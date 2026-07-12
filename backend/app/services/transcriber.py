@@ -187,6 +187,15 @@ def resolve_transcription_model(
         candidate = configured if configured and configured != "auto" else SAFE_TRANSCRIPTION_MODEL
 
     normalized_language = (language or "auto").lower()
+    if candidate.startswith("local:"):
+        try:
+            from .local_models import validate_imported
+            imported = validate_imported(candidate)
+            if imported["ready"]:
+                return ModelResolution(requested, candidate, imported["path"], "imported_reference")
+        except Exception:
+            pass
+        return ModelResolution(requested, candidate, candidate, "unavailable", "导入模型路径失效，需要重新定位")
     if (
         candidate in PARAKEET_MODEL_IDS
         and normalized_language != "auto"
@@ -240,7 +249,7 @@ def resolve_transcription_model(
     )
 
 
-def transcribe_audio(task_id: str, audio_path: str, project_id: str, language: str = "auto", model_size: str | None = None):
+def transcribe_audio(task_id: str, audio_path: str, project_id: str, language: str = "auto", model_size: str | None = None, runtime: str | None = None):
     """
     转写音频文件，生成字幕段（segments）。
     增量写入：每生成一个 segment 立即写数据库，前端可实时拉取。
@@ -262,6 +271,8 @@ def transcribe_audio(task_id: str, audio_path: str, project_id: str, language: s
         coreml_cli_path=app_settings.get("coreml_cli_path"),
     )
     model_id = resolution.model_id
+    runtime = runtime or (app_settings.get("transcription_runtime_by_model") or {}).get(model_id)
+    runtime = runtime or ("external_coreml" if model_id == PARAKEET_MODEL_ID else "cpu")
     if resolution.fell_back:
         task_manager.update_task(
             task_id,
@@ -296,7 +307,24 @@ def transcribe_audio(task_id: str, audio_path: str, project_id: str, language: s
     logger.info("[Transcriber] 加载模型: %s, 来源: %s, 语言: %s", model_id, resolution.source, language)
     task_manager.add_log(task_id, "info", "语音转写", f"加载模型: {model_id}")
 
-    if model_id in PARAKEET_MODEL_IDS:
+    imported = None
+    if model_id.startswith("local:"):
+        from .local_models import validate_imported
+        imported = validate_imported(model_id)
+        if not imported["ready"]:
+            raise TranscriptionError("导入模型路径失效，需要重新定位", "MODEL_NEEDS_RELINK")
+
+    if imported and imported["format"] == "memo-coreml":
+        session = create_parakeet_session(task_id,audio_path,language,PARAKEET_MODEL_ID,
+            coreml_model_dir=imported["path"],coreml_cli_path=imported.get("cli_path"),runtime="external_coreml")
+        segments_gen=session.segments; detected_lang=session.detected_language; audio_duration=session.audio_duration
+        device=session.device; compute_type=session.compute_type; runtime_model_name=imported["display_name"]; progress_start=session.progress_start
+    elif imported and imported["format"] == "sherpa-onnx":
+        session = create_parakeet_session(task_id,audio_path,language,PARAKEET_ONNX_MODEL_ID,
+            runtime=runtime,onnx_model_dir=imported["path"])
+        segments_gen=session.segments; detected_lang=session.detected_language; audio_duration=session.audio_duration
+        device=session.device; compute_type=session.compute_type; runtime_model_name=imported["display_name"]; progress_start=session.progress_start
+    elif model_id in PARAKEET_MODEL_IDS:
         session = create_parakeet_session(
             task_id,
             audio_path,
@@ -304,6 +332,7 @@ def transcribe_audio(task_id: str, audio_path: str, project_id: str, language: s
             model_id,
             coreml_model_dir=app_settings.get("coreml_model_path"),
             coreml_cli_path=app_settings.get("coreml_cli_path"),
+            runtime=runtime,
         )
         segments_gen = session.segments
         detected_lang = session.detected_language
@@ -312,6 +341,32 @@ def transcribe_audio(task_id: str, audio_path: str, project_id: str, language: s
         compute_type = session.compute_type
         runtime_model_name = session.model_label
         progress_start = session.progress_start
+    elif runtime == "mlx" or (imported and imported["format"] == "mlx"):
+        from types import SimpleNamespace
+        from huggingface_hub import snapshot_download
+        import mlx_whisper
+        from ..utils.config import MLX_MODELS_DIR
+        if imported:
+            model_path=imported["path"]
+        else:
+            local_dir = MLX_MODELS_DIR / model_id
+            local_dir.mkdir(parents=True, exist_ok=True)
+            model_path = snapshot_download(repo_id=f"mlx-community/whisper-{model_id}-mlx",local_dir=str(local_dir))
+        lang = None if language in ("auto", "") else language
+        result = mlx_whisper.transcribe(
+            audio_path, path_or_hf_repo=model_path,
+            language=lang, word_timestamps=True,
+        )
+        mlx_segments = [
+            SimpleNamespace(start=float(item["start"]), end=float(item["end"]), text=str(item["text"]))
+            for item in result.get("segments", [])
+        ]
+        segments_gen = iter(mlx_segments)
+        detected_lang = result.get("language") or lang or "auto"
+        audio_duration = max((item.end for item in mlx_segments), default=0.0)
+        device, compute_type = "mlx", "MLX"
+        runtime_model_name = f"MLX Whisper {model_id}"
+        progress_start = 5.0
     else:
         from faster_whisper import WhisperModel
         import ctranslate2

@@ -21,6 +21,7 @@ from ..models.schemas import (
     ProjectCreate, ProjectResponse, ProjectUpdate, SegmentResponse,
     ProjectGroupUpdate, SegmentUpdate, ExportRequest, ProcessingConfig,
     WorkflowRequest, TranscriptionRetryRequest, ModelPrepareRequest,
+    ModelScanRequest, ModelImportRequest,
 )
 from ..utils.config import (
     DATA_DIR, PROJECTS_DIR, DOWNLOADS_DIR, AUDIO_DIR, SUBTITLES_DIR,
@@ -49,6 +50,7 @@ from ..services.subtitle_exporter import (
 )
 from ..services.video_renderer import burn_subtitles
 from ..services.video_thumbnail import generate_video_thumbnail
+from ..services.local_models import scan_models, register_model, get_imported, validate_imported, remove_imported
 
 logger = logging.getLogger(__name__)
 
@@ -248,6 +250,8 @@ def transcription_models(project_id: Optional[str] = None, language: str = "auto
             "status": status.get("state"),
             # Old clients read ``runtime_error`` while v0.2 uses ``error``.
             "runtime_error": status.get("error") or None,
+            "runtimes": (["cpu", "mlx"] if model_id in {"small", "medium", "large-v3"}
+                         else ["external_coreml"] if model_id == PARAKEET_MODEL_ID else ["cpu", "coreml"]),
         })
     if settings.get("custom_model_path"):
         status = get_transcription_model_status(
@@ -258,11 +262,44 @@ def transcription_models(project_id: Optional[str] = None, language: str = "auto
             **status, "status": status.get("state"),
             "runtime_error": status.get("error") or None,
         })
+    for imported in get_imported():
+        checked = validate_imported(imported["id"])
+        model_items.append({"id": imported["id"], "name": imported["display_name"], "languages": ["*"],
+                            "ready": checked["ready"], "source": "imported_reference", "state": checked["status"],
+                            "status": checked["status"], "download_required": False, "runtime_error": checked.get("last_error") or None,
+                            "runtimes": imported["runtimes"], "format": imported["format"], "version": imported["version"]})
     return {
         "recommended_model": recommended,
         "audio": audio,
         "models": model_items,
     }
+
+
+@router.post("/transcription/models/scan")
+def scan_local_models(request: ModelScanRequest):
+    try: return {"candidates": scan_models(request.root_path)}
+    except ValueError as exc: raise HTTPException(400, str(exc)) from exc
+
+
+@router.post("/transcription/models/import")
+def import_local_model(request: ModelImportRequest):
+    try: return {"model": register_model(request.path, request.cli_path, request.display_name)}
+    except ValueError as exc: raise HTTPException(400, str(exc)) from exc
+
+
+@router.get("/transcription/models/imported")
+def imported_models(): return {"models": get_imported()}
+
+
+@router.post("/transcription/models/imported/{model_id:path}/validate")
+def validate_imported_model(model_id: str):
+    try: return validate_imported(model_id)
+    except ValueError as exc: raise HTTPException(404, str(exc)) from exc
+
+
+@router.delete("/transcription/models/imported/{model_id:path}")
+def delete_imported_model(model_id: str):
+    remove_imported(model_id); return {"message": "已从字幕工厂移除登记，源模型未被删除"}
 
 
 @router.get("/transcription/models/{model_id}/validate")
@@ -469,15 +506,16 @@ def get_project(project_id: str):
 
 @router.patch("/projects/{project_id}", response_model=ProjectResponse)
 def update_project(project_id: str, update: ProjectUpdate):
-    """重命名项目。"""
+    """Update project metadata without disturbing media or subtitles."""
     now = time.strftime("%Y-%m-%d %H:%M:%S")
     db = get_db()
     try:
-        cursor = db.execute(
-            """UPDATE projects SET title=?, updated_at=?
-               WHERE id=? AND deleted_at IS NULL""",
-            (update.title, now, project_id),
-        )
+        fields=[]; values=[]
+        if update.title is not None: fields.append("title=?"); values.append(update.title)
+        if update.target_language is not None: fields.append("target_language=?"); values.append(update.target_language.strip())
+        if not fields: raise HTTPException(400, "没有可更新的项目字段")
+        fields.append("updated_at=?"); values.extend([now, project_id])
+        cursor = db.execute(f"UPDATE projects SET {', '.join(fields)} WHERE id=? AND deleted_at IS NULL", values)
         if cursor.rowcount == 0:
             db.rollback()
             raise HTTPException(404, "项目不存在")
@@ -786,10 +824,14 @@ def _do_extract_audio(task_id: str, project_id: str, video_path: str):
 # ============================
 
 @router.post("/projects/{project_id}/transcribe")
-def start_transcribe(project_id: str, language: str = Form("auto"), model: str = Form("small")):
+def start_transcribe(project_id: str, language: str = Form("auto"), model: str = Form("small"), runtime: Optional[str] = Form(None)):
     """开始转写音频（后台任务）"""
+    # Direct Python callers (including the compatibility test suite) receive
+    # FastAPI's Form sentinel instead of a parsed request value.
+    if not isinstance(runtime, str):
+        runtime = None
     model = _resolve_model(model, language)
-    if model not in SUPPORTED_TRANSCRIPTION_MODELS:
+    if model not in SUPPORTED_TRANSCRIPTION_MODELS and not model.startswith("local:"):
         raise HTTPException(400, "不支持的转写模型")
     normalized_language = (language or "auto").lower()
     if (
@@ -823,19 +865,23 @@ def start_transcribe(project_id: str, language: str = Form("auto"), model: str =
     db.commit()
     db.close()
 
+    if runtime:
+        from ..services.app_settings import save_app_settings
+        settings=get_app_settings(); mapping=dict(settings.get("transcription_runtime_by_model") or {}); mapping[model]=runtime
+        save_app_settings({"transcription_runtime_by_model":mapping})
     task_id = task_manager.create_task(project_id, "transcribe")
-    task_manager.run_background(task_id, _do_transcribe, project_id, row["audio_path"], language, model)
+    task_manager.run_background(task_id, _do_transcribe, project_id, row["audio_path"], language, model, runtime)
     return {"task_id": task_id, "message": "转写任务已创建"}
 
 
-def _do_transcribe(task_id: str, project_id: str, audio_path: str, language: str, model: str):
+def _do_transcribe(task_id: str, project_id: str, audio_path: str, language: str, model: str, runtime: str | None = None):
     task_manager.update_task(task_id, message="等待本地转写引擎")
     while not TRANSCRIPTION_LOCK.acquire(timeout=0.25):
         task_manager.checkpoint(task_id)
     try:
         task_manager.checkpoint(task_id)
         try:
-            transcribe_audio(task_id, audio_path, project_id, language, model)
+            transcribe_audio(task_id, audio_path, project_id, language, model, runtime)
         except Exception as exc:
             transient = any(token in str(exc).lower() for token in (
                 "timeout", "timed out", "temporarily", "connection", "连接", "503",
@@ -847,7 +893,7 @@ def _do_transcribe(task_id: str, project_id: str, audio_path: str, language: str
                 details={"retry_reason": str(exc)},
             )
             task_manager.add_log(task_id, "warning", "语音转写", "临时错误，自动重试一次", detail=str(exc))
-            transcribe_audio(task_id, audio_path, project_id, language, model)
+            transcribe_audio(task_id, audio_path, project_id, language, model, runtime)
     finally:
         TRANSCRIPTION_LOCK.release()
 
@@ -933,7 +979,7 @@ def retry_transcription(project_id: str, request: TranscriptionRetryRequest):
 # ============================
 
 @router.post("/projects/{project_id}/clean")
-def start_clean(project_id: str, target_length: int = Form(42)):
+def start_clean(project_id: str, target_length: int = Form(42), provider_id: Optional[str] = Form(None), model: Optional[str] = Form(None)):
     """开始 AI 整理字幕（后台任务）"""
     db = get_db()
     row = db.execute("SELECT * FROM projects WHERE id = ?", (project_id,)).fetchone()
@@ -944,13 +990,15 @@ def start_clean(project_id: str, target_length: int = Form(42)):
 
     if target_length < 16 or target_length > 100:
         raise HTTPException(400, "目标单句长度必须在 16 到 100 个字符之间")
+    db=get_db(); existing=db.execute("SELECT id FROM tasks WHERE project_id=? AND type='clean' AND status IN ('pending','running','paused') ORDER BY created_at DESC LIMIT 1",(project_id,)).fetchone(); db.close()
+    if existing: return {"task_id":existing["id"],"message":"AI 整理已在运行","existing":True}
     task_id = task_manager.create_task(project_id, "clean")
-    task_manager.run_background(task_id, _do_clean, project_id, target_length)
+    task_manager.run_background(task_id, _do_clean, project_id, target_length, provider_id, model)
     return {"task_id": task_id, "message": "AI 整理任务已创建"}
 
 
-def _do_clean(task_id: str, project_id: str, target_length: int):
-    clean_subtitles(task_id, project_id, target_length)
+def _do_clean(task_id: str, project_id: str, target_length: int, provider_id: str | None = None, model: str | None = None):
+    clean_subtitles(task_id, project_id, target_length, provider_id, model)
 
 
 @router.post("/projects/{project_id}/clean/undo")
@@ -973,7 +1021,7 @@ def undo_clean(project_id: str):
 # ============================
 
 @router.post("/projects/{project_id}/translate")
-def start_translate(project_id: str, target_language: str = Form("zh")):
+def start_translate(project_id: str, target_language: str = Form("zh"), provider_id: Optional[str] = Form(None), model: Optional[str] = Form(None)):
     """开始 AI 翻译字幕（后台任务）"""
     db = get_db()
     row = db.execute("SELECT * FROM projects WHERE id = ?", (project_id,)).fetchone()
@@ -991,12 +1039,12 @@ def start_translate(project_id: str, target_language: str = Form("zh")):
     db.close()
 
     task_id = task_manager.create_task(project_id, "translate")
-    task_manager.run_background(task_id, _do_translate, project_id, target_language)
+    task_manager.run_background(task_id, _do_translate, project_id, target_language, provider_id, model)
     return {"task_id": task_id, "message": "AI 翻译任务已创建"}
 
 
-def _do_translate(task_id: str, project_id: str, target_language: str):
-    translate_subtitles(task_id, project_id, target_language)
+def _do_translate(task_id: str, project_id: str, target_language: str, provider_id: str | None = None, model: str | None = None):
+    translate_subtitles(task_id, project_id, target_language, provider_id, model)
 
 
 # ============================

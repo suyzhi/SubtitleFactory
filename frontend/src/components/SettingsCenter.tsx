@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import * as api from '../api/backend';
 import type {
-  AIProviderPreset, AISettings, AppSettings, HealthStatus, PathValidationResult,
+  AISettings, AppSettings, HealthStatus, PathValidationResult,
   ProcessingConfig, AppSettingWarning,
 } from '../types';
 import LanguagePicker from './LanguagePicker';
@@ -46,10 +46,6 @@ interface Props {
   onOpenLogs: () => void;
 }
 
-const DEFAULT_AI: AISettings = {
-  provider: 'deepseek', base_url: 'https://api.deepseek.com/v1', api_key: '', model: 'deepseek-chat',
-};
-
 function bytes(value?: number) {
   if (!value && value !== 0) return '—';
   const units = ['B', 'KB', 'MB', 'GB', 'TB'];
@@ -69,14 +65,12 @@ function runtimeCopy(item: Record<string, unknown> | undefined) {
 
 export default function SettingsCenter(props: Props) {
   const {
-    open, onClose, config, onConfigChange, appSettings, onAppSettingsChange, aiSettings, onAISaved, theme, onThemeChange,
+    open, onClose, config, onConfigChange, appSettings, onAppSettingsChange, theme, onThemeChange,
     motionEnabled, onMotionEnabledChange, density, onDensityChange, health, onRefreshHealth,
     modelStatus, onRefreshModels, onOpenLogs,
   } = props;
   const [category, setCategory] = useState<Category>('general');
   const [draft, setDraft] = useState<AppSettings>(appSettings);
-  const [aiDraft, setAIDraft] = useState<AISettings>(aiSettings || DEFAULT_AI);
-  const [presets, setPresets] = useState<AIProviderPreset[]>([]);
   const [warnings, setWarnings] = useState<AppSettingWarning[]>([]);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
@@ -85,23 +79,29 @@ export default function SettingsCenter(props: Props) {
   const [preparingModel, setPreparingModel] = useState('');
   const [validatingModel, setValidatingModel] = useState('');
   const [favoriteLanguage, setFavoriteLanguage] = useState('fr');
+  const [providerCards,setProviderCards]=useState<api.AIProviderCard[]>([]);
+  const [assignments,setAssignments]=useState({clean_provider_id:'deepseek',translate_provider_id:'deepseek'});
+  const [scannedModels,setScannedModels]=useState<api.ScannedModel[]>([]);
   const dialogRef = useRef<HTMLElement>(null);
 
   useEffect(() => {
     if (!open) return;
     setMessage('');
     setError('');
-    Promise.all([api.getAppSettings(), api.getAISettings()])
-      .then(([app, ai]) => {
+    Promise.all([api.getAppSettings(), api.getAISettings(), api.getAIProviders()])
+      .then(([app, , providers]) => {
         setDraft(app.settings || {});
         setWarnings(app.warnings || []);
-        setAIDraft(ai.settings);
-        setPresets(ai.presets);
+        setProviderCards(providers.providers); setAssignments(providers.assignments);
       })
       .catch(reason => setError(reason.message));
     onRefreshHealth();
     onRefreshModels();
   }, [open, onRefreshHealth, onRefreshModels]);
+
+  const scanModelFolder=async()=>{ try { const {open}=await import('@tauri-apps/plugin-dialog'); const path=await open({directory:true,multiple:false,title:'选择模型根目录'}); if(typeof path!=='string')return; setBusy(true); const result=await api.scanLocalModels(path); setScannedModels(result.models); setMessage(`发现 ${result.models.length} 个模型候选`); } catch(reason){setError(reason instanceof Error?reason.message:String(reason));} finally{setBusy(false);} };
+  const updateProvider=(id:string,patch:Partial<api.AIProviderCard>)=>setProviderCards(items=>items.map(item=>item.provider_id===id?{...item,...patch}:item));
+  const saveProvider=async(card:api.AIProviderCard)=>{setBusy(true);try{const saved=await api.saveAIProvider(card.provider_id,card);updateProvider(card.provider_id,saved);setMessage(`${card.name} 已保存`);}catch(reason){setError(reason instanceof Error?reason.message:String(reason));}finally{setBusy(false);}};
 
   useEffect(() => {
     if (!open) return;
@@ -181,17 +181,6 @@ export default function SettingsCenter(props: Props) {
     finally { setBusy(false); }
   };
 
-  const runAI = async (mode: 'test' | 'save') => {
-    setBusy(true); setError(''); setMessage('');
-    try {
-      const result = mode === 'test' ? await api.testAISettings(aiDraft) : await api.saveAISettings(aiDraft);
-      setAIDraft(result.settings);
-      onAISaved(result.settings);
-      setMessage(mode === 'test' ? `连接成功 · ${'latency_ms' in result ? result.latency_ms : 0} ms` : 'AI 服务设置已保存');
-    } catch (reason: any) { setError(reason.message); }
-    finally { setBusy(false); }
-  };
-
   const validatePath = async (kind: PathValidationResult['kind'], path: string) => {
     if (!path.trim()) return;
     setBusy(true); setError('');
@@ -217,14 +206,6 @@ export default function SettingsCenter(props: Props) {
     } catch (reason: any) {
       setError(`无法打开路径选择器：${reason.message}`);
     }
-  };
-
-  const selectProvider = (provider: string) => {
-    const preset = presets.find(item => item.id === provider);
-    setAIDraft(current => ({
-      ...current, provider, api_key: '', has_api_key: provider === current.provider ? current.has_api_key : false,
-      base_url: preset?.base_url || current.base_url, model: preset?.model || current.model,
-    }));
   };
 
   const prepareModel = async (modelId: string, repair: boolean) => {
@@ -309,7 +290,7 @@ export default function SettingsCenter(props: Props) {
               <i>{item.icon}</i><span>{item.label}</span>
             </button>)}
           </nav>
-          <small className="settings-version">Version {health?.version || '0.2.0'}</small>
+          <small className="settings-version">Version {health?.version || '0.3.0'}</small>
         </aside>
 
         <div className="settings-content">
@@ -348,7 +329,7 @@ export default function SettingsCenter(props: Props) {
                   <LanguagePicker value={resolvedSourceLanguage} onChange={source_language => updateDraft({ source_language })}/>
                 </label>
               </SettingsSection>
-              <SettingsSection title="模型管理" description="模型保存在 App 数据目录；外部 Core ML 模型仅在检测到后显示。" action={<button className="button secondary" onClick={onRefreshModels}>刷新状态</button>}>
+              <SettingsSection title="模型管理" description="可扫描 Memo/models 等目录并原地引用；移除登记不会删除源模型。" action={<div className="inline-actions"><button className="button secondary" onClick={scanModelFolder}>导入本地模型</button><button className="button secondary" onClick={onRefreshModels}>刷新状态</button></div>}>
                 <div className="model-list">
                   {modelStatus?.models.filter(model => model.ready || model.download_required || !model.id.includes('coreml')).map(model => {
                     const source = String((model as any).source || (model.ready ? 'bundled' : 'unavailable'));
@@ -361,6 +342,7 @@ export default function SettingsCenter(props: Props) {
                     </div>;
                   }) || <div className="settings-empty">正在读取模型状态…</div>}
                 </div>
+                {!!scannedModels.length&&<div className="scanned-models">{scannedModels.map(model=><div className="model-row" key={model.path}><span className={`status-orb ${model.supported?'ok':'warning'}`}/><div><strong>{model.display_name}</strong><small>{model.format} · {model.version||'未标版本'} · {model.supported?(model.reason||'可原地引用'):model.reason}</small></div>{model.supported&&<button className="button secondary model-action" disabled={busy||Boolean(model.reason)} onClick={()=>void api.importLocalModel(model.path,model.cli_path).then(()=>{setMessage(`${model.display_name} 已登记`);onRefreshModels();}).catch(reason=>setError(reason.message))}>登记</button>}</div>)}</div>}
               </SettingsSection>
               <SettingsSection title="自定义运行时" description="路径只保存在本机，不会写入项目、日志或发布包。">
                 {renderPath('自定义模型目录', 'custom_model_path', 'model', '选择包含模型文件的目录', true)}
@@ -370,14 +352,11 @@ export default function SettingsCenter(props: Props) {
             </>}
 
             {category === 'ai' && <>
-              <SettingsSection title="整理与翻译服务" description="使用 OpenAI 兼容接口。API Key 仅保存在本机。">
-                <label className="settings-field"><span><strong>服务商</strong></span><select value={aiDraft.provider} onChange={event => selectProvider(event.target.value)}>
-                  {presets.map(preset => <option value={preset.id} key={preset.id}>{preset.name}</option>)}
-                </select></label>
-                <label className="settings-field"><span><strong>Base URL</strong></span><input value={aiDraft.base_url} onChange={event => setAIDraft({ ...aiDraft, base_url: event.target.value })}/></label>
-                <label className="settings-field"><span><strong>模型</strong></span><input value={aiDraft.model} onChange={event => setAIDraft({ ...aiDraft, model: event.target.value })}/></label>
-                <label className="settings-field"><span><strong>API Key</strong><small>{aiDraft.has_api_key ? '已保存；留空表示不更改' : '尚未配置'}</small></span><input type="password" value={aiDraft.api_key} placeholder={aiDraft.has_api_key ? '••••••••••••' : 'sk-…'} onChange={event => setAIDraft({ ...aiDraft, api_key: event.target.value })}/></label>
-                <div className="inline-actions"><button className="button secondary" disabled={busy} onClick={() => runAI('test')}>测试连接</button><button className="button primary" disabled={busy || !aiDraft.base_url || !aiDraft.model} onClick={() => runAI('save')}>保存 AI 设置</button></div>
+              <SettingsSection title="任务分配" description="整理和翻译可使用不同的服务商与模型。">
+                <div className="provider-assignments"><label>AI 整理<select value={assignments.clean_provider_id} onChange={event=>setAssignments({...assignments,clean_provider_id:event.target.value})}>{providerCards.map(card=><option value={card.provider_id} key={card.provider_id}>{card.name}</option>)}</select></label><label>AI 翻译<select value={assignments.translate_provider_id} onChange={event=>setAssignments({...assignments,translate_provider_id:event.target.value})}>{providerCards.map(card=><option value={card.provider_id} key={card.provider_id}>{card.name}</option>)}</select></label><button className="button primary" onClick={()=>void api.saveAIAssignments(assignments).then(()=>setMessage('任务分配已保存')).catch(reason=>setError(reason.message))}>保存分配</button></div>
+              </SettingsSection>
+              <SettingsSection title="模型供应商" description="每张卡的地址、密钥和模型互相隔离，密钥只保存在本机。">
+                <div className="provider-card-grid">{providerCards.map(card=><article className="provider-card" key={card.provider_id}><header><strong>{card.name}</strong><span className={card.has_api_key?'ready':''}>{card.has_api_key?'已配置':'未配置'}</span></header><label>Base URL<input value={card.base_url} onChange={event=>updateProvider(card.provider_id,{base_url:event.target.value})}/></label><label>模型<input value={card.model} onChange={event=>updateProvider(card.provider_id,{model:event.target.value})}/></label>{!!card.models.length&&<div className="provider-model-chips">{card.models.map(model=><button type="button" className={model===card.model?'active':''} key={model} onClick={()=>updateProvider(card.provider_id,{model})}>{model}</button>)}</div>}<label>API Key<input type="password" value={card.api_key} placeholder={card.has_api_key?'留空保留现有密钥':'sk-…'} onChange={event=>updateProvider(card.provider_id,{api_key:event.target.value})}/></label><footer><button className="button secondary" disabled={busy||!card.has_api_key} onClick={()=>void api.testAIProvider(card.provider_id).then(result=>{updateProvider(card.provider_id,{last_test_status:'success',last_latency_ms:result.latency_ms});setMessage(`${card.name} ${result.latency_ms}ms`);}).catch(reason=>setError(reason.message))}>测试连接</button><button className="button primary" disabled={busy} onClick={()=>void saveProvider(card)}>保存</button></footer></article>)}</div>
               </SettingsSection>
             </>}
 
@@ -425,7 +404,7 @@ export default function SettingsCenter(props: Props) {
                 <div className="shortcut-grid"><span>播放 / 暂停</span><kbd>Space</kbd><span>剧院模式</span><kbd>T</kbd><span>关闭弹窗或检查器</span><kbd>Esc</kbd><span>保存字幕编辑</span><kbd>Return</kbd></div>
               </SettingsSection>
               <SettingsSection title="关于字幕工厂" description="本地优先的专业字幕工作台。">
-                <div className="about-card"><strong>字幕工厂 {health?.version || '0.2.0'}</strong><span>Apple Silicon · 本地运行</span><small>服务状态：{health?.status || '正在连接'}</small></div>
+                <div className="about-card"><strong>字幕工厂 {health?.version || '0.3.0'}</strong><span>Apple Silicon · 本地运行</span><small>服务状态：{health?.status || '正在连接'}</small></div>
                 <div className="about-data-row"><span><strong>数据目录</strong><small>{health?.runtime?.data_directory || 'App 本地数据目录'}</small></span></div>
                 <div className="inline-actions"><button className="button secondary" onClick={() => void copyDiagnostics()}>复制诊断信息</button><button className="button secondary" onClick={() => { onClose(); onOpenLogs(); }}>查看处理日志</button></div>
                 <p className="settings-help">复制的诊断信息不包含本机路径或 API Key。自定义路径和密钥不会进入 Git、默认配置、日志或 Release。</p>

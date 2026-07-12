@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.0 — 2026-07-12
+
+- Dual-concurrency, retryable AI clean and translation batches with persisted partial results.
+- Player-left/subtitles-right workspace, subtitle focus mode and inline target-language control.
+- Eight independently configured AI provider cards with separate clean/translation assignments.
+- In-place local model discovery for CTranslate2, MLX, Parakeet ONNX and Memo Core ML.
+- MLX Whisper and selectable CPU/Core ML Parakeet runtimes on Apple Silicon.
+
 ## 0.2.0 — 2026-07-12
 
 ### Added

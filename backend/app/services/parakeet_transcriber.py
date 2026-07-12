@@ -1086,8 +1086,21 @@ def _create_onnx_session(
     task_id: str,
     audio_path: str,
     normalized_language: str,
+    provider: str = "cpu",
+    model_dir: str | Path | None = None,
 ) -> ParakeetSession:
-    assets = ensure_parakeet_assets(task_id)
+    if model_dir:
+        root = Path(model_dir).expanduser().resolve()
+        from types import SimpleNamespace
+        assets = SimpleNamespace(
+            encoder=root / "encoder.int8.onnx", decoder=root / "decoder.int8.onnx",
+            joiner=root / "joiner.int8.onnx", tokens=root / "tokens.txt",
+            vad=root / "silero_vad.onnx",
+        )
+        missing=[item.name for item in (assets.encoder,assets.decoder,assets.joiner,assets.tokens) if not item.is_file()]
+        if missing: raise ValueError(f"导入的 Parakeet ONNX 模型缺少文件：{', '.join(missing)}")
+    else:
+        assets = ensure_parakeet_assets(task_id)
     task_manager.checkpoint(task_id)
     task_manager.update_task(
         task_id,
@@ -1106,7 +1119,7 @@ def _create_onnx_session(
             tokens=str(assets.tokens),
             model_type="nemo_transducer",
             num_threads=num_threads,
-            provider="cpu",
+            provider=provider,
             decoding_method="greedy_search",
             sample_rate=16000,
             feature_dim=80,
@@ -1144,6 +1157,7 @@ def _create_onnx_session(
         segments=segments,
         audio_duration=audio_duration,
         detected_language=detected_language,
+        device="Core ML" if provider == "coreml" else "cpu",
     )
 
 
@@ -1233,6 +1247,8 @@ def create_parakeet_session(
     model_id: str = PARAKEET_MODEL_ID,
     coreml_model_dir: str | Path | None = None,
     coreml_cli_path: str | Path | None = None,
+    runtime: str | None = None,
+    onnx_model_dir: str | Path | None = None,
 ) -> ParakeetSession:
     normalized_language = (language or "auto").lower()
     if normalized_language != "auto" and normalized_language not in PARAKEET_SUPPORTED_LANGUAGES:
@@ -1263,4 +1279,8 @@ def create_parakeet_session(
         return _create_coreml_session(
             task_id, audio_path, normalized_language, runtime
         )
-    return _create_onnx_session(task_id, audio_path, normalized_language)
+    return _create_onnx_session(
+        task_id, audio_path, normalized_language,
+        "coreml" if runtime == "coreml" else "cpu",
+        onnx_model_dir,
+    )

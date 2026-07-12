@@ -3,6 +3,7 @@ uvicorn>=0.41.0
 pydantic>=2.13.4
 pydantic-settings>=2.13.1
 faster-whisper>=1.2.1
+mlx-whisper>=0.4.3; platform_system == "Darwin" and platform_machine == "arm64"
 sherpa-onnx==1.13.4
 srt>=3.5.3
 yt-dlp>=2025.10.14

@@ -5,10 +5,12 @@ import logging
 import re
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from difflib import SequenceMatcher
 
 from ..models.database import get_db
 from ..utils.task_manager import TaskCancelled, task_manager
+from .ai_providers import assigned_provider
 from .ai_settings import get_ai_settings
 
 logger = logging.getLogger(__name__)
@@ -30,11 +32,12 @@ CLEANER_SYSTEM_PROMPT = """你是谨慎、忠实的视频字幕整理助手。�
 输出：[{"ids":["1","2"],"clean_text":"I want to show you this."}]"""
 
 
-def clean_subtitles(task_id: str, project_id: str, target_length: int = 42):
+def clean_subtitles(task_id: str, project_id: str, target_length: int = 42, provider_id: str | None = None, model: str | None = None):
     target_length = max(16, min(100, int(target_length)))
-    ai = get_ai_settings(include_secret=True)
-    if not ai.get("api_key") or ai["api_key"] == "your_api_key_here":
-        raise ValueError("AI API Key 未配置，请在 App 的 AI 接入管理中设置")
+    try:
+        ai = assigned_provider("clean", provider_id, model)
+    except ValueError:
+        ai = get_ai_settings(include_secret=True)
 
     db = get_db()
     rows = [dict(row) for row in db.execute(
@@ -56,43 +59,43 @@ def clean_subtitles(task_id: str, project_id: str, target_length: int = 42):
         detail=f"AI: {ai['provider']} · {ai['model']}"
     )
 
-    for batch_index, batch in enumerate(batches, 1):
-        task_manager.checkpoint(task_id)
-        progress = 5 + (batch_index - 1) / max(total_batches, 1) * 88
-        task_manager.update_task(
-            task_id, step="restructuring", progress=progress,
-            message=f"正在识别句子边界 {batch_index}/{total_batches}",
-            details={
-                "total_segments": len(rows), "current_batch": batch_index,
-                "total_batches": total_batches, "ai_provider": ai["provider"],
-                "ai_model": ai["model"], "failed_batches": failed_batches,
-                "target_length": target_length,
-            },
-        )
+    def process(batch_index: int, batch: list[dict]):
+        fingerprint = json.dumps({"segments":_fingerprint(batch),"provider":ai["provider"],"model":ai["model"],"target_length":target_length}, ensure_ascii=False, sort_keys=True)
+        db=get_db()
+        cached=db.execute("SELECT result_json FROM ai_batch_results WHERE project_id=? AND operation='clean' AND input_fingerprint=? AND status='success' ORDER BY updated_at DESC LIMIT 1",(project_id,fingerprint)).fetchone()
+        if cached:
+            try:
+                groups=json.loads(cached["result_json"]);db.close();return batch_index,groups,None
+            except (TypeError,ValueError,json.JSONDecodeError):
+                pass
+        db.execute("""INSERT OR REPLACE INTO ai_batch_results
+            (task_id,project_id,operation,batch_index,input_fingerprint,status,result_json,attempts,error,updated_at)
+            VALUES (?,?,?,?,?,'running','[]',0,'',?)""", (task_id,project_id,"clean",batch_index,fingerprint,_now())); db.commit(); db.close()
         try:
             groups = _call_llm_group(batch, ai, target_length, task_id=task_id)
-        except TaskCancelled:
-            raise
+            db=get_db(); db.execute("UPDATE ai_batch_results SET status='success',result_json=?,attempts=3,error='',updated_at=? WHERE task_id=? AND batch_index=?", (json.dumps(groups,ensure_ascii=False),_now(),task_id,batch_index)); db.commit(); db.close()
+            return batch_index, groups, None
         except Exception as exc:
-            failed_batches += 1
-            logger.warning("[Cleaner] 语义批次 %s 失败: %s", batch_index, exc)
-            task_manager.add_log(
-                task_id, "warning", "AI 句子重组", f"第 {batch_index}/{total_batches} 批未能重组",
-                detail=str(exc), suggestion="该批字幕保持原分段，其余批次继续处理",
-            )
-            groups = [
-                {"ids": [str(row["idx"])], "clean_text": row["clean_text"] or row["raw_text"]}
-                for row in batch
-            ]
-        task_manager.checkpoint(task_id)
-        grouped_results.extend(groups)
+            db=get_db(); db.execute("UPDATE ai_batch_results SET status='failed',attempts=3,error=?,updated_at=? WHERE task_id=? AND batch_index=?", (str(exc)[:500],_now(),task_id,batch_index)); db.commit(); db.close()
+            groups=[{"ids":[str(row["idx"])],"clean_text":row["clean_text"] or row["raw_text"]} for row in batch]
+            return batch_index, groups, exc
+
+    completed={}
+    with ThreadPoolExecutor(max_workers=2, thread_name_prefix="subtitle-ai") as executor:
+        futures=[executor.submit(process,index,batch) for index,batch in enumerate(batches,1)]
+        for done_count, future in enumerate(as_completed(futures),1):
+            task_manager.checkpoint(task_id); index,groups,error=future.result(); completed[index]=groups
+            if error:
+                failed_batches += 1; task_manager.add_log(task_id,"warning","AI 句子重组",f"第 {index}/{total_batches} 批未能重组",detail=str(error),suggestion="可单独重试失败批次")
+            task_manager.update_task(task_id,step="restructuring",progress=5+done_count/max(total_batches,1)*88,message=f"已完成 {done_count}/{total_batches} 个批次",details={"total_segments":len(rows),"total_batches":total_batches,"completed_batches":done_count,"failed_batches":failed_batches,"ai_provider":ai["provider"],"ai_model":ai["model"]})
+    for index in range(1,total_batches+1): grouped_results.extend(completed[index])
 
     # AI results stay in memory until every batch has completed. Cancellation at
     # either checkpoint below leaves the original subtitle rows untouched.
     task_manager.checkpoint(task_id)
     final_segments = _compose_final_segments(rows, grouped_results)
     task_manager.checkpoint(task_id)
-    _commit_restructured_segments(
+    conflicts = _commit_restructured_segments(
         project_id, rows, initial_fingerprint, final_segments, task_id=task_id
     )
     merged_count = len(rows) - len(final_segments)
@@ -105,6 +108,7 @@ def clean_subtitles(task_id: str, project_id: str, target_length: int = 42):
         details={
             "source_segments": len(rows), "total_segments": len(final_segments),
             "merged_segments": max(0, merged_count), "failed_batches": failed_batches,
+            "conflict_batches": conflicts,
             "total_batches": total_batches, "ai_provider": ai["provider"], "ai_model": ai["model"],
             "target_length": target_length,
         },
@@ -139,32 +143,38 @@ def undo_last_clean(project_id: str) -> int:
     return len(segments)
 
 
-def _build_semantic_batches(rows: list[dict], max_size: int = 42) -> list[list[dict]]:
+def _build_semantic_batches(rows: list[dict], max_size: int = 60, max_chars: int = 6000) -> list[list[dict]]:
     """Locked rows are hard boundaries; unlocked runs end near punctuation when possible."""
     batches = []
     run = []
     for row in rows:
         if row.get("locked"):
             if run:
-                batches.extend(_split_run(run, max_size))
+                batches.extend(_split_run(run, max_size, max_chars))
                 run = []
             continue
         run.append(row)
     if run:
-        batches.extend(_split_run(run, max_size))
+        batches.extend(_split_run(run, max_size, max_chars))
     return batches
 
 
-def _split_run(run: list[dict], max_size: int) -> list[list[dict]]:
+def _split_run(run: list[dict], max_size: int, max_chars: int = 6000) -> list[list[dict]]:
     result = []
     cursor = 0
     while cursor < len(run):
         remaining = len(run) - cursor
-        if remaining <= max_size:
+        char_limit = cursor
+        chars = 0
+        while char_limit < len(run) and char_limit-cursor < max_size:
+            next_chars=len(run[char_limit].get("raw_text", ""))
+            if char_limit > cursor and chars+next_chars > max_chars: break
+            chars += next_chars; char_limit += 1
+        if remaining <= max_size and char_limit == len(run):
             result.append(run[cursor:])
             break
-        low = cursor + max(18, max_size - 12)
-        high = cursor + max_size
+        high = max(cursor+1,char_limit)
+        low = min(high, cursor + max(12, (high-cursor)-12))
         candidates = [
             pos for pos in range(low, high + 1)
             if re.search(r"[.!?。！？][\"'”’)]?$", (run[pos - 1]["raw_text"] or "").strip())
@@ -192,7 +202,7 @@ def _call_llm_group(
 * 如果一个完整句超过 {target_length} 个字符，必须保留完整句并允许超长。
 * 只有原文自身存在明确的完整句边界时才分组；目标字符数本身绝不是拆句理由。"""
     error = None
-    for attempt in range(2):
+    for attempt in range(3):
         if task_id:
             task_manager.checkpoint(task_id)
         try:
@@ -227,7 +237,14 @@ def _call_llm_group(
         except Exception as exc:
             error = exc
             logger.warning("[Cleaner] LLM 句子重组失败（第 %s 次）: %s", attempt + 1, exc)
-    raise RuntimeError(f"AI 连续两次返回无效句子分组：{error}")
+            if getattr(getattr(exc,"response",None),"status_code",None) in (401,403):
+                break
+            if attempt < 2:
+                retry_after=getattr(getattr(exc,"response",None),"headers",{}).get("Retry-After")
+                try: delay=min(30.0,max(0.0,float(retry_after))) if retry_after else 2 ** attempt
+                except (TypeError,ValueError): delay=2 ** attempt
+                time.sleep(delay)
+    raise RuntimeError(f"AI 连续三次返回无效句子分组：{error}")
 
 
 def _validate_grouped_results(batch: list[dict], parsed) -> list[dict]:
@@ -237,17 +254,22 @@ def _validate_grouped_results(batch: list[dict], parsed) -> list[dict]:
         raise ValueError("AI 未返回 JSON 数组")
     expected = [str(row["idx"]) for row in batch]
     row_by_idx = {str(row["idx"]): row for row in batch}
-    flattened = []
+    consumed = set()
     normalized = []
     for group in parsed:
         if not isinstance(group, dict) or not isinstance(group.get("ids"), list):
-            raise ValueError("AI 分组格式错误")
+            continue
         ids = [str(value) for value in group["ids"]]
         text = group.get("clean_text")
         if not ids or not isinstance(text, str) or not text.strip():
-            raise ValueError("AI 返回了空文本")
+            continue
         if any(value not in row_by_idx for value in ids):
-            raise ValueError("AI 返回了未知字幕 ID")
+            continue
+        positions = [expected.index(value) for value in ids]
+        if ids != expected[min(positions):max(positions) + 1]:
+            raise ValueError("AI 字幕 ID 顺序变化或分组不连续")
+        if consumed.intersection(ids):
+            continue
 
         clean_text = text.strip()
         source_text = _join_text([
@@ -263,10 +285,15 @@ def _validate_grouped_results(batch: list[dict], parsed) -> list[dict]:
         # Character count is deliberately not validated here. A complete sentence
         # is allowed to exceed the user's target length.
         normalized.append({"ids": ids, "clean_text": clean_text})
-        flattened.extend(ids)
+        consumed.update(ids)
 
-    if flattened != expected:
-        raise ValueError("AI 字幕 ID 有遗漏、重复或顺序变化")
+    # Malformed groups and omitted IDs fall back to the original subtitle.  This
+    # keeps one bad group from invalidating useful work from the entire batch.
+    for value in expected:
+        if value not in consumed:
+            row = row_by_idx[value]
+            normalized.append({"ids": [value], "clean_text": row.get("clean_text") or row.get("raw_text") or ""})
+    normalized.sort(key=lambda group: expected.index(group["ids"][0]))
     return normalized
 
 
@@ -311,6 +338,7 @@ def _compose_final_segments(rows: list[dict], groups: list[dict]) -> list[dict]:
             "translated_text": "",
             "speaker": speakers.pop() if len(speakers) == 1 else "", "locked": 0,
             "is_draft": 0, "source_stage": "cleaned",
+            "_source_ids": [item["id"] for item in source_rows],
         })
     for index, segment in enumerate(output, 1):
         segment["idx"] = index
@@ -327,8 +355,18 @@ def _commit_restructured_segments(
         current = [dict(row) for row in db.execute(
             "SELECT * FROM segments WHERE project_id = ? ORDER BY idx", (project_id,)
         ).fetchall()]
-        if _fingerprint(current) != fingerprint:
-            raise RuntimeError("字幕在 AI 整理期间被修改。为避免覆盖编辑，本次结果未应用，请重试。")
+        original_by_id={row["id"]: row for row in original}; current_by_id={row["id"]: row for row in current}
+        reconciled=[]; consumed=set(); conflicts=0
+        for segment in final_segments:
+            source_ids=segment.pop("_source_ids", [segment["id"]])
+            unchanged=all(source_id in current_by_id and source_id in original_by_id and _fingerprint([current_by_id[source_id]]) == _fingerprint([original_by_id[source_id]]) for source_id in source_ids)
+            if unchanged: reconciled.append(segment)
+            else:
+                conflicts += 1; reconciled.extend(dict(current_by_id[source_id]) for source_id in source_ids if source_id in current_by_id)
+            consumed.update(source_ids)
+        reconciled.extend(dict(row) for row in current if row["id"] not in consumed)
+        reconciled=sorted(reconciled,key=lambda item:item["start"])
+        for index, segment in enumerate(reconciled,1): segment["idx"]=index
         if task_id:
             task_manager.checkpoint(task_id)
         revision_id = str(uuid.uuid4())
@@ -337,7 +375,7 @@ def _commit_restructured_segments(
             (revision_id, project_id, json.dumps(original, ensure_ascii=False), _now()),
         )
         db.execute("DELETE FROM segments WHERE project_id = ?", (project_id,))
-        for index, segment in enumerate(final_segments):
+        for index, segment in enumerate(reconciled):
             if task_id and index % 20 == 0:
                 task_manager.checkpoint(task_id)
             _insert_segment(db, segment)
@@ -351,6 +389,7 @@ def _commit_restructured_segments(
         if task_id:
             task_manager.checkpoint(task_id)
         db.commit()
+        return conflicts
     except Exception:
         db.rollback()
         raise

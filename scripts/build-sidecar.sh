@@ -29,6 +29,9 @@ cd "$ROOT/backend"
   --specpath "$BUILD_DIR" \
   --collect-all faster_whisper \
   --collect-all ctranslate2 \
+  --collect-all mlx \
+  --collect-all mlx_whisper \
+  --collect-all tiktoken \
   --collect-all sherpa_onnx \
   --collect-all av \
   --collect-all uvicorn \

@@ -119,6 +119,8 @@ function App() {
   const [leftPanelWidth, setLeftPanelWidth] = useState(() => Number(localStorage.getItem('subtitle_factory_left_width')) || 258);
   const [rightPanelWidth, setRightPanelWidth] = useState(() => Number(localStorage.getItem('subtitle_factory_right_width')) || 336);
   const [viewerHeight, setViewerHeight] = useState(() => Number(localStorage.getItem('subtitle_factory_viewer_height')) || 470);
+  const [subtitleFocus, setSubtitleFocus] = useState(false);
+  const [transcriptionRuntime, setTranscriptionRuntime] = useState(() => localStorage.getItem('subtitle_factory_transcription_runtime') || '');
   const [collapsedProjectGroups, setCollapsedProjectGroups] = useState<Set<string>>(() => {
     try { return new Set(JSON.parse(localStorage.getItem('subtitle_factory_collapsed_groups') || '[]')); }
     catch { return new Set(); }
@@ -698,8 +700,11 @@ function App() {
     const model = compatibleModel();
     if (!model) return;
     setSubtitleStats(null);
-    startTask('转写', 'transcribe', () => api.startTranscribe(activeProject.id, config.language, model));
-  }, [activeProject, compatibleModel, config.language, startTask]);
+    const selected = modelStatus?.models.find(item => item.id === model);
+    const runtime = transcriptionRuntime || selected?.runtimes?.[0]?.id;
+    if (runtime) localStorage.setItem('subtitle_factory_transcription_runtime', runtime);
+    startTask('转写', 'transcribe', () => api.startTranscribe(activeProject.id, config.language, model, runtime));
+  }, [activeProject, compatibleModel, config.language, modelStatus, transcriptionRuntime, startTask]);
 
   const doGenerateSubtitles = useCallback(() => {
     if (!activeProject) return;
@@ -1172,7 +1177,9 @@ function App() {
 
         <div className="panel-resizer panel-resizer-left" role="separator" aria-label="调整项目库宽度" tabIndex={0} onPointerDown={event => beginResize('left', event)} onKeyDown={event => { if (event.key === 'ArrowLeft') setLeftPanelWidth(value => Math.max(210, value - 16)); if (event.key === 'ArrowRight') setLeftPanelWidth(value => Math.min(430, value + 16)); }}/>
 
-        <main className="editor-workspace">
+        <main className={`editor-workspace ${subtitleFocus ? 'subtitle-focus' : ''}`}>
+          <div className="workbench-split">
+          <section className="media-workspace">
           <section className="fixed-viewer" style={{ '--viewer-height': `${viewerHeight}px` } as React.CSSProperties}>
             {activeProject?.video_path ? <SubtitlePlayer ref={videoPlayerRef} videoUrl={api.getVideoUrl(activeProject.id)} segments={segments} style={subtitleStyle} activeIdx={activeSegmentIdx} onTimeUpdate={handleTimeUpdate} onDurationChange={setVideoDuration} onStyleChange={handleStyleChange} theaterMode={theaterMode} onTheaterModeChange={setTheaterMode}/>
               : <div className="viewer-welcome"><span>▶</span><h2>开始创作字幕</h2><p>导入视频或粘贴 YouTube 链接</p><div><button className="button primary" onClick={handleImportLocal}>导入视频</button><button className="button secondary" onClick={() => setShowLinkPopover(true)}>添加链接</button></div></div>}
@@ -1192,10 +1199,13 @@ function App() {
             <span className="workflow-total">{totalProgress}%</span>
           </section>
 
+          </section>
           <section className="lower-workspace">
             <nav className="workspace-tabs" role="tablist" aria-label="项目工作区">
               {([['subtitles', '字幕'], ['style', '样式'], ['export', '导出'], ['logs', '日志']] as const).map(([id, label]) => <button key={id} role="tab" aria-selected={bottomTab === id} className={bottomTab === id ? 'active' : ''} onClick={() => { setBottomTab(id); if (id === 'style') setInspectorMode('style'); }}>{label}{id === 'subtitles' && <span>{segments.length}</span>}{id === 'logs' && processLogs.length > 0 && <span>{processLogs.length}</span>}</button>)}
+              <button className="focus-subtitles" onClick={() => setSubtitleFocus(value => !value)}>{subtitleFocus ? '显示播放器' : '专注字幕'}</button>
             </nav>
+            {bottomTab === 'subtitles' && <div className="subtitle-language-bar"><span>目标语言</span><LanguagePicker mode="target" allowCustom allowNone value={config.target_language} onChange={target_language => { setConfig({ ...config, target_language }); if (activeProject) void api.updateProjectTargetLanguage(activeProject.id, target_language).then(setActiveProject); }}/><button className="button primary" disabled={!hasSegments || isProcessing || config.target_language === 'none'} onClick={doTranslate}>开始翻译</button></div>}
             <div className="workspace-tab-content" key={bottomTab}>
               {bottomTab === 'subtitles' && (activeProject ? <SubtitleTable segments={segments} currentTime={currentTime} activeIdx={activeSegmentIndex} onSeek={handleSeek} onUpdate={handleUpdateSegment} onAutoScrollChange={setAutoScrollTable} autoScroll={autoScrollTable} disabled={isProcessing}/> : <div className="transcript-empty">选择项目后，字幕会在这里按时间排列并可直接编辑。</div>)}
               {bottomTab === 'style' && <div className="style-overview"><div className="style-preview-card" style={{ fontFamily: subtitleStyle.fontFamily }}><span style={{ color: subtitleStyle.originalTextColor, fontSize: Math.min(24, subtitleStyle.originalFontSize) }}>为每一句话找到恰好的位置。</span><small style={{ color: subtitleStyle.translatedTextColor }}>Give every line its perfect place.</small></div><div><h3>字幕样式</h3><p>调整字体、字号、双语顺序、颜色、背景与垂直位置。更改会立即显示在播放器中。</p><button className="button primary" onClick={() => setInspectorMode('style')}>打开样式检查器</button></div></div>}
@@ -1203,6 +1213,7 @@ function App() {
               {bottomTab === 'logs' && <div className="logs-workspace"><ProcessLogViewer logs={processLogs} collapsed={false} onToggle={() => undefined} onClear={() => setProcessLogs([])}/></div>}
             </div>
           </section>
+          </div>
         </main>
 
         {inspectorMode && <><div className="panel-resizer panel-resizer-right" role="separator" aria-label="调整检查器宽度" tabIndex={0} onPointerDown={event => beginResize('right', event)} onKeyDown={event => { if (event.key === 'ArrowLeft') setRightPanelWidth(value => Math.min(480, value + 16)); if (event.key === 'ArrowRight') setRightPanelWidth(value => Math.max(280, value - 16)); }}/>
@@ -1211,7 +1222,7 @@ function App() {
             {inspectorMode === 'style' && <SubtitleStylePanel style={subtitleStyle} onChange={handleStyleChange}/>}
             {inspectorMode === 'step' && <div className="step-inspector">
               {selectedStep === 'download' && <section className="inspector-section"><h3>下载与音频</h3><label>项目链接<input value={activeProject?.source_url || youtubeUrl} placeholder="YouTube URL" onChange={event => setYoutubeUrl(event.target.value)}/></label><div className="runtime-mini"><span className={health?.runtime?.ffmpeg?.ok ? 'ok' : 'error'}>FFmpeg {health?.runtime?.ffmpeg?.ok ? '可用' : '需检查'}</span><span className={health?.runtime?.yt_dlp?.ok ? 'ok' : 'error'}>yt-dlp {health?.runtime?.yt_dlp?.ok ? '可用' : '需检查'}</span></div><p>下载会移除 t=110s 等定位参数；失败时保留原项目，可在此重新下载。</p><button className="button primary" disabled={!activeProject?.source_url || isProcessing} onClick={retryDownload}>重新下载</button>{activeProject?.video_path && <button className="button secondary" disabled={isProcessing} onClick={doExtractAudio}>重新提取音频</button>}</section>}
-              {selectedStep === 'transcribe' && <section className="inspector-section"><h3>语音转写</h3><label>模型<select value={config.model} onChange={event => setConfig({ ...config, model: event.target.value as ModelSize })}><option value="auto">自动选择 · Whisper Small</option><option value="small">Whisper Small</option><option value="medium">Whisper Medium</option><option value="large-v3">Whisper Large V3</option>{modelStatus?.models.filter(model => model.id.includes('parakeet') && (model.ready || model.download_required)).map(model => <option key={model.id} value={model.id}>{model.name}</option>)}</select></label><label>源语言<LanguagePicker value={config.language} onChange={language => setConfig({ ...config, language })}/></label>{modelStatus && <div className="model-readiness"><strong>推荐：{modelStatus.models.find(model => model.id === modelStatus.recommended_model)?.name || modelStatus.recommended_model}</strong>{modelStatus.models.filter(model => model.ready).slice(0, 3).map(model => <small className="ready" key={model.id}>✓ {model.name} 已就绪</small>)}</div>}<button className="button primary" disabled={!hasAudio || isProcessing} onClick={doTranscribe}>开始转写</button></section>}
+              {selectedStep === 'transcribe' && <section className="inspector-section"><h3>语音转写</h3><label>模型<select value={config.model} onChange={event => { setConfig({ ...config, model: event.target.value as ModelSize }); setTranscriptionRuntime(''); }}><option value="auto">自动选择 · Whisper Small</option><option value="small">Whisper Small</option><option value="medium">Whisper Medium</option><option value="large-v3">Whisper Large V3</option>{modelStatus?.models.filter(model => (model.ready || model.download_required)).map(model => <option key={model.id} value={model.id}>{model.name}</option>)}</select></label><label>运行设备<select value={transcriptionRuntime} onChange={event => setTranscriptionRuntime(event.target.value)}><option value="">首次使用时选择</option>{modelStatus?.models.find(model => model.id === (config.model === 'auto' ? 'small' : config.model))?.runtimes?.map(runtime => <option key={runtime.id} value={runtime.id}>{runtime.name}</option>)}</select></label><label>源语言<LanguagePicker value={config.language} onChange={language => setConfig({ ...config, language })}/></label>{modelStatus && <div className="model-readiness"><strong>推荐：{modelStatus.models.find(model => model.id === modelStatus.recommended_model)?.name || modelStatus.recommended_model}</strong>{modelStatus.models.filter(model => model.ready).slice(0, 3).map(model => <small className="ready" key={model.id}>✓ {model.name} 已就绪</small>)}</div>}<button className="button primary" disabled={!hasAudio || isProcessing} onClick={doTranscribe}>开始转写</button></section>}
               {selectedStep === 'clean' && <section className="inspector-section"><h3>AI 忠实整理</h3><div className="ai-summary-row"><span className="ai-logo">✦</span><div><strong>{activeAIPreset?.name || aiSettings?.provider || '未配置 AI'}</strong><small>{aiSettings?.model || '请先打开设置中心'}</small></div></div><label>参考单句长度 <span>{config.clean_target_length} 字</span><input type="range" min={16} max={100} step={2} value={config.clean_target_length} onChange={event => setConfig({ ...config, clean_target_length: Number(event.target.value) })}/></label><p>只修正明显错词、标点和断句，不改变原意。完整长句不会被强行截断。</p><button className="button primary" disabled={!hasSegments || isProcessing || !aiSettings?.has_api_key} onClick={doClean}>确认并开始整理</button><button className="button secondary" disabled={!hasSegments || isProcessing} onClick={undoClean}>撤销上次整理</button></section>}
               {selectedStep === 'translate' && <section className="inspector-section"><h3>AI 翻译</h3><label>目标语言<LanguagePicker mode="target" allowCustom allowNone value={config.target_language} onChange={target_language => setConfig({ ...config, target_language })}/></label><label className="check-row"><input type="checkbox" checked={config.bilingual} onChange={event => setConfig({ ...config, bilingual: event.target.checked })}/> 导出时包含原文与译文</label><p>翻译由已配置的 {activeAIPreset?.name || aiSettings?.provider || 'AI 服务'} 完成，结果可继续编辑。</p><button className="button primary" disabled={!hasSegments || isProcessing || !aiSettings?.has_api_key || config.target_language === 'none'} onClick={doTranslate}>确认并开始翻译</button></section>}
               {selectedStep === 'export' && <section className="inspector-section"><h3>导出</h3><div className="export-grid">{(['srt', 'vtt', 'ass', 'srt-bilingual', 'mp4', 'mkv'] as ExportFormat[]).map(format => <button key={format} disabled={!hasSegments || isProcessing} onClick={() => void doExport(format)}>{format === 'srt-bilingual' ? '双语 SRT' : format.toUpperCase()}</button>)}</div></section>}

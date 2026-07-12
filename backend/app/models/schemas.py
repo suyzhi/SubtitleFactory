@@ -34,7 +34,8 @@ class ProjectResponse(BaseModel):
 
 
 class ProjectUpdate(BaseModel):
-    title: str = Field(min_length=1, max_length=160)
+    title: Optional[str] = Field(default=None, min_length=1, max_length=160)
+    target_language: Optional[str] = None
 
     @field_validator("title", mode="before")
     @classmethod
@@ -152,6 +153,28 @@ class AIConnectionTest(BaseModel):
     model: str
 
 
+class AIProviderUpdate(BaseModel):
+    base_url: str
+    api_key: Optional[str] = None
+    model: str
+    enabled: bool = True
+
+
+class AIAssignmentsUpdate(BaseModel):
+    clean_provider_id: str
+    translate_provider_id: str
+
+
+class ModelScanRequest(BaseModel):
+    root_path: str
+
+
+class ModelImportRequest(BaseModel):
+    path: str
+    cli_path: Optional[str] = None
+    display_name: Optional[str] = None
+
+
 # ── App settings ───────────────────────────────────────
 
 class AppSettingsUpdate(BaseModel):
@@ -175,6 +198,9 @@ class AppSettingsUpdate(BaseModel):
     ffmpeg_path: Optional[str] = None
     yt_dlp_path: Optional[str] = None
     download_directory: Optional[str] = None
+    clean_provider_id: Optional[str] = None
+    translate_provider_id: Optional[str] = None
+    transcription_runtime_by_model: Optional[dict[str, str]] = None
 
     @field_validator(
         "default_model", "source_language", "translation_target_language",

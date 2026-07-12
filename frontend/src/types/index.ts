@@ -274,6 +274,9 @@ export interface AppSettings {
   coreml_cli_path?: string;
   bilingual_order?: 'original_first' | 'translated_first' | string;
   favorite_languages?: string[];
+  clean_provider_id?: string;
+  translate_provider_id?: string;
+  transcription_runtime_by_model?: Record<string, string>;
   [key: string]: unknown;
 }
 

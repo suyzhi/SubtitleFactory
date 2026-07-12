@@ -13,7 +13,8 @@ import httpx
 from fastapi import APIRouter, HTTPException
 
 from ..models.schemas import (
-    AIConnectionTest, AISettingsUpdate, AppSettingsUpdate, PathValidationRequest,
+    AIConnectionTest, AISettingsUpdate, AIProviderUpdate, AIAssignmentsUpdate,
+    AppSettingsUpdate, PathValidationRequest,
 )
 from ..services.app_settings import get_app_settings, save_app_settings
 from ..services.ai_settings import (
@@ -24,6 +25,9 @@ from ..services.ai_settings import (
     save_ai_settings,
 )
 from ..utils.config import DATA_DIR, DOWNLOADS_DIR, MODELS_DIR
+from ..services.ai_providers import (
+    get_provider, list_provider_cards, record_test, save_provider,
+)
 
 router = APIRouter(prefix="/api")
 
@@ -448,6 +452,59 @@ def update_ai_settings(req: AISettingsUpdate):
         return {"settings": save_ai_settings(req.provider, req.base_url, req.model, req.api_key)}
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
+
+
+@router.get("/settings/ai/providers")
+def read_ai_provider_cards():
+    settings = get_app_settings()
+    return {"providers": list_provider_cards(False), "assignments": {
+        "clean_provider_id": settings.get("clean_provider_id") or "deepseek",
+        "translate_provider_id": settings.get("translate_provider_id") or "deepseek",
+    }}
+
+
+@router.put("/settings/ai/providers/{provider_id}")
+def update_ai_provider_card(provider_id: str, req: AIProviderUpdate):
+    try:
+        return {"provider": save_provider(provider_id, req.base_url, req.model, req.api_key, req.enabled)}
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@router.put("/settings/ai/assignments")
+def update_ai_assignments(req: AIAssignmentsUpdate):
+    try:
+        get_provider(req.clean_provider_id, False); get_provider(req.translate_provider_id, False)
+        settings = save_app_settings(req.model_dump())
+        return {"assignments": {"clean_provider_id": settings["clean_provider_id"], "translate_provider_id": settings["translate_provider_id"]}}
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+
+@router.get("/settings/ai/providers/{provider_id}/models")
+def read_remote_models(provider_id: str):
+    provider = get_provider(provider_id, True)
+    if not provider.get("api_key"): raise HTTPException(400, "请先保存 API Key")
+    try:
+        response = httpx.get(f"{provider['base_url'].rstrip('/')}/models", headers={"Authorization": f"Bearer {provider['api_key']}"}, timeout=20)
+        response.raise_for_status(); payload = response.json()
+        return {"models": sorted({str(item.get("id")) for item in payload.get("data", []) if item.get("id")})}
+    except Exception as exc:
+        raise HTTPException(502, f"读取模型列表失败：{str(exc)[:200]}") from exc
+
+
+@router.post("/settings/ai/providers/{provider_id}/test")
+def test_ai_provider_card(provider_id: str):
+    provider = get_provider(provider_id, True)
+    if not provider.get("api_key"): raise HTTPException(400, "请先保存 API Key")
+    started = time.monotonic()
+    try:
+        response = httpx.post(f"{provider['base_url'].rstrip('/')}/chat/completions", headers={"Authorization": f"Bearer {provider['api_key']}", "Content-Type": "application/json"}, json={"model": provider["model"], "messages": [{"role": "user", "content": "Reply with OK."}], "temperature": 0, "max_tokens": 8}, timeout=30)
+        response.raise_for_status(); response.json()["choices"][0]["message"]["content"]
+    except Exception as exc:
+        record_test(provider_id, False); raise HTTPException(502, f"连接测试失败：{str(exc)[:200]}") from exc
+    latency = round((time.monotonic()-started)*1000); record_test(provider_id, True, latency)
+    return {"ok": True, "latency_ms": latency, "provider": get_provider(provider_id, False)}
 
 
 @router.post("/settings/ai/test")

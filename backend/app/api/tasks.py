@@ -9,6 +9,7 @@ from fastapi import APIRouter, HTTPException
 
 from ..utils.task_manager import task_manager
 from ..models.database import get_db
+from ..services.subtitle_cleaner import clean_subtitles
 
 logger = logging.getLogger(__name__)
 
@@ -71,3 +72,17 @@ def cancel_task(task_id: str):
     if not task_manager.cancel_task(task_id):
         raise HTTPException(409, "当前任务状态无法终止")
     return task_manager.get_task(task_id)
+
+
+@router.post("/tasks/{task_id}/retry-failed-batches")
+def retry_failed_batches(task_id: str):
+    original = task_manager.get_task(task_id)
+    if not original: raise HTTPException(404, "任务不存在")
+    db=get_db(); failed=db.execute("SELECT COUNT(*) count FROM ai_batch_results WHERE task_id=? AND status='failed'",(task_id,)).fetchone()["count"]; db.close()
+    if not failed: raise HTTPException(409, "没有可重试的失败批次")
+    if original.get("type") != "clean": raise HTTPException(400, "当前仅支持重试整理批次")
+    new_id=task_manager.create_task(original.get("project_id"), "clean")
+    target=int((original.get("details") or {}).get("target_length",42))
+    task_manager.update_task(new_id,parent_task_id=task_id,details={"retry_of":task_id})
+    task_manager.run_background(new_id,clean_subtitles,original["project_id"],target)
+    return {"task_id":new_id,"retry_of":task_id,"failed_batches":failed}

@@ -7,25 +7,25 @@
 
 import json
 import logging
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import List
 
 from ..utils.task_manager import TaskCancelled, task_manager
 from ..models.database import get_db
-from .ai_settings import get_ai_settings
+from .ai_providers import assigned_provider
 from .subtitle_cleaner import _validate_batch_results
 
 logger = logging.getLogger(__name__)
 
 
-def translate_subtitles(task_id: str, project_id: str, target_language: str = "zh"):
+def translate_subtitles(task_id: str, project_id: str, target_language: str = "zh", provider_id: str | None = None, model: str | None = None):
     """
     翻译项目字幕。
     使用 clean_text（如果有）否则用 raw_text。
     结果写入 translated_text。
     """
-    ai = get_ai_settings(include_secret=True)
-    if not ai.get("api_key") or ai["api_key"] == "your_api_key_here":
-        raise ValueError("AI API Key 未配置，请在 App 的 AI 接入管理中设置")
+    ai = assigned_provider("translate", provider_id, model)
 
     db = get_db()
     rows = db.execute(
@@ -83,52 +83,32 @@ def translate_subtitles(task_id: str, project_id: str, target_language: str = "z
     retry_count = 0
     total_batches = (total + batch_size - 1) // batch_size
 
-    for i in range(0, total, batch_size):
-        task_manager.checkpoint(task_id)
-        batch = all_segments[i:i + batch_size]
-        current_batch = i // batch_size + 1
-        progress = 5 + (i / total) * 90
-        task_manager.update_task(
-            task_id, step="translating",
-            progress=progress,
-            message=f"正在 AI 翻译字幕 ({i + 1}-{min(i + batch_size, total)}/{total})...",
-            details={
-                "target_language": target_language,
-                "total_segments": total,
-                "batch_size": batch_size,
-                "current_batch": current_batch,
-                "total_batches": total_batches,
-                "processed_segments": len(all_results),
-                "failed_batches": failed_batches,
-                "retry_count": retry_count,
-            }
-        )
-
+    batches=[all_segments[i:i+batch_size] for i in range(0,total,batch_size)]
+    def process(current_batch:int,batch:list):
+        start=(current_batch-1)*batch_size
+        before=all_segments[max(0,start-3):start]; after=all_segments[start+len(batch):start+len(batch)+3]
+        fingerprint=json.dumps({"items":batch,"target_language":target_language,"provider":ai["provider"],"model":ai["model"]},ensure_ascii=False,sort_keys=True)
+        db=get_db();cached=db.execute("SELECT result_json FROM ai_batch_results WHERE project_id=? AND operation='translate' AND input_fingerprint=? AND status='success' ORDER BY updated_at DESC LIMIT 1",(project_id,fingerprint)).fetchone()
+        if cached:
+            try: result=json.loads(cached['result_json']);db.close();return current_batch,result,None
+            except (TypeError,ValueError,json.JSONDecodeError): pass
+        db.execute("INSERT OR REPLACE INTO ai_batch_results (task_id,project_id,operation,batch_index,input_fingerprint,status,result_json,attempts,error,updated_at) VALUES (?,?,?,?,?,'running','[]',0,'',datetime('now','localtime'))",(task_id,project_id,'translate',current_batch,fingerprint));db.commit();db.close()
         try:
-            context_before = all_segments[max(0, i - 3):i]
-            context_after = all_segments[i + len(batch):i + len(batch) + 3]
-            result = _call_llm_translate(
-                batch, system_prompt, ai, context_before, context_after,
-                task_id=task_id,
-            )
-            task_manager.checkpoint(task_id)
-            all_results.extend(result)
-            task_manager.add_log(
-                task_id, "info", "translating",
-                f"第 {current_batch}/{total_batches} 批翻译完成",
-                detail=f"批次范围: {i+1}-{min(i+batch_size, total)}, 已处理: {len(all_results)}/{total}"
-            )
-        except TaskCancelled:
-            raise
-        except Exception as e:
-            logger.warning(f"[Translator] 批次 {current_batch} 失败: {e}")
-            failed_batches += 1
-            task_manager.add_log(
-                task_id, "warning", "translating",
-                f"第 {current_batch}/{total_batches} 批翻译失败",
-                detail=str(e), suggestion="已跳过该批次，将继续处理剩余批次的字幕"
-            )
-            # 不以原文伪装成译文；保留已有译文并继续剩余批次。
+            result=_call_llm_translate(batch,system_prompt,ai,before,after,task_id=task_id)
+            db=get_db();db.execute("UPDATE ai_batch_results SET status='success',result_json=?,attempts=3,updated_at=datetime('now','localtime') WHERE task_id=? AND batch_index=?",(json.dumps(result,ensure_ascii=False),task_id,current_batch));db.commit();db.close()
+            return current_batch,result,None
+        except Exception as exc:
+            db=get_db();db.execute("UPDATE ai_batch_results SET status='failed',attempts=3,error=?,updated_at=datetime('now','localtime') WHERE task_id=? AND batch_index=?",(str(exc)[:500],task_id,current_batch));db.commit();db.close()
+            return current_batch,[],exc
+    completed={}
+    with ThreadPoolExecutor(max_workers=2,thread_name_prefix='subtitle-translate') as executor:
+        futures=[executor.submit(process,index,batch) for index,batch in enumerate(batches,1)]
+        for done,future in enumerate(as_completed(futures),1):
+            task_manager.checkpoint(task_id); current_batch,result,error=future.result();completed[current_batch]=result
+            if error:
+                failed_batches+=1;task_manager.add_log(task_id,'warning','translating',f'第 {current_batch}/{total_batches} 批翻译失败',detail=str(error),suggestion='可重试失败批次')
+            task_manager.update_task(task_id,step='translating',progress=5+done/max(total_batches,1)*90,message=f'已完成 {done}/{total_batches} 个翻译批次',details={'target_language':target_language,'total_segments':total,'total_batches':total_batches,'failed_batches':failed_batches,'ai_provider':ai['provider'],'ai_model':ai['model']})
+    for index in range(1,total_batches+1): all_results.extend(completed.get(index,[]))
 
     # Write only after all calls have reached a safe checkpoint. The transaction
     # rolls back if cancellation arrives while results are being applied.
@@ -205,7 +185,7 @@ def _call_llm_translate(batch: list, system_prompt: str, ai: dict,
         "max_tokens": 4096,
     }
 
-    for attempt in range(2):
+    for attempt in range(3):
         if task_id:
             task_manager.checkpoint(task_id)
         try:
@@ -229,8 +209,15 @@ def _call_llm_translate(batch: list, system_prompt: str, ai: dict,
             raise
         except Exception as e:
             logger.warning(f"[Translator] LLM 调用失败 (尝试 {attempt + 1}): {e}")
+            if getattr(getattr(e,"response",None),"status_code",None) in (401,403):
+                break
+            if attempt < 2:
+                retry_after=getattr(getattr(e,"response",None),"headers",{}).get("Retry-After")
+                try: delay=min(30.0,max(0.0,float(retry_after))) if retry_after else 2 ** attempt
+                except (TypeError,ValueError): delay=2 ** attempt
+                time.sleep(delay)
 
-    raise RuntimeError("AI 翻译连续两次失败或返回格式不完整")
+    raise RuntimeError("AI 翻译连续三次失败或返回格式不完整")
 
 
 def _extract_json(text: str):

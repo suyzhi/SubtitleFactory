@@ -110,10 +110,11 @@ export async function startExtractAudio(projectId: string): Promise<{ task_id: s
 
 // ── Transcribe ──
 
-export async function startTranscribe(projectId: string, language: string = 'auto', model: string = 'small'): Promise<{ task_id: string; message: string }> {
+export async function startTranscribe(projectId: string, language: string = 'auto', model: string = 'small', runtime?: string): Promise<{ task_id: string; message: string }> {
   const form = new FormData();
   form.append('language', language);
   form.append('model', model);
+  if (runtime) form.append('runtime', runtime);
   const res = await fetch(`${BASE_URL}/api/projects/${projectId}/transcribe`, { method: 'POST', body: form });
   if (!res.ok) throw new Error(await res.text());
   return res.json();
@@ -135,6 +136,11 @@ export interface TranscriptionModelStatus {
   id: string; name: string; ready: boolean; download_required: boolean;
   download_bytes?: number; runtime_error?: string | null; languages: string[];
   source?: string; status?: string; path?: string | null;
+  runtimes?: { id: string; name: string; available?: boolean }[];
+}
+
+export async function updateProjectTargetLanguage(projectId: string, target_language: string): Promise<Project> {
+  return request(`/api/projects/${projectId}`, { method: 'PATCH', body: JSON.stringify({ target_language }) });
 }
 
 export async function getTranscriptionModels(projectId?: string, language = 'auto'): Promise<{
@@ -261,6 +267,16 @@ export async function saveAISettings(settings: AISettings): Promise<{ settings: 
 export async function testAISettings(settings: AISettings): Promise<{ ok: boolean; latency_ms: number; settings: AISettings }> {
   return request('/api/settings/ai/test', { method: 'POST', body: JSON.stringify(settings) });
 }
+
+export interface AIProviderCard { provider_id:string; name:string; base_url:string; api_key:string; model:string; models:string[]; enabled:boolean; has_api_key:boolean; last_test_status?:string; last_latency_ms?:number; }
+export const getAIProviders=()=>request<{providers:AIProviderCard[];assignments:{clean_provider_id:string;translate_provider_id:string}}>('/api/settings/ai/providers');
+export const saveAIProvider=async(id:string,data:Partial<AIProviderCard>)=>(await request<{provider:AIProviderCard}>(`/api/settings/ai/providers/${id}`,{method:'PUT',body:JSON.stringify(data)})).provider;
+export const testAIProvider=(id:string)=>request<{ok:boolean;latency_ms:number}>(`/api/settings/ai/providers/${id}/test`,{method:'POST'});
+export const saveAIAssignments=(data:{clean_provider_id:string;translate_provider_id:string})=>request('/api/settings/ai/assignments',{method:'PUT',body:JSON.stringify(data)});
+
+export interface ScannedModel { path:string;display_name:string;family:string;format:string;version:string;supported:boolean;reason?:string;cli_path?:string;runtimes?:string[]; }
+export const scanLocalModels=(path:string)=>request<{models:ScannedModel[]}>(`/api/transcription/models/scan`,{method:'POST',body:JSON.stringify({root_path:path})});
+export const importLocalModel=(path:string,cli_path?:string)=>request('/api/transcription/models/import',{method:'POST',body:JSON.stringify({path,cli_path})});
 
 export async function getAppSettings(): Promise<AppSettingsResponse> {
   return request('/api/settings/app');

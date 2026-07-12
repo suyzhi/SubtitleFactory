@@ -127,6 +127,48 @@ def init_db():
             updated_at TEXT NOT NULL DEFAULT ''
         );
 
+        CREATE TABLE IF NOT EXISTS ai_provider_configs (
+            provider_id TEXT PRIMARY KEY,
+            base_url TEXT NOT NULL,
+            api_key TEXT NOT NULL DEFAULT '',
+            model TEXT NOT NULL,
+            enabled INTEGER NOT NULL DEFAULT 1,
+            last_test_status TEXT DEFAULT '',
+            last_test_at TEXT DEFAULT '',
+            last_latency_ms INTEGER DEFAULT 0,
+            updated_at TEXT NOT NULL DEFAULT ''
+        );
+
+        CREATE TABLE IF NOT EXISTS ai_batch_results (
+            task_id TEXT NOT NULL,
+            project_id TEXT NOT NULL,
+            operation TEXT NOT NULL,
+            batch_index INTEGER NOT NULL,
+            input_fingerprint TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending',
+            result_json TEXT DEFAULT '[]',
+            attempts INTEGER NOT NULL DEFAULT 0,
+            error TEXT DEFAULT '',
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (task_id, batch_index)
+        );
+
+        CREATE TABLE IF NOT EXISTS imported_models (
+            id TEXT PRIMARY KEY,
+            display_name TEXT NOT NULL,
+            family TEXT NOT NULL,
+            version TEXT DEFAULT '',
+            format TEXT NOT NULL,
+            path TEXT NOT NULL,
+            cli_path TEXT,
+            runtimes_json TEXT NOT NULL DEFAULT '[]',
+            fingerprint TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'ready',
+            last_error TEXT DEFAULT '',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+
         CREATE TABLE IF NOT EXISTS segment_revisions (
             id TEXT PRIMARY KEY,
             project_id TEXT NOT NULL,
@@ -166,6 +208,17 @@ def init_db():
             conn.execute(f"ALTER TABLE ai_settings ADD COLUMN {column} {definition}")
         except sqlite3.OperationalError:
             pass
+
+    # Migrate the single v0.2 AI configuration into its provider card once.
+    legacy = conn.execute("SELECT * FROM ai_settings WHERE id=1").fetchone()
+    if legacy and not conn.execute("SELECT 1 FROM ai_provider_configs LIMIT 1").fetchone():
+        conn.execute(
+            """INSERT INTO ai_provider_configs
+               (provider_id,base_url,api_key,model,updated_at,last_test_status,last_test_at,last_latency_ms)
+               VALUES (?,?,?,?,?,?,?,?)""",
+            (legacy["provider"], legacy["base_url"], legacy["api_key"], legacy["model"],
+             legacy["updated_at"], legacy["last_test_status"], legacy["last_test_at"], legacy["last_latency_ms"]),
+        )
 
     conn.commit()
     conn.close()

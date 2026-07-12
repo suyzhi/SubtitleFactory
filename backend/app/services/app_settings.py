@@ -27,6 +27,9 @@ APP_SETTINGS_DEFAULTS: dict[str, Any] = {
     "ffmpeg_path": None,
     "yt_dlp_path": None,
     "download_directory": None,
+    "clean_provider_id": "deepseek",
+    "translate_provider_id": "deepseek",
+    "transcription_runtime_by_model": {},
 }
 
 
