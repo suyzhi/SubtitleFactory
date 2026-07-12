@@ -1,0 +1,59 @@
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+backend/.venv/
+.pytest_cache/
+
+# Node / frontend
+node_modules/
+frontend/node_modules/
+frontend/dist/
+
+# Rust / Tauri generated files
+frontend/src-tauri/target/
+frontend/src-tauri/backend-runtime/
+
+# Packagers and generated binaries
+backend/build/
+backend/dist/
+backend/test_*.py
+frontend/src-tauri/binaries/
+*.app/
+*.dmg
+*.zip
+*.sha256
+
+# Private user data and caches
+backend/data/
+backend/logs/
+data/
+models/
+*.db
+*.db-shm
+*.db-wal
+*.log
+
+# Downloaded media and exports
+*.mp4
+*.mkv
+*.mov
+*.webm
+*.avi
+*.wav
+*.srt
+*.vtt
+*.ass
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
