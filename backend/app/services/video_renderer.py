@@ -9,14 +9,16 @@ import subprocess
 import os
 import logging
 
-from ..utils.config import FFMPEG_PATH, EXPORTS_DIR
+from ..utils.config import EXPORTS_DIR
 from ..utils.task_manager import task_manager
+from .runtime_diagnostics import resolve_ffmpeg_path
 
 logger = logging.getLogger(__name__)
 
 
 def burn_subtitles(task_id: str, video_path: str, subtitle_path: str,
-                   output_path: str = None, project_id: str = None):
+                   output_path: str = None, project_id: str = None,
+                   ffmpeg_path: str = None):
     """
     使用 ffmpeg 将字幕硬编码到视频中。
     支持 ASS 和 SRT 字幕。
@@ -24,6 +26,23 @@ def burn_subtitles(task_id: str, video_path: str, subtitle_path: str,
     task_manager.update_task(task_id, step="rendering", progress=80, message="正在压制字幕到视频...")
     task_manager.add_log(task_id, "info", "rendering", "开始压制字幕到视频",
                          detail=f"视频: {video_path}, 字幕: {subtitle_path}")
+
+    if ffmpeg_path is None:
+        try:
+            from .app_settings import get_app_settings
+            ffmpeg_path = get_app_settings().get("ffmpeg_path")
+        except Exception:
+            # Database initialization is intentionally not a prerequisite for
+            # the renderer's standalone/unit-test use.
+            ffmpeg_path = None
+    ffmpeg = resolve_ffmpeg_path(ffmpeg_path)
+    if ffmpeg is None:
+        error = RuntimeError("视频导出缺少可用的 FFmpeg")
+        error.error_code = "DOWNLOAD_RUNTIME_MISSING"
+        error.recoverable = True
+        error.available_actions = ["open_settings", "retry"]
+        error.suggestion = "请在下载与存储设置中检查 FFmpeg 状态"
+        raise error
 
     if not output_path:
         os.makedirs(EXPORTS_DIR, exist_ok=True)
@@ -39,7 +58,7 @@ def burn_subtitles(task_id: str, video_path: str, subtitle_path: str,
     escaped_path = subtitle_path.replace(":", "\\:").replace("'", "'\\''")
 
     cmd = [
-        FFMPEG_PATH,
+        str(ffmpeg.path),
         "-i", video_path,
         "-vf", f"subtitles=filename='{escaped_path}'",
         "-c:v", "libx264",           # 视频编码
@@ -69,7 +88,7 @@ def burn_subtitles(task_id: str, video_path: str, subtitle_path: str,
         if result.returncode != 0 and ("No such filter: 'subtitles'" in result.stderr or "Error parsing" in result.stderr):
             subtitle_codec = "mov_text" if container == "mp4" else "ass"
             fallback = [
-                FFMPEG_PATH, "-i", video_path, "-i", subtitle_path,
+                str(ffmpeg.path), "-i", video_path, "-i", subtitle_path,
                 "-map", "0:v:0", "-map", "0:a?", "-map", "1:0",
                 "-c:v", "copy", "-c:a", "copy", "-c:s", subtitle_codec,
                 "-disposition:s:0", "default",
@@ -117,5 +136,5 @@ def burn_subtitles(task_id: str, video_path: str, subtitle_path: str,
         task_manager.add_log(task_id, "error", "rendering", "视频压制超时", detail="超过 2 小时")
         raise Exception("视频压制超时（超过 2 小时）")
     except FileNotFoundError:
-        task_manager.add_log(task_id, "error", "rendering", "未找到 ffmpeg", detail=f"路径: {FFMPEG_PATH}")
-        raise Exception(f"未找到 ffmpeg: {FFMPEG_PATH}")
+        task_manager.add_log(task_id, "error", "rendering", "FFmpeg 运行时不可用")
+        raise Exception("FFmpeg 运行时不可用")

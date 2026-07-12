@@ -3,11 +3,14 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PYTHON="$ROOT/backend/.venv/bin/python"
+VENDOR_RUNTIME="${SUBTITLE_FACTORY_FFMPEG_VENDOR_DIR:-$ROOT/vendor/ffmpeg/darwin-arm64}"
 
 if [ ! -x "$PYTHON" ]; then
   echo "缺少 backend/.venv，请先运行 ./start-desktop.sh 安装依赖。" >&2
   exit 1
 fi
+
+"$ROOT/scripts/verify-release-runtime.sh" "$VENDOR_RUNTIME"
 
 "$PYTHON" -m pip install -q -r "$ROOT/backend/requirements.txt" "pyinstaller>=6.0"
 TRIPLE="$(rustc -vV | awk '/host:/ {print $2}')"
@@ -37,4 +40,11 @@ cd "$ROOT/backend"
 
 cp -R "$DIST_DIR/subtitle-backend/." "$OUTPUT_DIR/"
 chmod +x "$OUTPUT_DIR/subtitle-backend"
+mkdir -p "$OUTPUT_DIR/bin" "$OUTPUT_DIR/THIRD_PARTY_LICENSES/ffmpeg"
+cp "$VENDOR_RUNTIME/ffmpeg-darwin-arm64" "$OUTPUT_DIR/bin/ffmpeg"
+cp "$VENDOR_RUNTIME/ffprobe-darwin-arm64" "$OUTPUT_DIR/bin/ffprobe"
+cp "$VENDOR_RUNTIME/darwin-arm64.LICENSE" "$OUTPUT_DIR/THIRD_PARTY_LICENSES/ffmpeg/LICENSE"
+cp "$VENDOR_RUNTIME/darwin-arm64.README" "$OUTPUT_DIR/THIRD_PARTY_LICENSES/ffmpeg/README"
+chmod +x "$OUTPUT_DIR/bin/ffmpeg" "$OUTPUT_DIR/bin/ffprobe"
+"$ROOT/scripts/verify-release-runtime.sh" "$OUTPUT_DIR/bin"
 echo "已生成快速启动后端: $OUTPUT_DIR"

@@ -414,7 +414,10 @@ class PersistenceAndExportTests(unittest.TestCase):
                 Path(command[-1]).write_bytes(b"rendered")
                 return SimpleNamespace(returncode=0, stderr="")
 
-            with patch("app.services.video_renderer.subprocess.run", side_effect=fake_run):
+            with patch(
+                "app.services.video_renderer.resolve_ffmpeg_path",
+                return_value=SimpleNamespace(path=Path("/app/bin/ffmpeg"), source="bundled"),
+            ), patch("app.services.video_renderer.subprocess.run", side_effect=fake_run):
                 burn_subtitles("test-mp4", str(video), str(subtitle), str(Path(folder) / "out.mp4"))
                 burn_subtitles("test-mkv", str(video), str(subtitle), str(Path(folder) / "out.mkv"))
             self.assertIn("+faststart", commands[0])

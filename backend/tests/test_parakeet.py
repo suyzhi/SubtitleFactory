@@ -140,18 +140,29 @@ class ParakeetInferenceAdapterTests(unittest.TestCase):
             self.assertEqual(runtime.model_dir, model.resolve())
             self.assertEqual(runtime.cli_path, cli.resolve())
 
-    def test_existing_coreml_runtime_prevents_onnx_download(self):
+    def test_onnx_selection_is_independent_from_external_coreml(self):
+        expected = SimpleNamespace(engine="onnx")
+        with patch.object(
+            parakeet,
+            "discover_coreml_runtime",
+            side_effect=AssertionError("ONNX selection must not probe or use Memo"),
+        ), patch.object(
+            parakeet, "_create_onnx_session", return_value=expected
+        ) as onnx_session:
+            actual = parakeet.create_parakeet_session(
+                "onnx-explicit", "/tmp/audio.wav", "auto", PARAKEET_ONNX_MODEL_ID
+            )
+        self.assertIs(actual, expected)
+        onnx_session.assert_called_once()
+
+    def test_coreml_selection_uses_detected_external_runtime(self):
         runtime = CoreMLRuntime(Path("/memo/model"), Path("/memo/parakeet"))
         expected = SimpleNamespace(engine="coreml")
         with patch.object(parakeet, "discover_coreml_runtime", return_value=runtime), patch.object(
             parakeet, "_create_coreml_session", return_value=expected
-        ) as coreml_session, patch.object(
-            parakeet,
-            "ensure_parakeet_assets",
-            side_effect=AssertionError("Core ML availability must prevent ONNX download"),
-        ):
+        ) as coreml_session:
             actual = parakeet.create_parakeet_session(
-                "coreml-preferred", "/tmp/audio.wav", "auto", PARAKEET_ONNX_MODEL_ID
+                "coreml-explicit", "/tmp/audio.wav", "auto", PARAKEET_MODEL_ID
             )
         self.assertIs(actual, expected)
         coreml_session.assert_called_once()

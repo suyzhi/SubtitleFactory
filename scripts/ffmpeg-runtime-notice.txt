@@ -1,0 +1,21 @@
+Subtitle Factory bundled FFmpeg runtime
+========================================
+
+Version: FFmpeg 8.1.2
+Source: https://ffmpeg.org/releases/ffmpeg-8.1.2.tar.xz
+Source SHA-256: 464beb5e7bf0c311e68b45ae2f04e9cc2af88851abb4082231742a74d97b524c
+Architecture: Apple Silicon arm64
+Minimum macOS deployment target: 12.0
+
+This runtime is compiled from the official FFmpeg source without Homebrew or
+other third-party dynamic library dependencies. Optional non-free and GPL
+components are not enabled. The adjacent LICENSE file contains the applicable
+GNU Lesser General Public License 2.1 text.
+
+Configure options:
+  --arch=arm64 --target-os=darwin --cc=/usr/bin/clang
+  --disable-shared --enable-static --disable-autodetect
+  --disable-doc --disable-debug --disable-ffplay
+  --enable-audiotoolbox --enable-videotoolbox --enable-securetransport
+  --extra-cflags=-mmacosx-version-min=12.0
+  --extra-ldflags=-mmacosx-version-min=12.0

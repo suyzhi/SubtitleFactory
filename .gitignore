@@ -26,6 +26,9 @@ backend/build/
 backend/dist/
 backend/test_*.py
 frontend/src-tauri/binaries/
+vendor/ffmpeg/darwin-arm64/
+vendor/ffmpeg/build/
+vendor/ffmpeg/source/
 *.app/
 *.dmg
 *.zip
@@ -36,6 +39,8 @@ backend/data/
 backend/logs/
 data/
 models/
+!backend/app/models/
+!backend/app/models/*.py
 *.db
 *.db-shm
 *.db-wal

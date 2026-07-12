@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "字幕工厂",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "identifier": "com.subtitlefactory.desktop",
   "build": {
     "frontendDist": "../dist",
@@ -12,7 +12,9 @@
   "app": {
     "windows": [
       {
-        "title": "字幕工厂",
+        "title": "",
+        "hiddenTitle": true,
+        "titleBarStyle": "Transparent",
         "width": 1400,
         "height": 900,
         "minWidth": 1000,
@@ -27,13 +29,14 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": ["app", "dmg"],
     "resources": [
       "backend-runtime"
     ],
     "macOS": {
       "signingIdentity": "-",
-      "hardenedRuntime": false
+      "hardenedRuntime": false,
+      "minimumSystemVersion": "12.0"
     },
     "icon": [
       "icons/32x32.png",

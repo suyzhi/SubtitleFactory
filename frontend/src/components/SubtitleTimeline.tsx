@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import type { SubtitleSegment } from '../types';
 
 interface Props {
@@ -33,22 +34,21 @@ export default function SubtitleTimeline({ segments, currentTime, duration, onSe
               return <span key={value} style={{ left: `${value / total * 100}%` }}>{formatTime(value)}</span>;
             })}
           </div>
-          <div className="timeline-segments">
-            {segments.map(segment => (
-              <button key={segment.id} className="timeline-segment"
-                style={{
-                  left: `${segment.start / total * 100}%`,
-                  width: `${Math.max(.18, (segment.end - segment.start) / total * 100)}%`,
-                }}
-                title={`${formatTime(segment.start)} ${segment.clean_text || segment.raw_text}`}
-                onClick={event => { event.stopPropagation(); onSeek(segment.start); }}>
-                {segment.index}
-              </button>
-            ))}
-          </div>
+          <TimelineSegments segments={segments} total={total} onSeek={onSeek}/>
           <div className="timeline-playhead" style={{ left: `${Math.min(100, currentTime / total * 100)}%` }} />
         </div>
       </div>
     </div>
   );
 }
+
+const TimelineSegments = memo(function TimelineSegments({ segments, total, onSeek }: {
+  segments: SubtitleSegment[]; total: number; onSeek: (time: number) => void;
+}) {
+  return <div className="timeline-segments">
+    {segments.map(segment => <button key={segment.id} className="timeline-segment"
+      style={{ left: `${segment.start / total * 100}%`, width: `${Math.max(.18, (segment.end - segment.start) / total * 100)}%` }}
+      title={`${formatTime(segment.start)} ${segment.clean_text || segment.raw_text}`}
+      onClick={event => { event.stopPropagation(); onSeek(segment.start); }}>{segment.index}</button>)}
+  </div>;
+});

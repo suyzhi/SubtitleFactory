@@ -15,22 +15,36 @@ import re
 import math
 import time as time_module
 import logging
+import sys
+from dataclasses import asdict, dataclass
+from pathlib import Path
 from typing import List, Optional
 
-from ..utils.config import WHISPER_MODEL, MAX_CHARS_CN, MAX_CHARS_EN, MIN_DURATION, MAX_DURATION
+from ..utils.config import (
+    WHISPER_MODEL,
+    WHISPER_MODELS_DIR,
+    MAX_CHARS_CN,
+    MAX_CHARS_EN,
+    MIN_DURATION,
+    MAX_DURATION,
+)
 from ..utils.task_manager import task_manager
 from ..models.database import get_db
 from .parakeet_transcriber import (
     PARAKEET_MODEL_ID,
     PARAKEET_ONNX_MODEL_ID,
+    PARAKEET_SUPPORTED_LANGUAGES,
     create_parakeet_session,
+    get_parakeet_model_status,
 )
 
 logger = logging.getLogger(__name__)
 
 WHISPER_MODEL_IDS = frozenset({"tiny", "base", "small", "medium", "large-v3"})
 PARAKEET_MODEL_IDS = frozenset({PARAKEET_MODEL_ID, PARAKEET_ONNX_MODEL_ID})
-SUPPORTED_TRANSCRIPTION_MODELS = WHISPER_MODEL_IDS | PARAKEET_MODEL_IDS
+SUPPORTED_TRANSCRIPTION_MODELS = WHISPER_MODEL_IDS | PARAKEET_MODEL_IDS | {"custom"}
+SAFE_TRANSCRIPTION_MODEL = "small"
+_WHISPER_REQUIRED_FILES = frozenset({"model.bin", "config.json", "tokenizer.json"})
 
 # 日志节流：每 N 条字幕写一次日志
 LOG_THROTTLE_INTERVAL = 5
@@ -46,6 +60,186 @@ class TranscriptionError(RuntimeError):
         self.suggestion = suggestion
 
 
+@dataclass(frozen=True)
+class ModelResolution:
+    requested_model: str
+    model_id: str
+    load_target: str
+    source: str
+    fallback_reason: str = ""
+
+    @property
+    def fell_back(self) -> bool:
+        return bool(self.fallback_reason)
+
+    def to_details(self) -> dict:
+        # load_target may be a user-selected local path; never persist it.
+        value = asdict(self)
+        value.pop("load_target", None)
+        value["fell_back"] = self.fell_back
+        return value
+
+
+def validate_whisper_model_path(path: str | Path | None) -> dict:
+    """Validate a local faster-whisper CTranslate2 model directory."""
+    if not path:
+        return {"ok": False, "source": "unavailable", "error": "尚未选择模型目录"}
+    candidate = Path(path).expanduser()
+    missing = sorted(
+        name for name in _WHISPER_REQUIRED_FILES if not (candidate / name).is_file()
+    )
+    if not candidate.is_dir() or missing:
+        return {
+            "ok": False,
+            "source": "unavailable",
+            "error": "模型目录缺少必要文件" if missing else "模型目录不存在",
+            "missing_files": missing,
+        }
+    return {"ok": True, "source": "custom_path", "error": "", "missing_files": []}
+
+
+def _bundled_whisper_model(model_id: str) -> Path | None:
+    roots: list[Path] = []
+    frozen_root = getattr(sys, "_MEIPASS", None)
+    if frozen_root:
+        roots.append(Path(frozen_root))
+    if getattr(sys, "frozen", False):
+        roots.append(Path(sys.executable).resolve().parent)
+    for root in roots:
+        for candidate in (
+            root / "models" / "whisper" / model_id,
+            root / "models" / f"faster-whisper-{model_id}",
+        ):
+            if validate_whisper_model_path(candidate)["ok"]:
+                return candidate.resolve()
+    return None
+
+
+def _managed_whisper_model_ready(model_id: str) -> bool:
+    if not WHISPER_MODELS_DIR.is_dir():
+        return False
+    # Hugging Face snapshots use a nested cache layout, while a repaired/imported
+    # App model may be stored directly. Required filenames keep this bounded and
+    # independent of cache naming conventions.
+    for model_file in WHISPER_MODELS_DIR.rglob("model.bin"):
+        parent = model_file.parent
+        if model_id in str(parent).lower() and validate_whisper_model_path(parent)["ok"]:
+            return True
+    return False
+
+
+def get_transcription_model_status(
+    model_id: str,
+    *,
+    custom_model_path: str | Path | None = None,
+    coreml_model_path: str | Path | None = None,
+    coreml_cli_path: str | Path | None = None,
+) -> dict:
+    """Return model state with explicit source categories for the settings UI."""
+    if model_id in PARAKEET_MODEL_IDS:
+        return get_parakeet_model_status(
+            model_id,
+            coreml_model_dir=coreml_model_path,
+            coreml_cli_path=coreml_cli_path,
+        )
+    if model_id == "custom":
+        validation = validate_whisper_model_path(custom_model_path)
+        return {
+            "model_id": model_id,
+            "ready": validation["ok"],
+            "source": "custom_path" if validation["ok"] else "unavailable",
+            "state": "ready" if validation["ok"] else "invalid",
+            "download_required": False,
+            "error": validation["error"],
+        }
+    if model_id not in WHISPER_MODEL_IDS:
+        return {
+            "model_id": model_id, "ready": False, "source": "unavailable",
+            "state": "unavailable", "download_required": False,
+            "error": "不支持的转写模型",
+        }
+    bundled = _bundled_whisper_model(model_id)
+    managed_ready = _managed_whisper_model_ready(model_id)
+    return {
+        "model_id": model_id,
+        "ready": bool(bundled or managed_ready),
+        "source": "built_in" if bundled else "app_download",
+        "state": "ready" if bundled or managed_ready else "not_downloaded",
+        "download_required": not bool(bundled or managed_ready),
+        "error": "" if bundled or managed_ready else "首次使用时将下载到 App 模型目录",
+    }
+
+
+def resolve_transcription_model(
+    model_size: str | None,
+    language: str = "auto",
+    *,
+    default_model: str | None = None,
+    custom_model_path: str | Path | None = None,
+    coreml_model_path: str | Path | None = None,
+    coreml_cli_path: str | Path | None = None,
+) -> ModelResolution:
+    """Resolve to a safe runtime model and explain every automatic fallback."""
+    requested = (model_size or "auto").strip()
+    candidate = requested
+    if candidate == "auto":
+        configured = (default_model or SAFE_TRANSCRIPTION_MODEL).strip()
+        candidate = configured if configured and configured != "auto" else SAFE_TRANSCRIPTION_MODEL
+
+    normalized_language = (language or "auto").lower()
+    if (
+        candidate in PARAKEET_MODEL_IDS
+        and normalized_language != "auto"
+        and normalized_language not in PARAKEET_SUPPORTED_LANGUAGES
+    ):
+        return ModelResolution(
+            requested, SAFE_TRANSCRIPTION_MODEL, SAFE_TRANSCRIPTION_MODEL, "app_download",
+            "Parakeet 不支持所选源语言，已切换到 Whisper Small",
+        )
+
+    if candidate == PARAKEET_MODEL_ID:
+        status = get_parakeet_model_status(
+            candidate,
+            coreml_model_dir=coreml_model_path,
+            coreml_cli_path=coreml_cli_path,
+        )
+        if not status["ready"]:
+            return ModelResolution(
+                requested, SAFE_TRANSCRIPTION_MODEL, SAFE_TRANSCRIPTION_MODEL, "app_download",
+                "外部 Core ML 模型或 CLI 无效，已切换到 Whisper Small",
+            )
+        return ModelResolution(requested, candidate, candidate, status["source"])
+
+    if candidate == PARAKEET_ONNX_MODEL_ID:
+        return ModelResolution(requested, candidate, candidate, "app_download")
+
+    if candidate == "custom" or Path(candidate).expanduser().is_absolute():
+        selected_path = custom_model_path if candidate == "custom" else candidate
+        validation = validate_whisper_model_path(selected_path)
+        if validation["ok"]:
+            return ModelResolution(
+                requested, "custom", str(Path(selected_path).expanduser().resolve()), "custom_path",
+            )
+        return ModelResolution(
+            requested, SAFE_TRANSCRIPTION_MODEL, SAFE_TRANSCRIPTION_MODEL, "app_download",
+            "自定义模型目录无效，已切换到 Whisper Small",
+        )
+
+    if candidate in WHISPER_MODEL_IDS:
+        bundled = _bundled_whisper_model(candidate)
+        return ModelResolution(
+            requested,
+            candidate,
+            str(bundled) if bundled else candidate,
+            "built_in" if bundled else "app_download",
+        )
+
+    return ModelResolution(
+        requested, SAFE_TRANSCRIPTION_MODEL, SAFE_TRANSCRIPTION_MODEL, "app_download",
+        "所选模型不可用，已切换到 Whisper Small",
+    )
+
+
 def transcribe_audio(task_id: str, audio_path: str, project_id: str, language: str = "auto", model_size: str | None = None):
     """
     转写音频文件，生成字幕段（segments）。
@@ -54,7 +248,40 @@ def transcribe_audio(task_id: str, audio_path: str, project_id: str, language: s
     task_manager.update_task(task_id, step="loading_model", progress=2, message="正在准备转写模型...")
     task_manager.add_log(task_id, "info", "语音转写", "正在准备转写模型...")
 
-    model_size = model_size or WHISPER_MODEL
+    try:
+        from .app_settings import get_app_settings
+        app_settings = get_app_settings()
+    except Exception:
+        app_settings = {}
+    resolution = resolve_transcription_model(
+        model_size or "auto",
+        language,
+        default_model=app_settings.get("default_model") or WHISPER_MODEL,
+        custom_model_path=app_settings.get("custom_model_path"),
+        coreml_model_path=app_settings.get("coreml_model_path"),
+        coreml_cli_path=app_settings.get("coreml_cli_path"),
+    )
+    model_id = resolution.model_id
+    if resolution.fell_back:
+        task_manager.update_task(
+            task_id,
+            step="loading_model",
+            progress=2,
+            message=resolution.fallback_reason,
+            details={"model_resolution": resolution.to_details()},
+        )
+        task_manager.add_log(
+            task_id,
+            "warning",
+            "语音转写",
+            resolution.fallback_reason,
+            suggestion="可在转写设置中校验模型后重新选择",
+        )
+    else:
+        task_manager.update_task(
+            task_id,
+            details={"model_resolution": resolution.to_details()},
+        )
     run_id = str(uuid.uuid4())
     started_at = time_module.time()
     db_run = get_db()
@@ -62,15 +289,22 @@ def transcribe_audio(task_id: str, audio_path: str, project_id: str, language: s
         """INSERT INTO transcription_runs
            (id,project_id,task_id,model,language,status,started_at)
            VALUES (?,?,?,?,?,'running',datetime('now','localtime'))""",
-        (run_id, project_id, task_id, model_size, language),
+        (run_id, project_id, task_id, model_id, language),
     )
     db_run.commit()
     db_run.close()
-    logger.info(f"[Transcriber] 加载模型: {model_size}, 语言: {language}")
-    task_manager.add_log(task_id, "info", "语音转写", f"加载模型: {model_size}")
+    logger.info("[Transcriber] 加载模型: %s, 来源: %s, 语言: %s", model_id, resolution.source, language)
+    task_manager.add_log(task_id, "info", "语音转写", f"加载模型: {model_id}")
 
-    if model_size in PARAKEET_MODEL_IDS:
-        session = create_parakeet_session(task_id, audio_path, language, model_size)
+    if model_id in PARAKEET_MODEL_IDS:
+        session = create_parakeet_session(
+            task_id,
+            audio_path,
+            language,
+            model_id,
+            coreml_model_dir=app_settings.get("coreml_model_path"),
+            coreml_cli_path=app_settings.get("coreml_cli_path"),
+        )
         segments_gen = session.segments
         detected_lang = session.detected_language
         audio_duration = session.audio_duration
@@ -84,7 +318,13 @@ def transcribe_audio(task_id: str, audio_path: str, project_id: str, language: s
 
         device = "cuda" if ctranslate2.get_cuda_device_count() > 0 else "cpu"
         compute_type = "float16" if device == "cuda" else "int8"
-        model = WhisperModel(model_size, device=device, compute_type=compute_type)
+        WHISPER_MODELS_DIR.mkdir(parents=True, exist_ok=True)
+        model = WhisperModel(
+            resolution.load_target,
+            device=device,
+            compute_type=compute_type,
+            download_root=str(WHISPER_MODELS_DIR),
+        )
         task_manager.checkpoint(task_id)
 
         lang = None if language in ("auto", "") else language
@@ -97,7 +337,7 @@ def transcribe_audio(task_id: str, audio_path: str, project_id: str, language: s
         )
         detected_lang = info.language
         audio_duration = info.duration
-        runtime_model_name = f"faster-whisper {model_size}"
+        runtime_model_name = f"faster-whisper {model_id}"
         progress_start = 5.0
 
     logger.info(
@@ -110,7 +350,8 @@ def transcribe_audio(task_id: str, audio_path: str, project_id: str, language: s
         details={
             "mode": "incremental",
             "model": runtime_model_name,
-            "model_id": model_size,
+            "model_id": model_id,
+            "model_source": resolution.source,
             "device": device,
             "is_generating_segments": True,
             "is_postprocessing": False,
@@ -311,7 +552,8 @@ def transcribe_audio(task_id: str, audio_path: str, project_id: str, language: s
             "mode": "incremental",
             "is_generating_segments": False,
             "is_postprocessing": False,
-            "model": model_size,
+            "model": model_id,
+            "model_source": resolution.source,
             "device": device,
             "detected_language": detected_lang,
             "total_segments": total_final,

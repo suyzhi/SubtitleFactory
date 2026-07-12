@@ -4,7 +4,8 @@ const BASE_URL = 'http://127.0.0.1:8000';
 
 import type {
   Project, SubtitleSegment, TaskStatus,
-  ProjectCreate, SegmentUpdate, ExportRequest, AIProviderPreset, AISettings
+  ProjectCreate, SegmentUpdate, ExportRequest, AIProviderPreset, AISettings,
+  AppSettings, AppSettingsResponse, HealthStatus, PathValidationResult
 } from '../types';
 
 async function request<T>(url: string, options?: RequestInit): Promise<T> {
@@ -21,8 +22,8 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
 
 // ── Projects ──
 
-export async function listProjects(): Promise<{ projects: Project[] }> {
-  return request('/api/projects');
+export async function listProjects(options?: { deleted?: boolean }): Promise<{ projects: Project[] }> {
+  return request(options?.deleted ? '/api/projects?deleted=true' : '/api/projects');
 }
 
 export async function createProject(data: ProjectCreate): Promise<{ project_id: string; message: string }> {
@@ -41,6 +42,29 @@ export async function updateProjectGroup(projectId: string, groupName: string | 
     method: 'PATCH',
     body: JSON.stringify({ group_name: groupName }),
   });
+}
+
+export async function renameProject(projectId: string, title: string): Promise<Project> {
+  return request(`/api/projects/${projectId}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ title }),
+  });
+}
+
+export async function trashProject(projectId: string, terminate = false): Promise<{ project?: Project; message?: string }> {
+  return request(`/api/projects/${projectId}/trash${terminate ? '?terminate=true' : ''}`, { method: 'POST' });
+}
+
+export async function restoreProject(projectId: string): Promise<{ project?: Project; message?: string }> {
+  return request(`/api/projects/${projectId}/restore`, { method: 'POST' });
+}
+
+export async function permanentlyDeleteProject(projectId: string): Promise<{ message?: string }> {
+  return request(`/api/projects/${projectId}?permanent=true`, { method: 'DELETE' });
+}
+
+export async function emptyTrash(): Promise<{ message?: string; deleted_count?: number }> {
+  return request('/api/projects/trash?confirm=true', { method: 'DELETE' });
 }
 
 // ── Download / Import ──
@@ -110,6 +134,7 @@ export async function retryTranscription(
 export interface TranscriptionModelStatus {
   id: string; name: string; ready: boolean; download_required: boolean;
   download_bytes?: number; runtime_error?: string | null; languages: string[];
+  source?: string; status?: string; path?: string | null;
 }
 
 export async function getTranscriptionModels(projectId?: string, language = 'auto'): Promise<{
@@ -120,6 +145,18 @@ export async function getTranscriptionModels(projectId?: string, language = 'aut
   const query = new URLSearchParams({ language });
   if (projectId) query.set('project_id', projectId);
   return request(`/api/transcription/models?${query.toString()}`);
+}
+
+export async function prepareTranscriptionModel(modelId: string, repair = false): Promise<{
+  task_id: string; model_id: string; message: string;
+}> {
+  return request(`/api/transcription/models/${encodeURIComponent(modelId)}/prepare`, {
+    method: 'POST', body: JSON.stringify({ repair }),
+  });
+}
+
+export async function validateTranscriptionModel(modelId: string): Promise<TranscriptionModelStatus> {
+  return request(`/api/transcription/models/${encodeURIComponent(modelId)}/validate`);
 }
 
 // ── AI Clean ──
@@ -225,7 +262,21 @@ export async function testAISettings(settings: AISettings): Promise<{ ok: boolea
   return request('/api/settings/ai/test', { method: 'POST', body: JSON.stringify(settings) });
 }
 
-export async function checkHealth(): Promise<{ status: string; service: string; version: string }> {
+export async function getAppSettings(): Promise<AppSettingsResponse> {
+  return request('/api/settings/app');
+}
+
+export async function saveAppSettings(settings: Partial<AppSettings>): Promise<AppSettingsResponse> {
+  return request('/api/settings/app', { method: 'PUT', body: JSON.stringify(settings) });
+}
+
+export async function validateAppPath(data: {
+  kind: PathValidationResult['kind']; path: string;
+}): Promise<PathValidationResult> {
+  return request('/api/settings/app/validate-path', { method: 'POST', body: JSON.stringify(data) });
+}
+
+export async function checkHealth(): Promise<HealthStatus> {
   const res = await fetch(`${BASE_URL}/api/health`, { method: 'GET' });
   if (!res.ok) throw new Error(`Backend not available: ${res.status}`);
   return res.json();

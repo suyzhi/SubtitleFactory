@@ -1,7 +1,8 @@
-"""Parakeet TDT inference with Memo Core ML first and sherpa-onnx fallback.
+"""Independent Parakeet runtimes: App-managed ONNX and optional Core ML.
 
-On macOS we reuse Memo's compiled Core ML model and arm64 CLI when present.
-Only machines without that runtime fall back to the official sherpa-onnx model.
+The ONNX model is downloaded only into the App data directory. Memo's Core ML
+runtime is detected as an optional external accelerator and is never treated as
+a release dependency or silently substituted for an explicitly selected model.
 """
 
 from __future__ import annotations
@@ -25,8 +26,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Iterator
 
-from ..utils.config import MODELS_DIR
+from ..utils.config import MODELS_DIR, environment_path_overrides_enabled
 from ..utils.task_manager import TaskCancelled, task_manager
+from .runtime_diagnostics import validate_runtime_executable
 
 logger = logging.getLogger(__name__)
 
@@ -86,6 +88,7 @@ _COREML_REQUIRED_MODEL_ENTRIES = (
 class CoreMLRuntime:
     model_dir: Path
     cli_path: Path
+    source: str = "external_detected"
 
 
 @dataclass(frozen=True)
@@ -130,36 +133,52 @@ def _valid_coreml_model_dir(path: Path) -> bool:
 
 
 def _valid_coreml_cli(path: Path) -> bool:
-    return path.is_file() and os.access(path, os.X_OK)
+    if not path.is_file() or not os.access(path, os.X_OK):
+        return False
+    return validate_runtime_executable(
+        path,
+        name="parakeet",
+        source="external_detected",
+        version_args=("--help",),
+    ).available
 
 
 def discover_coreml_runtime(
     model_dir: str | Path | None = None,
     cli_path: str | Path | None = None,
+    *,
+    strict: bool = True,
+    allow_environment: bool | None = None,
 ) -> CoreMLRuntime | None:
     """Find Memo's Core ML runtime without embedding a user-specific path.
 
-    Explicit arguments and environment variables are authoritative: an invalid
-    override raises instead of silently starting the 465 MiB ONNX download.
+    Explicit App-setting paths are authoritative. Environment paths are a
+    development/advanced diagnostic feature and are ignored by normal frozen
+    releases. ``strict=False`` is useful for startup fallback/status checks.
     """
-    explicit_model = model_dir if model_dir is not None else os.getenv(PARAKEET_COREML_MODEL_ENV)
-    explicit_cli = cli_path if cli_path is not None else os.getenv(PARAKEET_COREML_CLI_ENV)
+    if allow_environment is None:
+        allow_environment = environment_path_overrides_enabled()
+    environment_model = os.getenv(PARAKEET_COREML_MODEL_ENV) if allow_environment else None
+    environment_cli = os.getenv(PARAKEET_COREML_CLI_ENV) if allow_environment else None
+    explicit_model = model_dir if model_dir is not None else environment_model
+    explicit_cli = cli_path if cli_path is not None else environment_cli
+    source = "custom_path" if model_dir is not None or cli_path is not None else "external_detected"
 
     if explicit_model:
         resolved_model = Path(explicit_model).expanduser().resolve()
         if not _valid_coreml_model_dir(resolved_model):
-            raise RuntimeError(
-                f"{PARAKEET_COREML_MODEL_ENV} 指向的 Core ML 模型目录无效：{resolved_model}"
-            )
+            if strict:
+                raise RuntimeError("所选 Core ML 模型目录无效或文件不完整")
+            return None
     else:
         resolved_model = None
 
     if explicit_cli:
         resolved_cli = Path(explicit_cli).expanduser().resolve()
         if not _valid_coreml_cli(resolved_cli):
-            raise RuntimeError(
-                f"{PARAKEET_COREML_CLI_ENV} 指向的 Parakeet CLI 不可执行：{resolved_cli}"
-            )
+            if strict:
+                raise RuntimeError("所选 Parakeet CLI 不可执行或与当前架构不兼容")
+            return None
     else:
         resolved_cli = None
 
@@ -174,25 +193,55 @@ def discover_coreml_runtime(
             if _valid_coreml_cli(candidate):
                 resolved_cli = candidate.resolve()
 
-    if resolved_cli is None:
+    if resolved_cli is None and allow_environment:
         executable = shutil.which("parakeet")
         if executable and _valid_coreml_cli(Path(executable)):
             resolved_cli = Path(executable).resolve()
 
     if explicit_model and resolved_cli is None:
-        raise RuntimeError(
-            f"已指定 {PARAKEET_COREML_MODEL_ENV}，但未找到可执行的 Parakeet CLI；"
-            f"请同时设置 {PARAKEET_COREML_CLI_ENV}"
-        )
+        if strict:
+            raise RuntimeError("已选择 Core ML 模型，但没有配套的可执行 Parakeet CLI")
+        return None
     if explicit_cli and resolved_model is None:
-        raise RuntimeError(
-            f"已指定 {PARAKEET_COREML_CLI_ENV}，但未找到完整的 Core ML 模型；"
-            f"请同时设置 {PARAKEET_COREML_MODEL_ENV}"
-        )
+        if strict:
+            raise RuntimeError("已选择 Parakeet CLI，但没有配套的完整 Core ML 模型")
+        return None
 
     if resolved_model is not None and resolved_cli is not None:
-        return CoreMLRuntime(model_dir=resolved_model, cli_path=resolved_cli)
+        return CoreMLRuntime(model_dir=resolved_model, cli_path=resolved_cli, source=source)
     return None
+
+
+def validate_coreml_runtime_paths(
+    model_dir: str | Path | None,
+    cli_path: str | Path | None,
+) -> dict:
+    """Validate file-picker values without exposing them in logs or defaults."""
+    try:
+        runtime = discover_coreml_runtime(
+            model_dir, cli_path, strict=True, allow_environment=False,
+        )
+    except RuntimeError as exc:
+        return {
+            "ok": False,
+            "source": "unavailable",
+            "error": str(exc),
+            "model_files_valid": bool(model_dir and _valid_coreml_model_dir(Path(model_dir).expanduser())),
+            "cli_valid": bool(cli_path and _valid_coreml_cli(Path(cli_path).expanduser())),
+        }
+    if runtime is None:
+        return {
+            "ok": False, "source": "unavailable",
+            "error": "需要同时选择 Core ML 模型目录和 Parakeet CLI",
+            "model_files_valid": False, "cli_valid": False,
+        }
+    return {
+        "ok": True,
+        "source": runtime.source,
+        "error": "",
+        "model_files_valid": True,
+        "cli_valid": True,
+    }
 
 
 def _build_coreml_command(
@@ -209,6 +258,15 @@ def _build_coreml_command(
         "--output-format", "json",
         "--output-filename", output_filename,
     ]
+
+
+def _redact_runtime_paths(message: str, runtime: CoreMLRuntime) -> str:
+    """Keep user-selected local paths out of persisted task logs."""
+    return (
+        str(message)
+        .replace(str(runtime.model_dir), "<Core ML model>")
+        .replace(str(runtime.cli_path), "<Parakeet CLI>")
+    )
 
 
 def _parse_coreml_status_line(line: str) -> dict | None:
@@ -370,8 +428,7 @@ def _run_coreml_cli(
                                 "coreml": {
                                     "status": "running",
                                     "progress": progress,
-                                    "model_dir": str(runtime.model_dir),
-                                    "cli_path": str(runtime.cli_path),
+                                    "source": runtime.source,
                                 }
                             },
                         )
@@ -444,6 +501,73 @@ def _model_cache_is_valid(assets: ParakeetAssets) -> bool:
         and assets.vad.is_file()
         and assets.vad.stat().st_size == SILERO_VAD_BYTES
     )
+
+
+def get_parakeet_model_status(
+    model_id: str = PARAKEET_ONNX_MODEL_ID,
+    *,
+    cache_root: Path | None = None,
+    coreml_model_dir: str | Path | None = None,
+    coreml_cli_path: str | Path | None = None,
+) -> dict:
+    """Return a source-aware status for model manager and diagnostics APIs."""
+    if model_id == PARAKEET_MODEL_ID:
+        try:
+            runtime = discover_coreml_runtime(
+                coreml_model_dir,
+                coreml_cli_path,
+                strict=False,
+                allow_environment=(
+                    coreml_model_dir is None
+                    and coreml_cli_path is None
+                    and environment_path_overrides_enabled()
+                ),
+            )
+        except RuntimeError:
+            runtime = None
+        if runtime:
+            return {
+                "model_id": model_id,
+                "ready": True,
+                "source": runtime.source,
+                "state": "ready",
+                "download_required": False,
+                "error": "",
+            }
+        validation = None
+        if coreml_model_dir is not None or coreml_cli_path is not None:
+            validation = validate_coreml_runtime_paths(coreml_model_dir, coreml_cli_path)
+        return {
+            "model_id": model_id,
+            "ready": False,
+            "source": "unavailable",
+            "state": "unavailable",
+            "download_required": False,
+            "error": (validation or {}).get(
+                "error", "未发现外部 Core ML 模型与配套 CLI",
+            ),
+        }
+    if model_id != PARAKEET_ONNX_MODEL_ID:
+        return {
+            "model_id": model_id,
+            "ready": False,
+            "source": "unavailable",
+            "state": "unavailable",
+            "download_required": False,
+            "error": "不支持的 Parakeet 模型",
+        }
+    assets = _asset_paths(Path(cache_root or MODELS_DIR).expanduser().resolve())
+    ready = _model_cache_is_valid(assets)
+    partial = assets.model_dir.exists() or assets.vad.exists()
+    return {
+        "model_id": model_id,
+        "ready": ready,
+        "source": "app_download" if ready or partial else "unavailable",
+        "state": "ready" if ready else ("invalid" if partial else "not_downloaded"),
+        "download_required": not ready,
+        "download_bytes": PARAKEET_ARCHIVE_BYTES + SILERO_VAD_BYTES,
+        "error": "" if ready else ("模型缓存不完整，可执行修复" if partial else "模型尚未下载"),
+    }
 
 
 def _format_mib(byte_count: int) -> str:
@@ -597,12 +721,17 @@ def _install_model_archive(
     return _asset_paths(cache_root)
 
 
-def ensure_parakeet_assets(task_id: str, cache_root: Path | None = None) -> ParakeetAssets:
+def ensure_parakeet_assets(
+    task_id: str,
+    cache_root: Path | None = None,
+    *,
+    repair: bool = False,
+) -> ParakeetAssets:
     """Return complete cached assets, downloading official files on first use."""
     root = Path(cache_root or MODELS_DIR).expanduser().resolve()
     root.mkdir(parents=True, exist_ok=True)
     assets = _asset_paths(root)
-    if _model_cache_is_valid(assets):
+    if _model_cache_is_valid(assets) and not repair:
         task_manager.update_task(
             task_id,
             details={
@@ -617,10 +746,30 @@ def ensure_parakeet_assets(task_id: str, cache_root: Path | None = None) -> Para
 
     with _DOWNLOAD_LOCK:
         assets = _asset_paths(root)
-        if _model_cache_is_valid(assets):
+        if _model_cache_is_valid(assets) and not repair:
             return assets
 
         archive = root / f"{PARAKEET_MODEL_DIR_NAME}.tar.bz2"
+        if repair:
+            task_manager.update_task(
+                task_id,
+                step="repairing_model",
+                progress=1,
+                message="正在清理 Parakeet 模型缓存并重新校验...",
+                details={
+                    "model_download": {
+                        "status": "repairing",
+                        "model_id": PARAKEET_ONNX_MODEL_ID,
+                    }
+                },
+            )
+            shutil.rmtree(assets.model_dir, ignore_errors=True)
+            shutil.rmtree(root / f".{PARAKEET_MODEL_DIR_NAME}.extracting", ignore_errors=True)
+            assets.vad.unlink(missing_ok=True)
+            archive.unlink(missing_ok=True)
+            archive.with_name(f"{archive.name}.part").unlink(missing_ok=True)
+            assets.vad.with_name(f"{assets.vad.name}.part").unlink(missing_ok=True)
+            assets = _asset_paths(root)
         last_reported_percent = -1
         model_files_ready = _model_files_are_valid(assets)
         if not model_files_ready:
@@ -802,6 +951,46 @@ def ensure_parakeet_assets(task_id: str, cache_root: Path | None = None) -> Para
         return assets
 
 
+def prepare_parakeet_model(
+    task_id: str,
+    model_id: str = PARAKEET_ONNX_MODEL_ID,
+    *,
+    repair: bool = False,
+    cache_root: Path | None = None,
+    coreml_model_dir: str | Path | None = None,
+    coreml_cli_path: str | Path | None = None,
+) -> dict:
+    """Prepare/repair a model for the model-manager background endpoint."""
+    if model_id == PARAKEET_MODEL_ID:
+        status = get_parakeet_model_status(
+            model_id,
+            coreml_model_dir=coreml_model_dir,
+            coreml_cli_path=coreml_cli_path,
+        )
+        if not status["ready"]:
+            raise RuntimeError(status["error"])
+        task_manager.update_task(
+            task_id,
+            step="model_ready",
+            progress=100,
+            message="外部 Core ML 模型已通过校验",
+            details={"model_status": status},
+        )
+        return status
+    if model_id != PARAKEET_ONNX_MODEL_ID:
+        raise ValueError(f"不支持的 Parakeet 模型：{model_id}")
+    ensure_parakeet_assets(task_id, cache_root, repair=repair)
+    status = get_parakeet_model_status(model_id, cache_root=cache_root)
+    task_manager.update_task(
+        task_id,
+        step="model_ready",
+        progress=100,
+        message="Parakeet ONNX 模型已准备完成",
+        details={"model_status": status},
+    )
+    return status
+
+
 def _import_sherpa_onnx() -> Any:
     try:
         import sherpa_onnx
@@ -968,16 +1157,15 @@ def _create_coreml_session(
         task_id,
         step="loading_model",
         progress=3,
-        message="正在复用 Memo 的 Parakeet Core ML 模型...",
+        message="正在加载外部 Parakeet Core ML 模型...",
         details={
             "coreml": {
                 "status": "ready",
-                "model_dir": str(runtime.model_dir),
-                "cli_path": str(runtime.cli_path),
+                "source": runtime.source,
             },
             "model_download": {
-                "status": "skipped_coreml_available",
-                "model_id": PARAKEET_ONNX_MODEL_ID,
+                "status": "external_runtime",
+                "model_id": PARAKEET_MODEL_ID,
             },
         },
     )
@@ -985,8 +1173,7 @@ def _create_coreml_session(
         task_id,
         "info",
         "Parakeet Core ML",
-        "已发现 Memo 的本地 Core ML 模型，跳过 ONNX 模型下载",
-        detail=f"模型: {runtime.model_dir}",
+        "已加载外部 Core ML 模型与 CLI",
     )
     try:
         payload = _run_coreml_cli(task_id, audio_path, runtime)
@@ -996,21 +1183,22 @@ def _create_coreml_session(
     except TaskCancelled:
         raise
     except Exception as exc:
+        safe_error = _redact_runtime_paths(str(exc), runtime)
         task_manager.update_task(
             task_id,
             step="model_error",
             message="Parakeet Core ML 转写失败",
-            details={"coreml": {"status": "error", "error": str(exc)}},
+            details={"coreml": {"status": "error", "error": safe_error}},
         )
         task_manager.add_log(
             task_id,
             "error",
             "Parakeet Core ML",
             "本地 Core ML 转写失败",
-            detail=str(exc),
-            suggestion="请确认 Memo 的模型目录与 parakeet-cli 完整，或用环境变量指定正确路径",
+            detail=safe_error,
+            suggestion="请重新选择完整的 Core ML 模型目录与兼容当前架构的 CLI",
         )
-        raise RuntimeError(f"Parakeet Core ML 转写失败：{exc}") from exc
+        raise RuntimeError(f"Parakeet Core ML 转写失败：{safe_error}") from exc
 
     task_manager.update_task(
         task_id,
@@ -1022,8 +1210,7 @@ def _create_coreml_session(
                 "status": "success",
                 "progress": 100,
                 "segments": len(segments),
-                "model_dir": str(runtime.model_dir),
-                "cli_path": str(runtime.cli_path),
+                "source": runtime.source,
             }
         },
     )
@@ -1044,6 +1231,8 @@ def create_parakeet_session(
     audio_path: str,
     language: str = "auto",
     model_id: str = PARAKEET_MODEL_ID,
+    coreml_model_dir: str | Path | None = None,
+    coreml_cli_path: str | Path | None = None,
 ) -> ParakeetSession:
     normalized_language = (language or "auto").lower()
     if normalized_language != "auto" and normalized_language not in PARAKEET_SUPPORTED_LANGUAGES:
@@ -1053,22 +1242,25 @@ def create_parakeet_session(
     if model_id not in {PARAKEET_MODEL_ID, PARAKEET_ONNX_MODEL_ID}:
         raise ValueError(f"不支持的 Parakeet 模型：{model_id}")
 
-    # Always prefer the existing Core ML runtime, even if an older client sends
-    # the legacy ONNX model id. This prevents an unnecessary 465 MiB download.
-    runtime = discover_coreml_runtime()
-    if runtime is not None:
+    if model_id == PARAKEET_MODEL_ID:
+        runtime = discover_coreml_runtime(
+            coreml_model_dir,
+            coreml_cli_path,
+            strict=False,
+            allow_environment=(
+                coreml_model_dir is None
+                and coreml_cli_path is None
+                and environment_path_overrides_enabled()
+            ),
+        )
+        if runtime is None:
+            error = RuntimeError("外部 Parakeet Core ML 模型或 CLI 当前不可用")
+            error.error_code = "MODEL_RUNTIME_MISSING"
+            error.recoverable = True
+            error.available_actions = ["choose_fallback", "open_settings"]
+            error.suggestion = "请选择 Whisper Small，或重新选择完整的 Core ML 模型与 CLI"
+            raise error
         return _create_coreml_session(
             task_id, audio_path, normalized_language, runtime
         )
-
-    task_manager.add_log(
-        task_id,
-        "warning",
-        "Parakeet 模型",
-        "未发现可用的 Memo Core ML 模型，使用 sherpa-onnx CPU 兼容方案",
-        suggestion=(
-            f"可设置 {PARAKEET_COREML_MODEL_ENV} 和 {PARAKEET_COREML_CLI_ENV} "
-            "复用现有 Core ML 运行时"
-        ),
-    )
     return _create_onnx_session(task_id, audio_path, normalized_language)

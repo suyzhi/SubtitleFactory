@@ -5,6 +5,7 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 
@@ -39,6 +40,43 @@ class DownloadQualityTests(unittest.TestCase):
         }])
         self.assertTrue(options["writethumbnail"])
         self.assertEqual(options["outtmpl"]["thumbnail"], "/tmp/thumbnail.%(ext)s")
+
+    def test_quality_limit_and_container_settings_change_yt_dlp_options(self):
+        limited = downloader._download_options(
+            "task-id", "/tmp/%(title)s.%(ext)s",
+            quality="1080p", container="mkv",
+        )
+        self.assertIn("height<=1080", limited["format"])
+        self.assertEqual(limited["merge_output_format"], "mkv")
+        self.assertEqual(limited["final_ext"], "mkv")
+        self.assertEqual(limited["postprocessors"][0]["preferedformat"], "mkv")
+
+        webm = downloader._download_options(
+            "task-id", "/tmp/%(title)s.%(ext)s",
+            quality="720p", container="webm",
+        )
+        self.assertIn("bestvideo[ext=webm][height<=720]", webm["format"])
+        self.assertIn("bestaudio[ext=webm]", webm["format"])
+        self.assertEqual(webm["merge_output_format"], "webm")
+
+    def test_progress_never_moves_backwards_between_video_and_audio_streams(self):
+        options = downloader._download_options(
+            "task-id", "/tmp/%(title)s.%(ext)s",
+        )
+        hook = options["progress_hooks"][0]
+
+        with (
+            patch.object(downloader.task_manager, "wait_if_paused"),
+            patch.object(downloader.task_manager, "update_task") as update_task,
+        ):
+            hook({"status": "downloading", "downloaded_bytes": 90, "total_bytes": 100})
+            # yt-dlp starts the second requested stream with a fresh byte count.
+            hook({"status": "downloading", "downloaded_bytes": 10, "total_bytes": 100})
+            hook({"status": "downloading", "downloaded_bytes": 100, "total_bytes": 100})
+
+        progress = [call.kwargs["progress"] for call in update_task.call_args_list]
+        self.assertEqual(progress, sorted(progress))
+        self.assertGreaterEqual(progress[1], progress[0])
 
     def test_download_returns_postprocessed_video_and_records_thumbnail(self):
         captured_options = []
@@ -79,6 +117,11 @@ class DownloadQualityTests(unittest.TestCase):
             with (
                 patch.object(downloader, "DOWNLOADS_DIR", Path(folder)),
                 patch.object(downloader.yt_dlp, "YoutubeDL", FakeYoutubeDL),
+                patch.object(
+                    downloader,
+                    "resolve_ffmpeg_path",
+                    return_value=SimpleNamespace(path=Path("/app/bin/ffmpeg"), source="bundled"),
+                ),
                 patch.object(downloader.task_manager, "update_task") as update_task,
             ):
                 result = downloader.download_video(
@@ -94,6 +137,7 @@ class DownloadQualityTests(unittest.TestCase):
             )
             self.assertEqual(Path(details["thumbnail_path"]).name, "thumbnail.webp")
             self.assertEqual(captured_options[0]["format"], "bestvideo+bestaudio/best")
+            self.assertEqual(captured_options[0]["ffmpeg_location"], "/app/bin/ffmpeg")
 
 
 class ProjectThumbnailPersistenceTests(unittest.TestCase):

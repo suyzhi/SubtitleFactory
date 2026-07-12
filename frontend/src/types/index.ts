@@ -13,6 +13,7 @@ export interface Project {
   target_language: string;
   created_at: string;
   updated_at: string;
+  deleted_at?: string | null;
   segments_count: number;
   status?: string;
 }
@@ -197,9 +198,10 @@ export interface ProcessingConfig {
   clean_target_length: number;
 }
 
-export type ModelSize = 'auto' | 'small' | 'medium' | 'large-v3' | 'parakeet-tdt-0.6b-v3-coreml' | 'parakeet-tdt-0.6b-v3-int8';
-export type SourceLang = 'auto' | 'en' | 'zh' | 'ja';
-export type TargetLang = 'zh' | 'en' | 'ja' | 'none';
+export type ModelSize = 'auto' | 'small' | 'medium' | 'large-v3' | 'parakeet-tdt-0.6b-v3-coreml' | 'parakeet-tdt-0.6b-v3-int8' | (string & {});
+/** BCP-47-ish language code. Kept open so the UI can add languages without a release. */
+export type SourceLang = string;
+export type TargetLang = string;
 export type ExportFormat = 'srt' | 'vtt' | 'ass' | 'srt-bilingual' | 'mp4' | 'mkv';
 
 export interface AIProviderPreset {
@@ -220,4 +222,78 @@ export interface AISettings {
   last_test_status?: '' | 'success' | 'failed';
   last_test_at?: string;
   last_latency_ms?: number;
+}
+
+export type RuntimeSource = 'bundled' | 'app_download' | 'external_detected' | 'custom' | 'environment' | 'path' | 'unavailable' | string;
+
+export interface RuntimeCheck {
+  ok?: boolean;
+  available?: boolean;
+  status?: string;
+  source?: RuntimeSource;
+  path?: string | null;
+  resolved_path?: string | null;
+  message?: string | null;
+  reason?: string | null;
+  version?: string | null;
+  free_bytes?: number;
+  total_bytes?: number;
+  [key: string]: unknown;
+}
+
+export interface RuntimeHealth {
+  ffmpeg?: RuntimeCheck;
+  yt_dlp?: RuntimeCheck;
+  disk?: RuntimeCheck;
+  output_directory?: RuntimeCheck;
+  models?: RuntimeCheck | RuntimeCheck[] | Record<string, RuntimeCheck>;
+  data_directory?: string;
+}
+
+export interface HealthStatus {
+  status: string;
+  service: string;
+  version: string;
+  runtime?: RuntimeHealth;
+}
+
+export interface AppSettings {
+  default_model?: string;
+  source_language?: string;
+  translation_target_language?: string;
+  default_workflow?: 'automatic' | 'manual' | string;
+  auto_save?: boolean;
+  startup_behavior?: 'restore_last' | 'project_library';
+  download_quality?: string;
+  download_container?: 'mp4' | 'mkv' | 'webm';
+  download_directory?: string;
+  ffmpeg_path?: string;
+  yt_dlp_path?: string;
+  custom_model_path?: string;
+  coreml_model_path?: string;
+  coreml_cli_path?: string;
+  bilingual_order?: 'original_first' | 'translated_first' | string;
+  favorite_languages?: string[];
+  [key: string]: unknown;
+}
+
+export interface AppSettingsResponse {
+  settings: AppSettings;
+  warnings?: AppSettingWarning[];
+}
+
+export interface AppSettingWarning {
+  field: string;
+  code: string;
+  message: string;
+  fallback?: unknown;
+}
+
+export interface PathValidationResult {
+  ok: boolean;
+  kind: 'ffmpeg' | 'yt_dlp' | 'model' | 'coreml_model' | 'cli' | 'download_directory';
+  path: string;
+  resolved_path?: string | null;
+  reason?: string | null;
+  details?: Record<string, unknown>;
 }

@@ -30,7 +30,7 @@ class TaskManager:
         self._pause_conditions: dict[str, threading.Condition] = {}
         self._futures: dict[str, Future] = {}
 
-    def create_task(self, project_id: str, task_type: str) -> str:
+    def create_task(self, project_id: Optional[str], task_type: str) -> str:
         """创建新任务，返回 task_id"""
         task_id = str(uuid.uuid4())
         now = time.strftime("%Y-%m-%d %H:%M:%S")
@@ -132,6 +132,53 @@ class TaskManager:
                     self._tasks[task_id] = task
                     self._pause_conditions[task_id] = threading.Condition(self._lock)
             return dict(task) if task else None
+
+    def active_task_ids(self, project_id: str) -> list[str]:
+        """Return pending/running/paused task IDs for a project.
+
+        Querying both memory and SQLite keeps project deletion safe after an API
+        worker has been restored lazily or when a task is queued in the current
+        process but has not been read through ``get_task`` yet.
+        """
+        active_statuses = {"pending", "running", "paused"}
+        with self._lock:
+            task_ids = {
+                task_id for task_id, task in self._tasks.items()
+                if task.get("project_id") == project_id
+                and task.get("status") in active_statuses
+            }
+            # A cooperatively cancelled worker can still be unwinding from a
+            # blocking native process. Keep permanent deletion blocked until
+            # its Future is actually finished, even though its public task
+            # status is already the terminal ``cancelled`` state.
+            task_ids.update(
+                task_id for task_id, future in self._futures.items()
+                if not future.done()
+                and self._tasks.get(task_id, {}).get("project_id") == project_id
+            )
+        try:
+            from ..models.database import get_db
+            db = get_db()
+            rows = db.execute(
+                """SELECT id FROM tasks
+                   WHERE project_id=? AND status IN ('pending','running','paused')""",
+                (project_id,),
+            ).fetchall()
+            db.close()
+            task_ids.update(row["id"] for row in rows)
+        except Exception:
+            logger.debug("Unable to inspect persisted project tasks", exc_info=True)
+        return sorted(task_ids)
+
+    def cancel_project_tasks(self, project_id: str) -> list[str]:
+        """Request cooperative cancellation for every active project task."""
+        cancelled = []
+        for task_id in self.active_task_ids(project_id):
+            # Loading a persisted task first lets cancel_task update its terminal
+            # state using exactly the same path as an in-memory worker.
+            if self.get_task(task_id) and self.cancel_task(task_id):
+                cancelled.append(task_id)
+        return cancelled
 
     @staticmethod
     def _persist(task: dict) -> None:

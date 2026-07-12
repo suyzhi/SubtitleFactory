@@ -8,33 +8,38 @@ import time
 import json
 import shutil
 import logging
-import platform
 import wave
 import threading
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Query
 from fastapi.responses import FileResponse
 
 from ..models.database import get_db, init_db, project_to_dict, segment_to_dict
 from ..models.schemas import (
-    ProjectCreate, ProjectResponse, SegmentResponse,
+    ProjectCreate, ProjectResponse, ProjectUpdate, SegmentResponse,
     ProjectGroupUpdate, SegmentUpdate, ExportRequest, ProcessingConfig,
-    WorkflowRequest, TranscriptionRetryRequest,
+    WorkflowRequest, TranscriptionRetryRequest, ModelPrepareRequest,
 )
-from ..utils.config import PROJECTS_DIR, DOWNLOADS_DIR, MODELS_DIR
+from ..utils.config import (
+    DATA_DIR, PROJECTS_DIR, DOWNLOADS_DIR, AUDIO_DIR, SUBTITLES_DIR,
+    EXPORTS_DIR,
+)
 from ..utils.task_manager import task_manager
-from ..services.downloader import download_video, get_video_info
+from ..services.app_settings import get_app_settings
+from ..services.downloader import download_video, get_video_info, normalize_youtube_url
 from ..services.audio_extractor import extract_audio
 from ..services.transcriber import (
     PARAKEET_MODEL_IDS,
     SUPPORTED_TRANSCRIPTION_MODELS,
+    get_transcription_model_status,
+    resolve_transcription_model,
     transcribe_audio,
 )
 from ..services.parakeet_transcriber import (
     PARAKEET_SUPPORTED_LANGUAGES, PARAKEET_MODEL_ID, PARAKEET_ONNX_MODEL_ID,
-    discover_coreml_runtime,
+    prepare_parakeet_model,
 )
 from ..services.subtitle_cleaner import clean_subtitles, undo_last_clean
 from ..services.subtitle_translator import translate_subtitles
@@ -53,16 +58,136 @@ VIDEO_EXTENSIONS = {".mp4", ".mkv", ".mov", ".webm", ".avi"}
 TRANSCRIPTION_LOCK = threading.Lock()
 
 
+def _project_row(project_id: str):
+    db = get_db()
+    try:
+        return db.execute("SELECT * FROM projects WHERE id=?", (project_id,)).fetchone()
+    finally:
+        db.close()
+
+
+def _active_task_conflict(project_id: str) -> list[str]:
+    return task_manager.active_task_ids(project_id)
+
+
+def _raise_active_task_conflict(task_ids: list[str]) -> None:
+    raise HTTPException(
+        status_code=409,
+        detail={
+            "code": "ACTIVE_TASKS",
+            "message": "项目正在处理；确认终止任务后再移入回收站",
+            "task_ids": task_ids,
+        },
+    )
+
+
+def _path_is_managed(path: Path) -> bool:
+    """Only remove files below App-owned or user-selected storage roots."""
+    roots = {
+        Path(DATA_DIR), Path(PROJECTS_DIR), Path(DOWNLOADS_DIR), Path(AUDIO_DIR),
+        Path(SUBTITLES_DIR), Path(EXPORTS_DIR),
+    }
+    try:
+        custom_download_root = get_app_settings().get("download_directory")
+    except Exception:
+        custom_download_root = None
+    if custom_download_root:
+        roots.add(Path(custom_download_root))
+    resolved = path.resolve(strict=False)
+    for root in roots:
+        resolved_root = root.expanduser().resolve(strict=False)
+        if resolved == resolved_root:
+            continue
+        try:
+            resolved.relative_to(resolved_root)
+            return True
+        except ValueError:
+            continue
+    return False
+
+
+def _remove_managed_path(path: Path) -> None:
+    if not _path_is_managed(path) or not path.exists():
+        return
+    if path.is_symlink() or path.is_file():
+        path.unlink()
+    elif path.is_dir():
+        shutil.rmtree(path)
+
+
+def _purge_project_files(row) -> None:
+    """Delete only App-managed media, subtitles, thumbnails, and exports."""
+    project_id = row["id"]
+    candidates = {
+        Path(PROJECTS_DIR) / project_id,
+        Path(DOWNLOADS_DIR) / project_id,
+        Path(AUDIO_DIR) / project_id,
+        Path(SUBTITLES_DIR) / project_id,
+        Path(EXPORTS_DIR) / project_id,
+    }
+    try:
+        custom_download_root = get_app_settings().get("download_directory")
+    except Exception:
+        custom_download_root = None
+    if custom_download_root:
+        candidates.add(Path(custom_download_root).expanduser() / project_id)
+    for column in ("video_path", "audio_path", "thumbnail_path"):
+        value = row[column] if column in row.keys() else None
+        if value:
+            candidates.add(Path(value))
+    for root in (Path(SUBTITLES_DIR), Path(EXPORTS_DIR)):
+        if root.is_dir():
+            candidates.update(
+                item for item in root.iterdir()
+                if item.name.startswith(f"{project_id}_")
+            )
+    for path in sorted(candidates, key=lambda item: len(item.parts), reverse=True):
+        _remove_managed_path(path)
+
+
+def _purge_project_record(project_id: str) -> None:
+    db = get_db()
+    try:
+        # Explicit task deletion is required because the legacy tasks table has
+        # no foreign key. Other rows are listed for old databases whose foreign
+        # key definitions may predate the current schema.
+        db.execute(
+            "DELETE FROM transcription_segments WHERE project_id=?", (project_id,)
+        )
+        db.execute("DELETE FROM transcription_runs WHERE project_id=?", (project_id,))
+        db.execute("DELETE FROM segment_revisions WHERE project_id=?", (project_id,))
+        db.execute("DELETE FROM segments WHERE project_id=?", (project_id,))
+        db.execute("DELETE FROM tasks WHERE project_id=?", (project_id,))
+        db.execute("DELETE FROM projects WHERE id=?", (project_id,))
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
 def _resolve_model(model: str, language: str) -> str:
+    # Preserve the established API contract: an explicitly unknown model is a
+    # client error, while only automatic/unavailable configured choices fall
+    # back to the safe release model.
+    if model != "auto" and model not in SUPPORTED_TRANSCRIPTION_MODELS:
+        return model
     if model != "auto":
         return model
-    if language not in {"zh", "ja"} and platform.system() == "Darwin" and platform.machine() == "arm64":
-        try:
-            if discover_coreml_runtime() is not None:
-                return PARAKEET_MODEL_ID
-        except RuntimeError:
-            pass
-    return "small"
+    try:
+        settings = get_app_settings()
+    except Exception:
+        settings = {}
+    resolution = resolve_transcription_model(
+        model,
+        language,
+        default_model=settings.get("default_model") or "small",
+        custom_model_path=settings.get("custom_model_path"),
+        coreml_model_path=settings.get("coreml_model_path"),
+        coreml_cli_path=settings.get("coreml_cli_path"),
+    )
+    return resolution.model_id
 
 
 def _audio_preflight(audio_path: str | None) -> dict:
@@ -89,12 +214,10 @@ def _audio_preflight(audio_path: str | None) -> dict:
 
 @router.get("/transcription/models")
 def transcription_models(project_id: Optional[str] = None, language: str = "auto"):
-    runtime = None
-    runtime_error = None
     try:
-        runtime = discover_coreml_runtime()
-    except RuntimeError as exc:
-        runtime_error = str(exc)
+        settings = get_app_settings()
+    except Exception:
+        settings = {}
     audio = None
     if project_id:
         db = get_db()
@@ -102,24 +225,114 @@ def transcription_models(project_id: Optional[str] = None, language: str = "auto
         db.close()
         audio = _audio_preflight(row["audio_path"] if row else None)
     recommended = _resolve_model("auto", language)
+    model_definitions = [
+        ("small", "Whisper Small", ["*"]),
+        ("medium", "Whisper Medium", ["*"]),
+        ("large-v3", "Whisper Large V3", ["*"]),
+        (PARAKEET_MODEL_ID, "Parakeet V3 Core ML", sorted(PARAKEET_SUPPORTED_LANGUAGES)),
+        (PARAKEET_ONNX_MODEL_ID, "Parakeet V3 ONNX", sorted(PARAKEET_SUPPORTED_LANGUAGES)),
+    ]
+    model_items = []
+    for model_id, name, languages in model_definitions:
+        status = get_transcription_model_status(
+            model_id,
+            custom_model_path=settings.get("custom_model_path"),
+            coreml_model_path=settings.get("coreml_model_path"),
+            coreml_cli_path=settings.get("coreml_cli_path"),
+        )
+        model_items.append({
+            "id": model_id,
+            "name": name,
+            "languages": languages,
+            **status,
+            "status": status.get("state"),
+            # Old clients read ``runtime_error`` while v0.2 uses ``error``.
+            "runtime_error": status.get("error") or None,
+        })
+    if settings.get("custom_model_path"):
+        status = get_transcription_model_status(
+            "custom", custom_model_path=settings.get("custom_model_path")
+        )
+        model_items.append({
+            "id": "custom", "name": "自定义 Whisper", "languages": ["*"],
+            **status, "status": status.get("state"),
+            "runtime_error": status.get("error") or None,
+        })
     return {
         "recommended_model": recommended,
         "audio": audio,
-        "models": [
-            {"id": "small", "name": "Whisper Small", "ready": True, "download_required": False,
-             "languages": ["auto", "en", "zh", "ja"]},
-            {"id": "medium", "name": "Whisper Medium", "ready": True, "download_required": False,
-             "languages": ["auto", "en", "zh", "ja"]},
-            {"id": "large-v3", "name": "Whisper Large V3", "ready": True, "download_required": False,
-             "languages": ["auto", "en", "zh", "ja"]},
-            {"id": PARAKEET_MODEL_ID, "name": "Parakeet V3 Core ML",
-             "ready": runtime is not None, "download_required": runtime is None,
-             "runtime_error": runtime_error, "languages": sorted(PARAKEET_SUPPORTED_LANGUAGES)},
-            {"id": PARAKEET_ONNX_MODEL_ID, "name": "Parakeet V3 ONNX",
-             "ready": (MODELS_DIR / f"sherpa-onnx-nemo-{PARAKEET_ONNX_MODEL_ID}").is_dir(),
-             "download_required": True, "download_bytes": 465 * 1024 * 1024,
-             "languages": sorted(PARAKEET_SUPPORTED_LANGUAGES)},
-        ],
+        "models": model_items,
+    }
+
+
+@router.get("/transcription/models/{model_id}/validate")
+def validate_transcription_model(model_id: str):
+    try:
+        settings = get_app_settings()
+    except Exception:
+        settings = {}
+    status = get_transcription_model_status(
+        model_id,
+        custom_model_path=settings.get("custom_model_path"),
+        coreml_model_path=settings.get("coreml_model_path"),
+        coreml_cli_path=settings.get("coreml_cli_path"),
+    )
+    names = {
+        "small": "Whisper Small",
+        "medium": "Whisper Medium",
+        "large-v3": "Whisper Large V3",
+        "custom": "自定义 Whisper",
+        PARAKEET_MODEL_ID: "Parakeet V3 Core ML",
+        PARAKEET_ONNX_MODEL_ID: "Parakeet V3 ONNX",
+    }
+    languages = (
+        sorted(PARAKEET_SUPPORTED_LANGUAGES)
+        if model_id in PARAKEET_MODEL_IDS else ["*"]
+    )
+    return {
+        "id": model_id,
+        "name": names.get(model_id, model_id),
+        "languages": languages,
+        **status,
+        "status": status.get("state"),
+        "runtime_error": status.get("error") or None,
+    }
+
+
+def _do_prepare_transcription_model(
+    task_id: str, model_id: str, repair: bool, settings: dict,
+):
+    prepare_parakeet_model(
+        task_id,
+        model_id,
+        repair=repair,
+        coreml_model_dir=settings.get("coreml_model_path"),
+        coreml_cli_path=settings.get("coreml_cli_path"),
+    )
+
+
+@router.post("/transcription/models/{model_id}/prepare")
+def prepare_transcription_model(model_id: str, request: ModelPrepareRequest):
+    if model_id not in PARAKEET_MODEL_IDS:
+        raise HTTPException(
+            400,
+            detail={
+                "code": "MODEL_PREPARE_UNSUPPORTED",
+                "message": "Whisper 模型会在首次转写时自动下载",
+            },
+        )
+    try:
+        settings = get_app_settings()
+    except Exception:
+        settings = {}
+    task_id = task_manager.create_task(None, "prepare_model")
+    task_manager.run_background(
+        task_id, _do_prepare_transcription_model, model_id, request.repair, settings,
+    )
+    return {
+        "task_id": task_id,
+        "model_id": model_id,
+        "message": "正在修复模型" if request.repair else "正在准备模型",
     }
 
 
@@ -128,13 +341,14 @@ def transcription_models(project_id: Optional[str] = None, language: str = "auto
 # ============================
 
 @router.get("/projects")
-def list_projects():
-    """获取所有项目列表"""
+def list_projects(deleted: bool = False):
+    """获取项目列表；默认隐藏回收站项目。"""
     init_db()
     db = get_db()
     rows = db.execute(
         "SELECT p.*, (SELECT COUNT(*) FROM segments s WHERE s.project_id = p.id) as segments_count "
-        "FROM projects p ORDER BY p.updated_at DESC"
+        f"FROM projects p WHERE p.deleted_at IS {'NOT ' if deleted else ''}NULL "
+        "ORDER BY COALESCE(p.deleted_at, p.updated_at) DESC"
     ).fetchall()
     db.close()
     return {
@@ -142,6 +356,74 @@ def list_projects():
             {**project_to_dict(r), "segments_count": r["segments_count"]}
             for r in rows
         ]
+    }
+
+
+@router.delete("/projects/trash")
+def empty_project_trash(confirm: bool = Query(False)):
+    """清空回收站；必须显式确认，且不会删除回收站外的项目。"""
+    if not confirm:
+        raise HTTPException(
+            400,
+            detail={"code": "CONFIRMATION_REQUIRED", "message": "清空回收站需要显式确认"},
+        )
+    db = get_db()
+    rows = db.execute(
+        "SELECT * FROM projects WHERE deleted_at IS NOT NULL ORDER BY deleted_at"
+    ).fetchall()
+    db.close()
+
+    active = {
+        row["id"]: _active_task_conflict(row["id"])
+        for row in rows
+    }
+    active = {project_id: ids for project_id, ids in active.items() if ids}
+    if active:
+        raise HTTPException(
+            409,
+            detail={
+                "code": "ACTIVE_TASKS",
+                "message": "回收站中仍有项目任务正在结束，请稍后重试",
+                "projects": active,
+            },
+        )
+
+    for row in rows:
+        try:
+            _purge_project_files(row)
+        except OSError as exc:
+            raise HTTPException(
+                500,
+                detail={
+                    "code": "FILE_CLEANUP_FAILED",
+                    "message": "项目文件清理失败，未删除数据库记录",
+                    "project_id": row["id"],
+                    "reason": str(exc),
+                },
+            ) from exc
+
+    db = get_db()
+    try:
+        project_ids = [row["id"] for row in rows]
+        for project_id in project_ids:
+            db.execute(
+                "DELETE FROM transcription_segments WHERE project_id=?", (project_id,)
+            )
+            db.execute("DELETE FROM transcription_runs WHERE project_id=?", (project_id,))
+            db.execute("DELETE FROM segment_revisions WHERE project_id=?", (project_id,))
+            db.execute("DELETE FROM segments WHERE project_id=?", (project_id,))
+            db.execute("DELETE FROM tasks WHERE project_id=?", (project_id,))
+        db.execute("DELETE FROM projects WHERE deleted_at IS NOT NULL")
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+    return {
+        "deleted_count": len(rows),
+        "project_ids": [row["id"] for row in rows],
+        "message": "回收站已清空",
     }
 
 
@@ -185,6 +467,123 @@ def get_project(project_id: str):
     return {**project_to_dict(row), "segments_count": row["segments_count"]}
 
 
+@router.patch("/projects/{project_id}", response_model=ProjectResponse)
+def update_project(project_id: str, update: ProjectUpdate):
+    """重命名项目。"""
+    now = time.strftime("%Y-%m-%d %H:%M:%S")
+    db = get_db()
+    try:
+        cursor = db.execute(
+            """UPDATE projects SET title=?, updated_at=?
+               WHERE id=? AND deleted_at IS NULL""",
+            (update.title, now, project_id),
+        )
+        if cursor.rowcount == 0:
+            db.rollback()
+            raise HTTPException(404, "项目不存在")
+        row = db.execute(
+            "SELECT p.*, (SELECT COUNT(*) FROM segments s WHERE s.project_id=p.id) segments_count "
+            "FROM projects p WHERE p.id=?",
+            (project_id,),
+        ).fetchone()
+        db.commit()
+    finally:
+        db.close()
+    return {**project_to_dict(row), "segments_count": row["segments_count"]}
+
+
+@router.post("/projects/{project_id}/trash")
+def trash_project(project_id: str, terminate: bool = Query(False)):
+    """将项目移入回收站，保留所有媒体、字幕、任务和导出文件。"""
+    row = _project_row(project_id)
+    if not row:
+        raise HTTPException(404, "项目不存在")
+    if row["deleted_at"]:
+        return {
+            "project": project_to_dict(row),
+            "terminated_task_ids": [],
+            "message": "项目已在回收站",
+        }
+
+    active_task_ids = _active_task_conflict(project_id)
+    if active_task_ids and not terminate:
+        _raise_active_task_conflict(active_task_ids)
+    terminated_task_ids = (
+        task_manager.cancel_project_tasks(project_id) if active_task_ids else []
+    )
+
+    now = time.strftime("%Y-%m-%d %H:%M:%S")
+    db = get_db()
+    try:
+        db.execute(
+            "UPDATE projects SET deleted_at=?, updated_at=? WHERE id=?",
+            (now, now, project_id),
+        )
+        db.commit()
+        updated = db.execute("SELECT * FROM projects WHERE id=?", (project_id,)).fetchone()
+    finally:
+        db.close()
+    return {
+        "project": project_to_dict(updated),
+        "terminated_task_ids": terminated_task_ids,
+        "message": "项目已移入回收站",
+    }
+
+
+@router.post("/projects/{project_id}/restore")
+def restore_project(project_id: str):
+    """从回收站恢复项目。"""
+    now = time.strftime("%Y-%m-%d %H:%M:%S")
+    db = get_db()
+    try:
+        row = db.execute("SELECT * FROM projects WHERE id=?", (project_id,)).fetchone()
+        if not row:
+            raise HTTPException(404, "项目不存在")
+        db.execute(
+            "UPDATE projects SET deleted_at=NULL, updated_at=? WHERE id=?",
+            (now, project_id),
+        )
+        db.commit()
+        restored = db.execute("SELECT * FROM projects WHERE id=?", (project_id,)).fetchone()
+    finally:
+        db.close()
+    return {"project": project_to_dict(restored), "message": "项目已恢复"}
+
+
+@router.delete("/projects/{project_id}")
+def delete_project(
+    project_id: str,
+    permanent: bool = Query(False),
+    terminate: bool = Query(False),
+):
+    """默认移入回收站；显式 permanent=true 才彻底删除。"""
+    if not permanent:
+        return trash_project(project_id, terminate=terminate)
+
+    row = _project_row(project_id)
+    if not row:
+        raise HTTPException(404, "项目不存在")
+    active_task_ids = _active_task_conflict(project_id)
+    if active_task_ids:
+        # Permanent cleanup must not race a worker that may still be returning
+        # from FFmpeg/yt-dlp/ML inference. Move to trash first to terminate it,
+        # then retry permanent deletion once no active task remains.
+        _raise_active_task_conflict(active_task_ids)
+    try:
+        _purge_project_files(row)
+    except OSError as exc:
+        raise HTTPException(
+            500,
+            detail={
+                "code": "FILE_CLEANUP_FAILED",
+                "message": "项目文件清理失败，数据库记录已保留",
+                "reason": str(exc),
+            },
+        ) from exc
+    _purge_project_record(project_id)
+    return {"project_id": project_id, "message": "项目已永久删除"}
+
+
 @router.patch("/projects/{project_id}/group", response_model=ProjectResponse)
 def update_project_group(project_id: str, update: ProjectGroupUpdate):
     """设置项目分组；null、空字符串或纯空白表示未分组。"""
@@ -223,20 +622,33 @@ def start_download(project_id: str, url: str = Form(...)):
         db.close()
         raise HTTPException(404, "项目不存在")
 
-    # 更新源 URL
+    normalized_url = normalize_youtube_url(url)
+    # 保存规范化 URL，避免 t=110s 等播放定位参数被当作下载范围。
     db.execute("UPDATE projects SET source_url = ?, updated_at = ? WHERE id = ?",
-               (url, time.strftime("%Y-%m-%d %H:%M:%S"), project_id))
+               (normalized_url, time.strftime("%Y-%m-%d %H:%M:%S"), project_id))
     db.commit()
     db.close()
 
     task_id = task_manager.create_task(project_id, "download")
-    task_manager.run_background(task_id, _do_download, project_id, url)
+    task_manager.run_background(task_id, _do_download, project_id, normalized_url)
     return {"task_id": task_id, "message": "下载任务已创建"}
 
 
 def _do_download(task_id: str, project_id: str, url: str):
     """后台执行下载"""
-    video_path = download_video(task_id, url, project_id)
+    try:
+        app_settings = get_app_settings()
+    except Exception:
+        app_settings = {}
+    video_path = download_video(
+        task_id,
+        url,
+        project_id,
+        ffmpeg_path=app_settings.get("ffmpeg_path"),
+        download_dir=app_settings.get("download_directory"),
+        quality=app_settings.get("download_quality") or "best",
+        container=app_settings.get("download_container") or "mp4",
+    )
     task_manager.checkpoint(task_id)
 
     db = get_db()

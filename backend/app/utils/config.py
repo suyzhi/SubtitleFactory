@@ -3,6 +3,7 @@
 """
 
 import os
+import sys
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -20,7 +21,10 @@ AUDIO_DIR = DATA_DIR / "audio"
 SUBTITLES_DIR = DATA_DIR / "subtitles"
 EXPORTS_DIR = DATA_DIR / "exports"
 MODELS_DIR = DATA_DIR / "models"
-LOGS_DIR = BASE_DIR / "logs"
+# Runtime-created files must never be written beside a frozen sidecar inside
+# the read-only App bundle.  Tauri supplies SUBTITLE_FACTORY_DATA_DIR in a
+# release build; development and tests retain the deterministic fallback above.
+LOGS_DIR = DATA_DIR / "logs"
 DB_PATH = DATA_DIR / "subtitles.db"
 
 # 创建目录
@@ -32,8 +36,31 @@ LLM_API_KEY = os.getenv("LLM_API_KEY", "")
 LLM_BASE_URL = os.getenv("LLM_BASE_URL", "https://api.deepseek.com/v1")
 LLM_MODEL = os.getenv("LLM_MODEL", "deepseek-chat")
 
-# Whisper
-WHISPER_MODEL = os.getenv("WHISPER_MODEL", "small")
+def is_frozen_app() -> bool:
+    """Whether the backend is running from the packaged PyInstaller sidecar."""
+    return bool(getattr(sys, "frozen", False))
+
+
+def environment_path_overrides_enabled() -> bool:
+    """Allow developer path overrides without making them release defaults.
+
+    Frozen builds ignore ambient path overrides unless the user deliberately
+    enables the advanced escape hatch.  The dedicated bundled-runtime variables
+    remain available to the Tauri launcher and are handled separately.
+    """
+    return not is_frozen_app() or os.getenv(
+        "SUBTITLE_FACTORY_ALLOW_ENV_PATHS", ""
+    ).strip().lower() in {"1", "true", "yes", "on"}
+
+
+# Whisper. A release always starts from the safe, supported Small model unless
+# an App setting explicitly chooses something else.
+WHISPER_MODEL = (
+    os.getenv("WHISPER_MODEL", "small")
+    if environment_path_overrides_enabled()
+    else "small"
+)
+WHISPER_MODELS_DIR = MODELS_DIR / "whisper"
 
 # 外部工具路径
 YT_DLP_PATH = os.getenv("YT_DLP_PATH", "yt-dlp")
