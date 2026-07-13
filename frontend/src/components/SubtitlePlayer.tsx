@@ -9,6 +9,7 @@ import captionsIcon from '../assets/player-icons/captions.png';
 import fullscreenIcon from '../assets/player-icons/fullscreen.png';
 import theaterIcon from '../assets/player-icons/theater.png';
 import { SUBTITLE_FONT_OPTIONS } from '../subtitleStyle';
+import AppSelect from './AppSelect';
 
 interface Props {
   videoUrl: string;
@@ -231,11 +232,7 @@ const SubtitlePlayer = forwardRef<SubtitlePlayerHandle, Props>(function Subtitle
               onChange={event => { const next = Number(event.target.value); setVolume(next); if (videoRef.current) videoRef.current.volume = next; }} />
             <span className="player-time">{timecode(time)} / {timecode(duration)}</span>
             <span className="control-spacer" />
-            <select className="rate-select" aria-label="播放速度" value={rate} onChange={event => {
-              const next = Number(event.target.value); setRate(next); if (videoRef.current) videoRef.current.playbackRate = next;
-            }}>
-              {[0.5, 0.75, 1, 1.25, 1.5, 2].map(value => <option key={value} value={value}>{value}×</option>)}
-            </select>
+            <AppSelect className="rate-select" label="播放速度" value={String(rate)} onChange={value=>{const next=Number(value);setRate(next);if(videoRef.current)videoRef.current.playbackRate=next;}} options={[0.5,0.75,1,1.25,1.5,2].map(value=>({value:String(value),label:`${value}×`}))}/>
             <button className={`player-icon-btn ${style.mode !== 'off' ? 'active' : ''}`} aria-label="字幕设置"
               aria-haspopup="dialog" aria-expanded={showSubtitleMenu}
               onClick={() => setShowSubtitleMenu(value => !value)}><ControlIcon src={captionsIcon} /></button>
@@ -251,14 +248,10 @@ const SubtitlePlayer = forwardRef<SubtitlePlayerHandle, Props>(function Subtitle
       {showSubtitleMenu && <div className="player-subtitle-menu" role="dialog" aria-label="字幕显示设置">
         <div className="player-menu-title"><strong>字幕显示</strong><button aria-label="关闭字幕设置" onClick={() => setShowSubtitleMenu(false)}>✕</button></div>
         <label>显示内容
-          <select value={style.mode} onChange={event => updateStyle({ mode: event.target.value as SubtitleDisplayMode })}>
-            {MODE_OPTIONS.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
-          </select>
+          <AppSelect value={style.mode} onChange={mode=>updateStyle({mode:mode as SubtitleDisplayMode})} label="显示内容" options={MODE_OPTIONS}/>
         </label>
         <label>字幕字体
-          <select value={style.fontFamily} onChange={event => updateStyle({ fontFamily: event.target.value })}>
-            {SUBTITLE_FONT_OPTIONS.map(option => <option key={option.label} value={option.value}>{option.label}</option>)}
-          </select>
+          <AppSelect value={style.fontFamily} onChange={fontFamily=>updateStyle({fontFamily})} label="字幕字体" searchable options={SUBTITLE_FONT_OPTIONS}/>
         </label>
         <div className="player-color-grid">
           <label className="player-color-field">原文颜色 <span>{style.originalTextColor.toUpperCase()}</span>
@@ -283,9 +276,7 @@ const SubtitlePlayer = forwardRef<SubtitlePlayerHandle, Props>(function Subtitle
             onChange={event => updateStyle({ verticalPosition: Number(event.target.value) })} />
         </label>
         <label>背景
-          <select value={style.backgroundMode} onChange={event => updateStyle({ backgroundMode: event.target.value as SubtitleStyleSettings['backgroundMode'] })}>
-            <option value="black">半透明黑底</option><option value="none">无背景</option><option value="white">浅色背景</option>
-          </select>
+          <AppSelect value={style.backgroundMode} onChange={backgroundMode=>updateStyle({backgroundMode:backgroundMode as SubtitleStyleSettings['backgroundMode']})} label="字幕背景" options={[{value:'black',label:'半透明黑底'},{value:'none',label:'无背景'},{value:'white',label:'浅色背景'}]}/>
         </label>
       </div>}
     </div>

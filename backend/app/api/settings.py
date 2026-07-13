@@ -17,6 +17,7 @@ from ..models.schemas import (
     AppSettingsUpdate, PathValidationRequest,
 )
 from ..services.app_settings import get_app_settings, save_app_settings
+from ..services.local_models import get_imported
 from ..services.ai_settings import (
     PROVIDER_PRESETS,
     get_ai_settings,
@@ -204,7 +205,7 @@ def _repair_invalid_settings(settings: dict[str, Any]) -> tuple[dict[str, Any], 
     warnings: list[dict] = []
     if repaired.get("default_model") == "auto":
         repaired["default_model"] = "small"
-    elif repaired.get("default_model") not in _MODEL_IDS:
+    elif repaired.get("default_model") not in _MODEL_IDS and not _is_registered_model(repaired.get("default_model")):
         warnings.append({
             "field": "default_model", "code": "UNSUPPORTED_MODEL",
             "message": "默认模型不可用，已回退到 Whisper Small",
@@ -246,6 +247,16 @@ def _repair_invalid_settings(settings: dict[str, Any]) -> tuple[dict[str, Any], 
     }:
         repaired["default_model"] = "small"
     return repaired, warnings
+
+
+def _is_registered_model(model_id: Any) -> bool:
+    if not isinstance(model_id, str) or not model_id.startswith("local:"):
+        return False
+    try:
+        get_imported(model_id)
+    except ValueError:
+        return False
+    return True
 
 
 def read_validated_app_settings(*, persist_repairs: bool = True) -> tuple[dict, list[dict]]:

@@ -2,6 +2,7 @@
 
 import type { SubtitleStyleSettings, SubtitleDisplayMode } from '../types';
 import { DEFAULT_SUBTITLE_STYLE, saveSubtitleStyle, SUBTITLE_FONT_OPTIONS } from '../subtitleStyle';
+import AppSelect from './AppSelect';
 
 const TEXT_COLORS = [
   { label: '白色', value: '#ffffff' },
@@ -49,17 +50,11 @@ export default function SubtitleStylePanel({ style, onChange, collapsed, onToggl
         <div className="subtitle-style-body">
           {/* 显示模式 */}
           <label className="style-label">显示模式
-            <select value={style.mode} onChange={e => update({ mode: e.target.value as SubtitleDisplayMode })}>
-              {MODE_OPTIONS.map(o => (
-                <option key={o.value} value={o.value}>{o.label}</option>
-              ))}
-            </select>
+            <AppSelect value={style.mode} onChange={mode=>update({mode:mode as SubtitleDisplayMode})} label="显示模式" options={MODE_OPTIONS}/>
           </label>
 
           <label className="style-label">字幕字体
-            <select value={style.fontFamily} onChange={e => update({ fontFamily: e.target.value })}>
-              {SUBTITLE_FONT_OPTIONS.map(option => <option key={option.label} value={option.value}>{option.label}</option>)}
-            </select>
+            <AppSelect value={style.fontFamily} onChange={fontFamily=>update({fontFamily})} label="字幕字体" searchable options={SUBTITLE_FONT_OPTIONS}/>
           </label>
 
           {/* 垂直位置 */}
@@ -121,11 +116,7 @@ export default function SubtitleStylePanel({ style, onChange, collapsed, onToggl
 
           {/* 背景模式 */}
           <label className="style-label">背景
-            <select value={style.backgroundMode} onChange={e => update({ backgroundMode: e.target.value as any })}>
-              <option value="none">无背景</option>
-              <option value="black">半透明黑底</option>
-              <option value="white">半透明白底</option>
-            </select>
+            <AppSelect value={style.backgroundMode} onChange={backgroundMode=>update({backgroundMode:backgroundMode as SubtitleStyleSettings['backgroundMode']})} label="字幕背景" options={[{value:'none',label:'无背景'},{value:'black',label:'半透明黑底'},{value:'white',label:'半透明白底'}]}/>
           </label>
 
           {/* 阴影 */}

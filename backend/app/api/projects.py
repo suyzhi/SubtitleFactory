@@ -10,6 +10,7 @@ import shutil
 import logging
 import wave
 import threading
+import importlib.util
 from pathlib import Path
 from typing import Optional
 
@@ -58,6 +59,60 @@ router = APIRouter(prefix="/api")
 
 VIDEO_EXTENSIONS = {".mp4", ".mkv", ".mov", ".webm", ".avi"}
 TRANSCRIPTION_LOCK = threading.Lock()
+
+RUNTIME_LABELS = {
+    "cpu": ("CPU", "faster-whisper / sherpa-onnx"),
+    "mlx": ("Apple GPU", "MLX Whisper · Metal"),
+    "coreml": ("Apple Neural Engine / GPU", "sherpa-onnx · Core ML"),
+    "external_coreml": ("外部 Core ML", "Memo Parakeet CLI"),
+}
+
+def _runtime_ids(model_id: str, imported: dict | None = None) -> list[str]:
+    if imported: return list(imported.get("runtimes") or [])
+    if model_id in {"small", "medium", "large-v3"}: return ["cpu", "mlx"]
+    if model_id == PARAKEET_MODEL_ID: return ["external_coreml"]
+    if model_id == PARAKEET_ONNX_MODEL_ID: return ["cpu", "coreml"]
+    return ["cpu"]
+
+def _runtime_available(runtime_id: str) -> tuple[bool, str]:
+    if runtime_id == "mlx":
+        ok = importlib.util.find_spec("mlx_whisper") is not None
+        return ok, "MLX Whisper 已随 App 提供" if ok else "当前运行包缺少 MLX Whisper"
+    if runtime_id == "coreml":
+        try:
+            import onnxruntime
+            ok = "CoreMLExecutionProvider" in onnxruntime.get_available_providers()
+        except Exception:
+            ok = False
+        return ok, "Core ML Execution Provider 可用" if ok else "当前 ONNX Runtime 不支持 Core ML"
+    return True, "可用"
+
+def _runtime_options(model_id: str, imported: dict | None = None, model_ready: bool = True) -> list[dict]:
+    result=[]
+    for runtime_id in _runtime_ids(model_id, imported):
+        available, reason = _runtime_available(runtime_id)
+        if (runtime_id == "external_coreml" or imported) and not model_ready:
+            available, reason = False, "外部模型路径或配套 CLI 需要重新校验"
+        label, engine = RUNTIME_LABELS.get(runtime_id, (runtime_id, runtime_id))
+        result.append({"id":runtime_id,"name":label,"engine":engine,"available":available,"reason":reason})
+    return result
+
+def _select_runtime(model_id: str, requested: str | None, settings: dict, imported: dict | None = None) -> str:
+    remembered=(settings.get("transcription_runtime_by_model") or {}).get(model_id)
+    selected=requested or remembered
+    model_ready=True
+    if imported:
+        model_ready=bool(validate_imported(model_id).get("ready"))
+    elif model_id==PARAKEET_MODEL_ID:
+        model_ready=bool(get_transcription_model_status(model_id,coreml_model_path=settings.get("coreml_model_path"),coreml_cli_path=settings.get("coreml_cli_path")).get("ready"))
+    options=_runtime_options(model_id, imported, model_ready); allowed={item["id"]:item for item in options}
+    if not selected:
+        raise HTTPException(409, detail={"code":"RUNTIME_SELECTION_REQUIRED","message":"首次使用此模型前请选择运行设备","model_id":model_id,"runtimes":options})
+    if selected not in allowed:
+        raise HTTPException(400, detail={"code":"RUNTIME_NOT_SUPPORTED","message":"所选运行设备不支持当前模型","model_id":model_id,"runtimes":options})
+    if not allowed[selected]["available"]:
+        raise HTTPException(409, detail={"code":"RUNTIME_UNAVAILABLE","message":allowed[selected]["reason"],"model_id":model_id,"runtimes":options})
+    return selected
 
 
 def _project_row(project_id: str):
@@ -250,8 +305,8 @@ def transcription_models(project_id: Optional[str] = None, language: str = "auto
             "status": status.get("state"),
             # Old clients read ``runtime_error`` while v0.2 uses ``error``.
             "runtime_error": status.get("error") or None,
-            "runtimes": (["cpu", "mlx"] if model_id in {"small", "medium", "large-v3"}
-                         else ["external_coreml"] if model_id == PARAKEET_MODEL_ID else ["cpu", "coreml"]),
+            "runtimes": _runtime_options(model_id, model_ready=bool(status.get("ready") or model_id != PARAKEET_MODEL_ID)),
+            "selected_runtime": (settings.get("transcription_runtime_by_model") or {}).get(model_id),
         })
     if settings.get("custom_model_path"):
         status = get_transcription_model_status(
@@ -261,13 +316,17 @@ def transcription_models(project_id: Optional[str] = None, language: str = "auto
             "id": "custom", "name": "自定义 Whisper", "languages": ["*"],
             **status, "status": status.get("state"),
             "runtime_error": status.get("error") or None,
+            "runtimes": _runtime_options("custom", model_ready=bool(status.get("ready"))),
+            "selected_runtime": (settings.get("transcription_runtime_by_model") or {}).get("custom"),
         })
     for imported in get_imported():
         checked = validate_imported(imported["id"])
         model_items.append({"id": imported["id"], "name": imported["display_name"], "languages": ["*"],
                             "ready": checked["ready"], "source": "imported_reference", "state": checked["status"],
                             "status": checked["status"], "download_required": False, "runtime_error": checked.get("last_error") or None,
-                            "runtimes": imported["runtimes"], "format": imported["format"], "version": imported["version"]})
+                            "runtimes": _runtime_options(imported["id"], imported, checked["ready"]),
+                            "selected_runtime": (settings.get("transcription_runtime_by_model") or {}).get(imported["id"]),
+                            "format": imported["format"], "version": imported["version"]})
     return {
         "recommended_model": recommended,
         "audio": audio,
@@ -277,7 +336,9 @@ def transcription_models(project_id: Optional[str] = None, language: str = "auto
 
 @router.post("/transcription/models/scan")
 def scan_local_models(request: ModelScanRequest):
-    try: return {"candidates": scan_models(request.root_path)}
+    try:
+        models=scan_models(request.root_path)
+        return {"models":models,"candidates":models}
     except ValueError as exc: raise HTTPException(400, str(exc)) from exc
 
 
@@ -718,7 +779,7 @@ def _do_download(task_id: str, project_id: str, url: str):
 @router.post("/projects/{project_id}/import-local")
 async def import_local_video(
     project_id: str, file: UploadFile = File(...),
-    autostart: bool = Form(False), model: str = Form("auto"), language: str = Form("auto"),
+    autostart: bool = Form(False), model: str = Form("auto"), language: str = Form("auto"), runtime: Optional[str] = Form(None),
 ):
     """导入本地视频文件"""
     db = get_db()
@@ -771,9 +832,12 @@ async def import_local_video(
     }
     if autostart is True:
         resolved_model = _resolve_model(model, language)
+        settings=get_app_settings()
+        imported=get_imported(resolved_model) if resolved_model.startswith("local:") else None
+        selected_runtime=_select_runtime(resolved_model, runtime, settings, imported)
         task_id = task_manager.create_task(project_id, "workflow")
         task_manager.run_background(
-            task_id, _do_workflow, project_id, resolved_model, language, None,
+            task_id, _do_workflow, project_id, resolved_model, language, None, selected_runtime,
         )
         result.update({"task_id": task_id, "message": "视频已导入，正在自动生成字幕"})
     return result
@@ -828,6 +892,7 @@ def start_transcribe(project_id: str, language: str = Form("auto"), model: str =
     """开始转写音频（后台任务）"""
     # Direct Python callers (including the compatibility test suite) receive
     # FastAPI's Form sentinel instead of a parsed request value.
+    direct_call_sentinel = runtime is not None and not isinstance(runtime, str)
     if not isinstance(runtime, str):
         runtime = None
     model = _resolve_model(model, language)
@@ -865,10 +930,13 @@ def start_transcribe(project_id: str, language: str = Form("auto"), model: str =
     db.commit()
     db.close()
 
-    if runtime:
-        from ..services.app_settings import save_app_settings
-        settings=get_app_settings(); mapping=dict(settings.get("transcription_runtime_by_model") or {}); mapping[model]=runtime
-        save_app_settings({"transcription_runtime_by_model":mapping})
+    from ..services.app_settings import save_app_settings
+    settings=get_app_settings(); imported=get_imported(model) if model.startswith("local:") else None
+    if direct_call_sentinel and not runtime:
+        runtime=_runtime_ids(model,imported)[0]
+    runtime=_select_runtime(model,runtime,settings,imported)
+    mapping=dict(settings.get("transcription_runtime_by_model") or {}); mapping[model]=runtime
+    save_app_settings({"transcription_runtime_by_model":mapping})
     task_id = task_manager.create_task(project_id, "transcribe")
     task_manager.run_background(task_id, _do_transcribe, project_id, row["audio_path"], language, model, runtime)
     return {"task_id": task_id, "message": "转写任务已创建"}
@@ -909,16 +977,21 @@ def start_workflow(project_id: str, request: WorkflowRequest):
     if not row["video_path"] and not source_url:
         raise HTTPException(400, "项目没有可处理的视频或链接")
     model = _resolve_model(request.model, request.language)
+    settings=get_app_settings(); imported=get_imported(model) if model.startswith("local:") else None
+    runtime=_select_runtime(model,request.runtime,settings,imported)
+    from ..services.app_settings import save_app_settings
+    mapping=dict(settings.get("transcription_runtime_by_model") or {});mapping[model]=runtime
+    save_app_settings({"transcription_runtime_by_model":mapping})
     task_id = task_manager.create_task(project_id, "workflow")
     task_manager.run_background(
         task_id, _do_workflow, project_id, model, request.language,
-        source_url if not row["video_path"] else None,
+        source_url if not row["video_path"] else None, runtime,
     )
     return {"task_id": task_id, "message": "自动字幕工作流已创建", "model": model}
 
 
 def _do_workflow(
-    task_id: str, project_id: str, model: str, language: str, source_url: str | None,
+    task_id: str, project_id: str, model: str, language: str, source_url: str | None, runtime: str,
 ):
     stages = {
         "download": "waiting", "extract_audio": "waiting", "transcribe": "waiting",
@@ -949,7 +1022,7 @@ def _do_workflow(
     db.close()
     stages["transcribe"] = "running"
     task_manager.update_task(task_id, step="transcribe", details={"stages": stages, "resolved_model": model})
-    _do_transcribe(task_id, project_id, audio_path, language, model)
+    _do_transcribe(task_id, project_id, audio_path, language, model, runtime)
     stages["transcribe"] = "success"
     task_manager.update_task(
         task_id, step="workflow_done", progress=100,
@@ -969,8 +1042,10 @@ def retry_transcription(project_id: str, request: TranscriptionRetryRequest):
     preflight = _audio_preflight(row["audio_path"])
     if not preflight["ok"]:
         raise HTTPException(400, f"{preflight['error_code']}: {preflight['message']}")
+    settings=get_app_settings(); imported=get_imported(model) if model.startswith("local:") else None
+    runtime=_select_runtime(model,request.runtime,settings,imported)
     task_id = task_manager.create_task(project_id, "transcribe")
-    task_manager.run_background(task_id, _do_transcribe, project_id, row["audio_path"], request.language, model)
+    task_manager.run_background(task_id, _do_transcribe, project_id, row["audio_path"], request.language, model, runtime)
     return {"task_id": task_id, "message": "转写重试任务已创建", "model": model}
 
 

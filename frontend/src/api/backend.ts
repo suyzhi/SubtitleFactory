@@ -1,6 +1,6 @@
 // 字幕工厂 - Backend API Client
 
-const BASE_URL = 'http://127.0.0.1:8000';
+const BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000';
 
 import type {
   Project, SubtitleSegment, TaskStatus,
@@ -79,7 +79,7 @@ export async function startDownload(projectId: string, url: string): Promise<{ t
 
 export async function importLocalVideo(
   projectId: string, file: File, options?: {
-    autostart?: boolean; model?: string; language?: string; onProgress?: (percent: number) => void;
+    autostart?: boolean; model?: string; language?: string; runtime?:string; onProgress?: (percent: number) => void;
   }
 ): Promise<{ message: string; video_path: string; task_id?: string }> {
   return new Promise((resolve, reject) => {
@@ -88,6 +88,7 @@ export async function importLocalVideo(
     form.append('autostart', String(options?.autostart ?? false));
     form.append('model', options?.model || 'auto');
     form.append('language', options?.language || 'auto');
+    if(options?.runtime) form.append('runtime',options.runtime);
     const xhr = new XMLHttpRequest();
     xhr.open('POST', `${BASE_URL}/api/projects/${projectId}/import-local`);
     xhr.upload.onprogress = event => {
@@ -121,13 +122,13 @@ export async function startTranscribe(projectId: string, language: string = 'aut
 }
 
 export async function startWorkflow(
-  projectId: string, data: { model: string; language: string; source_url?: string }
+  projectId: string, data: { model: string; language: string; runtime?:string; source_url?: string }
 ): Promise<{ task_id: string; message: string; model: string }> {
   return request(`/api/projects/${projectId}/workflow`, { method: 'POST', body: JSON.stringify(data) });
 }
 
 export async function retryTranscription(
-  projectId: string, data: { model: string; language: string }
+  projectId: string, data: { model: string; language: string; runtime?:string }
 ): Promise<{ task_id: string; message: string; model: string }> {
   return request(`/api/projects/${projectId}/transcribe/retry`, { method: 'POST', body: JSON.stringify(data) });
 }
@@ -136,7 +137,8 @@ export interface TranscriptionModelStatus {
   id: string; name: string; ready: boolean; download_required: boolean;
   download_bytes?: number; runtime_error?: string | null; languages: string[];
   source?: string; status?: string; path?: string | null;
-  runtimes?: { id: string; name: string; available?: boolean }[];
+  runtimes?: { id: string; name: string; engine?:string; available:boolean; reason?:string }[];
+  selected_runtime?:string|null; format?:string; version?:string;
 }
 
 export async function updateProjectTargetLanguage(projectId: string, target_language: string): Promise<Project> {

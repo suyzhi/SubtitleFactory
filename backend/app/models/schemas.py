@@ -124,6 +124,7 @@ class ProcessingConfig(BaseModel):
 class WorkflowRequest(BaseModel):
     model: str = "auto"
     language: str = "auto"
+    runtime: Optional[str] = None
     source_url: Optional[str] = None
     stop_after: Literal["transcribe"] = "transcribe"
 
@@ -131,6 +132,7 @@ class WorkflowRequest(BaseModel):
 class TranscriptionRetryRequest(BaseModel):
     model: str = "small"
     language: str = "auto"
+    runtime: Optional[str] = None
 
 
 class ModelPrepareRequest(BaseModel):

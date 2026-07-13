@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import * as api from '../api/backend';
 import type { AIProviderPreset, AISettings } from '../types';
+import AppSelect from './AppSelect';
 
 interface Props {
   open: boolean;
@@ -85,9 +86,7 @@ export default function AISettingsDialog({ open, onClose, onSaved }: Props) {
 
         <div className="ai-settings-form">
           <label>服务商
-            <select value={settings.provider} onChange={event => selectProvider(event.target.value)}>
-              {presets.map(preset => <option key={preset.id} value={preset.id}>{preset.name}</option>)}
-            </select>
+            <AppSelect value={settings.provider} onChange={selectProvider} label="AI 服务商" options={presets.map(preset=>({value:preset.id,label:preset.name,description:preset.model}))}/>
           </label>
           <label>Base URL
             <input value={settings.base_url}

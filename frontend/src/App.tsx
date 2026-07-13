@@ -21,6 +21,7 @@ import SubtitleTimeline from './components/SubtitleTimeline';
 import SubtitleStylePanel from './components/SubtitleStylePanel';
 import SettingsCenter from './components/SettingsCenter';
 import LanguagePicker from './components/LanguagePicker';
+import AppSelect from './components/AppSelect';
 import { languageLabel } from './languages';
 import appIcon from './assets/branding/app-icon-ui.png';
 import settingsIcon from './assets/player-icons/settings.png';
@@ -120,7 +121,7 @@ function App() {
   const [rightPanelWidth, setRightPanelWidth] = useState(() => Number(localStorage.getItem('subtitle_factory_right_width')) || 336);
   const [viewerHeight, setViewerHeight] = useState(() => Number(localStorage.getItem('subtitle_factory_viewer_height')) || 470);
   const [subtitleFocus, setSubtitleFocus] = useState(false);
-  const [transcriptionRuntime, setTranscriptionRuntime] = useState(() => localStorage.getItem('subtitle_factory_transcription_runtime') || '');
+  const [transcriptionRuntimes, setTranscriptionRuntimes] = useState<Record<string,string>>(() => { try{return JSON.parse(localStorage.getItem('subtitle_factory_transcription_runtimes')||'{}');}catch{return {};}});
   const [collapsedProjectGroups, setCollapsedProjectGroups] = useState<Set<string>>(() => {
     try { return new Set(JSON.parse(localStorage.getItem('subtitle_factory_collapsed_groups') || '[]')); }
     catch { return new Set(); }
@@ -606,6 +607,19 @@ function App() {
     }
   }, [youtubeUrl, config, addLog, selectProject, setStepStatus]);
 
+  const runtimeForModel = useCallback((model:string) => transcriptionRuntimes[model]
+    || String((appSettings.transcription_runtime_by_model || {})[model] || '')
+    || modelStatus?.models.find(item=>item.id===model)?.selected_runtime || '',
+  [appSettings.transcription_runtime_by_model,modelStatus,transcriptionRuntimes]);
+  const chooseRuntime = useCallback((model:string,runtime:string)=>{
+    setTranscriptionRuntimes(current=>{const next={...current,[model]:runtime};localStorage.setItem('subtitle_factory_transcription_runtimes',JSON.stringify(next));return next;});
+  },[]);
+  const requireRuntime = useCallback((model:string)=>{
+    const runtime=runtimeForModel(model); const option=modelStatus?.models.find(item=>item.id===model)?.runtimes?.find(item=>item.id===runtime);
+    if(!runtime||!option?.available){setSelectedStep('transcribe');setInspectorMode('step');setToast(!runtime?'请选择转写运行设备：CPU、Apple GPU 或 Core ML':'所选运行设备当前不可用，请重新选择');return '';}
+    return runtime;
+  },[modelStatus,runtimeForModel]);
+
   // ── Full pipeline ──
   const handleFullPipeline = useCallback(async () => {
     if (sourceActionLock.current) return;
@@ -614,6 +628,8 @@ function App() {
     const model = appSettings.default_workflow === 'manual' ? config.model : compatibleModel();
     try {
       if (!model) return;
+      const workflowRuntime=appSettings.default_workflow==='manual'?'':requireRuntime(model);
+      if(appSettings.default_workflow!=='manual'&&!workflowRuntime)return;
       const pid = await handleCreateProject();
       if (!pid) return;
       if (youtubeUrl) {
@@ -621,7 +637,7 @@ function App() {
           await startTask('下载视频', 'download', () => api.startDownload(pid, youtubeUrl));
         } else {
           await startTask('自动生成字幕', 'download', () => api.startWorkflow(pid, {
-            source_url: youtubeUrl, model, language: config.language,
+            source_url: youtubeUrl, model, language: config.language, runtime:workflowRuntime,
           }));
         }
       }
@@ -629,7 +645,7 @@ function App() {
       sourceActionLock.current = false;
       setTaskStarting(false);
     }
-  }, [appSettings.default_workflow, youtubeUrl, config.language, config.model, compatibleModel, handleCreateProject, startTask]);
+  }, [appSettings.default_workflow, youtubeUrl, config.language, config.model, compatibleModel, handleCreateProject, requireRuntime, startTask]);
 
   // ── Import local videos; a project is created only after a real selection. ──
   const importFiles = useCallback(async (files: File[]) => {
@@ -639,6 +655,9 @@ function App() {
       setToast('请选择 MP4、MKV、MOV、WebM 或 AVI 视频');
       return;
     }
+    const workflowModel=compatibleModel();
+    const workflowRuntime=appSettings.default_workflow==='manual'||!workflowModel?'':requireRuntime(workflowModel);
+    if(appSettings.default_workflow!=='manual'&&!workflowRuntime)return;
     importActionLock.current = true;
     setTaskStarting(true);
     try {
@@ -651,7 +670,7 @@ function App() {
         setUploadProgress(0);
         addLog('info', '导入视频', `正在导入 ${file.name}`);
         const result = await api.importLocalVideo(created.project_id, file, {
-          autostart: appSettings.default_workflow !== 'manual', model: config.model, language: config.language,
+          autostart: appSettings.default_workflow !== 'manual', model: workflowModel||config.model, language: config.language, runtime:workflowRuntime,
           onProgress: setUploadProgress,
         });
         setUploadProgress(null);
@@ -678,7 +697,7 @@ function App() {
       importActionLock.current = false;
       setTaskStarting(false);
     }
-  }, [addLog, appSettings.default_workflow, config.language, config.model, config.target_language, ingestTaskLogs, selectProject, syncProcessFromTask]);
+  }, [addLog, appSettings.default_workflow, compatibleModel, config.language, config.model, config.target_language, ingestTaskLogs, requireRuntime, selectProject, syncProcessFromTask]);
 
   const handleImportLocal = useCallback(() => {
     const input = document.createElement('input');
@@ -695,26 +714,26 @@ function App() {
     startTask('提取音频', 'extract_audio', () => api.startExtractAudio(activeProject.id));
   }, [activeProject, startTask]);
 
+
   const doTranscribe = useCallback(() => {
     if (!activeProject) return;
     const model = compatibleModel();
     if (!model) return;
     setSubtitleStats(null);
-    const selected = modelStatus?.models.find(item => item.id === model);
-    const runtime = transcriptionRuntime || selected?.runtimes?.[0]?.id;
-    if (runtime) localStorage.setItem('subtitle_factory_transcription_runtime', runtime);
+    const runtime = requireRuntime(model); if(!runtime)return;
     startTask('转写', 'transcribe', () => api.startTranscribe(activeProject.id, config.language, model, runtime));
-  }, [activeProject, compatibleModel, config.language, modelStatus, transcriptionRuntime, startTask]);
+  }, [activeProject, compatibleModel, config.language, requireRuntime, startTask]);
 
   const doGenerateSubtitles = useCallback(() => {
     if (!activeProject) return;
     const model = compatibleModel();
     if (!model) return;
+    const runtime=requireRuntime(model);if(!runtime)return;
     setSubtitleStats(null);
     startTask('自动生成字幕', 'transcribe', () => api.startWorkflow(activeProject.id, {
-      model, language: config.language,
+      model, language: config.language, runtime,
     }));
-  }, [activeProject, compatibleModel, config.language, startTask]);
+  }, [activeProject, compatibleModel, config.language, requireRuntime, startTask]);
 
   const recoverTranscription = useCallback(async () => {
     if (!activeProject || !currentTask?.recoverable) return;
@@ -728,14 +747,15 @@ function App() {
         return;
       }
       const detail = fallback.download_required ? '该模型可能需要下载。' : '该模型已在本机就绪。';
+      const runtime=requireRuntime(fallback.id);if(!runtime)return;
       if (!window.confirm(`当前转写失败：${currentTask.error || currentTask.message}\n\n是否改用 ${fallback.name} 重试？${detail}`)) return;
       await startTask('备用模型转写', 'transcribe', () => api.retryTranscription(activeProject.id, {
-        model: fallback.id, language: config.language,
+        model: fallback.id, language: config.language, runtime,
       }));
     } catch (error: any) {
       setToast(`无法启动恢复：${error.message}`);
     }
-  }, [activeProject, config.language, config.model, currentTask, startTask]);
+  }, [activeProject, config.language, config.model, currentTask, requireRuntime, startTask]);
 
   const doClean = useCallback(() => {
     if (!activeProject) return;
@@ -1067,6 +1087,9 @@ function App() {
       { id: 'export', label: '导出', icon: '↗', state: combine('export', 'render') },
     ];
   }, [processSteps]);
+  const inspectorModelId=config.model==='auto'?(modelStatus?.recommended_model||'small'):config.model;
+  const inspectorModel=modelStatus?.models.find(item=>item.id===inspectorModelId);
+  const modelOptions=[{value:'auto',label:'自动选择',description:`推荐 ${modelStatus?.models.find(item=>item.id===modelStatus.recommended_model)?.name||'Whisper Small'}`},...(modelStatus?.models||[]).map(item=>({value:item.id,label:item.name,description:[item.version,item.format,item.source].filter(Boolean).join(' · ')}))];
 
   const primaryActionLabel = !activeProject ? '生成字幕'
     : currentTask?.status === 'paused' ? '继续'
@@ -1144,7 +1167,6 @@ function App() {
             <button role="tab" aria-selected={libraryView === 'trash'} className={libraryView === 'trash' ? 'active' : ''} onClick={() => setLibraryView('trash')}>回收站 <span>{trashProjects.length}</span></button>
           </div>
           <div className="project-list">
-            <datalist id="project-group-options">{knownProjectGroups.map(name => <option key={name} value={name}/>)}</datalist>
             {libraryView === 'projects' && projectGroups.map(group => {
               const collapsed = collapsedProjectGroups.has(group.key);
               return <section className="project-group" key={group.key}>
@@ -1158,7 +1180,7 @@ function App() {
                       <span className="project-card-copy"><strong>{project.title}</strong><small>{project.segments_count} 条 · {project.created_at.slice(0, 10)}</small></span>
                       <span className="project-more" aria-hidden="true">•••</span>
                     </button>
-                    {editingGroup && <div className="project-group-editor"><input autoFocus list="project-group-options" value={groupDraft} placeholder="分组名称" onChange={event => setGroupDraft(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') void saveProjectGroup(project); if (event.key === 'Escape') setGroupEditorProjectId(null); }}/><button onClick={() => void saveProjectGroup(project)}>保存</button><button aria-label="取消" onClick={() => setGroupEditorProjectId(null)}>×</button></div>}
+                    {editingGroup && <div className="project-group-editor"><AppSelect value={groupDraft} onChange={setGroupDraft} label="项目分组" placeholder="搜索或输入分组名称" searchable allowCustom options={knownProjectGroups.map(name=>({value:name,label:name}))}/><button onClick={() => void saveProjectGroup(project)}>保存</button><button aria-label="取消" onClick={() => setGroupEditorProjectId(null)}>×</button></div>}
                   </div>;
                 })}</div>}
               </section>;
@@ -1222,7 +1244,7 @@ function App() {
             {inspectorMode === 'style' && <SubtitleStylePanel style={subtitleStyle} onChange={handleStyleChange}/>}
             {inspectorMode === 'step' && <div className="step-inspector">
               {selectedStep === 'download' && <section className="inspector-section"><h3>下载与音频</h3><label>项目链接<input value={activeProject?.source_url || youtubeUrl} placeholder="YouTube URL" onChange={event => setYoutubeUrl(event.target.value)}/></label><div className="runtime-mini"><span className={health?.runtime?.ffmpeg?.ok ? 'ok' : 'error'}>FFmpeg {health?.runtime?.ffmpeg?.ok ? '可用' : '需检查'}</span><span className={health?.runtime?.yt_dlp?.ok ? 'ok' : 'error'}>yt-dlp {health?.runtime?.yt_dlp?.ok ? '可用' : '需检查'}</span></div><p>下载会移除 t=110s 等定位参数；失败时保留原项目，可在此重新下载。</p><button className="button primary" disabled={!activeProject?.source_url || isProcessing} onClick={retryDownload}>重新下载</button>{activeProject?.video_path && <button className="button secondary" disabled={isProcessing} onClick={doExtractAudio}>重新提取音频</button>}</section>}
-              {selectedStep === 'transcribe' && <section className="inspector-section"><h3>语音转写</h3><label>模型<select value={config.model} onChange={event => { setConfig({ ...config, model: event.target.value as ModelSize }); setTranscriptionRuntime(''); }}><option value="auto">自动选择 · Whisper Small</option><option value="small">Whisper Small</option><option value="medium">Whisper Medium</option><option value="large-v3">Whisper Large V3</option>{modelStatus?.models.filter(model => (model.ready || model.download_required)).map(model => <option key={model.id} value={model.id}>{model.name}</option>)}</select></label><label>运行设备<select value={transcriptionRuntime} onChange={event => setTranscriptionRuntime(event.target.value)}><option value="">首次使用时选择</option>{modelStatus?.models.find(model => model.id === (config.model === 'auto' ? 'small' : config.model))?.runtimes?.map(runtime => <option key={runtime.id} value={runtime.id}>{runtime.name}</option>)}</select></label><label>源语言<LanguagePicker value={config.language} onChange={language => setConfig({ ...config, language })}/></label>{modelStatus && <div className="model-readiness"><strong>推荐：{modelStatus.models.find(model => model.id === modelStatus.recommended_model)?.name || modelStatus.recommended_model}</strong>{modelStatus.models.filter(model => model.ready).slice(0, 3).map(model => <small className="ready" key={model.id}>✓ {model.name} 已就绪</small>)}</div>}<button className="button primary" disabled={!hasAudio || isProcessing} onClick={doTranscribe}>开始转写</button></section>}
+              {selectedStep === 'transcribe' && <section className="inspector-section transcription-inspector"><h3>语音转写</h3><label>转写模型<AppSelect value={config.model} onChange={model=>setConfig({...config,model:model as ModelSize})} options={modelOptions} label="转写模型" searchable/></label><div className="runtime-picker"><header><strong>运行设备</strong><small>{runtimeForModel(inspectorModelId)?'已为此模型记住':'首次使用必须选择'}</small></header><div className="runtime-choice-grid">{inspectorModel?.runtimes?.map(runtime=><button type="button" key={runtime.id} disabled={!runtime.available} className={runtimeForModel(inspectorModelId)===runtime.id?'selected':''} onClick={()=>chooseRuntime(inspectorModelId,runtime.id)}><i>{runtime.id==='cpu'?'CPU':runtime.id==='mlx'?'GPU':runtime.id==='coreml'?'ANE':'ML'}</i><span><strong>{runtime.name}</strong><small>{runtime.engine}</small>{!runtime.available&&<em>{runtime.reason}</em>}</span>{runtimeForModel(inspectorModelId)===runtime.id&&<b>✓</b>}</button>)}</div>{!inspectorModel?.runtimes?.length&&<p className="runtime-empty">正在读取此模型支持的运行设备…</p>}</div><label>源语言<LanguagePicker value={config.language} onChange={language => setConfig({ ...config, language })}/></label>{modelStatus && <div className="model-readiness"><strong>{inspectorModel?.name||inspectorModelId}</strong><small>{inspectorModel?.ready?'模型已就绪':inspectorModel?.download_required?'首次运行时下载到 App 数据目录':'模型不可用'}</small></div>}<button className="button primary" disabled={!hasAudio || isProcessing || !runtimeForModel(inspectorModelId)} onClick={doTranscribe}>开始转写</button>{!runtimeForModel(inspectorModelId)&&<p className="runtime-required">请选择上方运行设备后再开始转写。</p>}</section>}
               {selectedStep === 'clean' && <section className="inspector-section"><h3>AI 忠实整理</h3><div className="ai-summary-row"><span className="ai-logo">✦</span><div><strong>{activeAIPreset?.name || aiSettings?.provider || '未配置 AI'}</strong><small>{aiSettings?.model || '请先打开设置中心'}</small></div></div><label>参考单句长度 <span>{config.clean_target_length} 字</span><input type="range" min={16} max={100} step={2} value={config.clean_target_length} onChange={event => setConfig({ ...config, clean_target_length: Number(event.target.value) })}/></label><p>只修正明显错词、标点和断句，不改变原意。完整长句不会被强行截断。</p><button className="button primary" disabled={!hasSegments || isProcessing || !aiSettings?.has_api_key} onClick={doClean}>确认并开始整理</button><button className="button secondary" disabled={!hasSegments || isProcessing} onClick={undoClean}>撤销上次整理</button></section>}
               {selectedStep === 'translate' && <section className="inspector-section"><h3>AI 翻译</h3><label>目标语言<LanguagePicker mode="target" allowCustom allowNone value={config.target_language} onChange={target_language => setConfig({ ...config, target_language })}/></label><label className="check-row"><input type="checkbox" checked={config.bilingual} onChange={event => setConfig({ ...config, bilingual: event.target.checked })}/> 导出时包含原文与译文</label><p>翻译由已配置的 {activeAIPreset?.name || aiSettings?.provider || 'AI 服务'} 完成，结果可继续编辑。</p><button className="button primary" disabled={!hasSegments || isProcessing || !aiSettings?.has_api_key || config.target_language === 'none'} onClick={doTranslate}>确认并开始翻译</button></section>}
               {selectedStep === 'export' && <section className="inspector-section"><h3>导出</h3><div className="export-grid">{(['srt', 'vtt', 'ass', 'srt-bilingual', 'mp4', 'mkv'] as ExportFormat[]).map(format => <button key={format} disabled={!hasSegments || isProcessing} onClick={() => void doExport(format)}>{format === 'srt-bilingual' ? '双语 SRT' : format.toUpperCase()}</button>)}</div></section>}

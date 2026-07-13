@@ -17,6 +17,8 @@ from app.services import downloader
 from app.services import parakeet_transcriber as parakeet
 from app.services import runtime_diagnostics as runtime
 from app.services.transcriber import resolve_transcription_model
+from app.api.projects import _runtime_options, _select_runtime
+from fastapi import HTTPException
 
 
 def _executable(folder: Path, name: str, output: str = "tool version 1") -> Path:
@@ -116,6 +118,24 @@ class DownloadRuntimeTests(unittest.TestCase):
 
 
 class ModelIndependenceTests(unittest.TestCase):
+    def test_runtime_options_expose_stable_ids_and_visible_device_metadata(self):
+        options = _runtime_options("small")
+        self.assertEqual([item["id"] for item in options], ["cpu", "mlx"])
+        self.assertEqual(options[0]["name"], "CPU")
+        self.assertEqual(options[1]["name"], "Apple GPU")
+        self.assertIn("engine", options[1])
+        self.assertIn("available", options[1])
+
+    def test_runtime_must_be_explicit_or_remembered(self):
+        with self.assertRaises(HTTPException) as raised:
+            _select_runtime("small", None, {"transcription_runtime_by_model": {}})
+        self.assertEqual(raised.exception.status_code, 409)
+        self.assertEqual(raised.exception.detail["code"], "RUNTIME_SELECTION_REQUIRED")
+        self.assertEqual(
+            _select_runtime("small", None, {"transcription_runtime_by_model": {"small": "cpu"}}),
+            "cpu",
+        )
+
     def test_auto_is_safe_whisper_small_without_memo(self):
         with patch.object(
             parakeet, "discover_coreml_runtime",

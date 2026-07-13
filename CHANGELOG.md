@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.1 — 2026-07-13
+
+- Fixed the transcription runtime contract so CPU, Apple GPU, Core ML and external Memo devices render correctly.
+- Require an explicit per-model runtime choice on first use instead of silently falling back to CPU.
+- Replaced native select and datalist controls with a focus-safe, searchable App combobox.
+- Added keyboard navigation, portaled popovers and per-model runtime choices in the workspace and settings center.
+
 ## 0.3.0 — 2026-07-12
 
 - Dual-concurrency, retryable AI clean and translation batches with persisted partial results.

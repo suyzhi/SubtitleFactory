@@ -5,6 +5,7 @@ import type {
   ProcessingConfig, AppSettingWarning,
 } from '../types';
 import LanguagePicker from './LanguagePicker';
+import AppSelect from './AppSelect';
 import { languageLabel } from '../languages';
 
 type Category = 'general' | 'transcription' | 'ai' | 'translation' | 'storage' | 'appearance' | 'about';
@@ -112,6 +113,7 @@ export default function SettingsCenter(props: Props) {
       (activeCategory || dialog)?.focus();
     });
     const onKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented) return;
       if (event.key === 'Escape') {
         event.preventDefault();
         onClose();
@@ -290,7 +292,7 @@ export default function SettingsCenter(props: Props) {
               <i>{item.icon}</i><span>{item.label}</span>
             </button>)}
           </nav>
-          <small className="settings-version">Version {health?.version || '0.3.0'}</small>
+          <small className="settings-version">Version {health?.version || '0.3.1'}</small>
         </aside>
 
         <div className="settings-content">
@@ -310,9 +312,7 @@ export default function SettingsCenter(props: Props) {
               </SettingsSection>
               <SettingsSection title="启动" description="选择 App 打开时看到的内容。">
                 <label className="settings-field horizontal"><span><strong>启动行为</strong><small>不影响正在运行的后台任务</small></span>
-                  <select value={draft.startup_behavior || 'restore_last'} onChange={event => updateDraft({ startup_behavior: event.target.value as AppSettings['startup_behavior'] })}>
-                    <option value="restore_last">打开上次项目</option><option value="project_library">显示项目库</option>
-                  </select>
+                  <AppSelect value={draft.startup_behavior||'restore_last'} onChange={startup_behavior=>updateDraft({startup_behavior:startup_behavior as AppSettings['startup_behavior']})} label="启动行为" options={[{value:'restore_last',label:'打开上次项目'},{value:'project_library',label:'显示项目库'}]}/>
                 </label>
               </SettingsSection>
             </>}
@@ -320,10 +320,7 @@ export default function SettingsCenter(props: Props) {
             {category === 'transcription' && <>
               <SettingsSection title="默认转写" description="自动选择在普通用户电脑上使用 Whisper Small。">
                 <label className="settings-field horizontal"><span><strong>默认模型</strong><small>Parakeet 仅支持其模型声明的语言</small></span>
-                  <select value={resolvedModel} onChange={event => updateDraft({ default_model: event.target.value })}>
-                    <option value="auto">自动选择 · Whisper Small</option><option value="small">Whisper Small</option><option value="medium">Whisper Medium</option><option value="large-v3">Whisper Large V3</option>
-                    {modelStatus?.models.filter(model => model.id.includes('parakeet') && (model.ready || model.download_required)).map(model => <option value={model.id} key={model.id}>{model.name}</option>)}
-                  </select>
+                  <AppSelect value={resolvedModel} onChange={default_model=>updateDraft({default_model})} label="默认模型" searchable options={[{value:'auto',label:'自动选择',description:'Whisper Small'},...(modelStatus?.models||[]).map(model=>({value:model.id,label:model.name,description:[model.version,model.format].filter(Boolean).join(' · ')}))]}/>
                 </label>
                 <label className="settings-field horizontal"><span><strong>源语言</strong><small>可搜索 20 种常用语言</small></span>
                   <LanguagePicker value={resolvedSourceLanguage} onChange={source_language => updateDraft({ source_language })}/>
@@ -338,6 +335,14 @@ export default function SettingsCenter(props: Props) {
                       <span className={`status-orb ${model.ready ? 'ok' : model.download_required ? 'warning' : 'error'}`}/>
                       <div><strong>{model.name}</strong><small>{model.ready ? '已就绪' : model.download_required ? `首次转写时下载${model.download_bytes ? ` · ${bytes(model.download_bytes)}` : ''}` : model.runtime_error || '不可用'}</small></div>
                       <em>{modelSourceLabels[source] || source}</em>
+                      {!!model.runtimes?.length && <AppSelect
+                        className="model-runtime-select"
+                        value={String((draft.transcription_runtime_by_model as Record<string, string> | undefined)?.[model.id] || model.selected_runtime || '')}
+                        onChange={runtime => updateDraft({ transcription_runtime_by_model: { ...((draft.transcription_runtime_by_model as Record<string, string> | undefined) || {}), [model.id]: runtime } })}
+                        label={`${model.name} 运行设备`}
+                        placeholder="选择 CPU / GPU"
+                        options={model.runtimes.map(runtime => ({ value: runtime.id, label: runtime.name, description: runtime.engine, disabled: !runtime.available }))}
+                      />}
                       <span className="model-row-actions"><button className="button secondary model-action" disabled={!!validatingModel} onClick={() => void validateModel(model.id)}>{validatingModel === model.id ? '校验中…' : '校验'}</button>{canPrepare && <button className="button secondary model-action" disabled={!!preparingModel} onClick={() => void prepareModel(model.id, model.ready || !model.download_required)}>{preparingModel === model.id ? '处理中…' : model.ready ? '修复' : '下载'}</button>}</span>
                     </div>;
                   }) || <div className="settings-empty">正在读取模型状态…</div>}
@@ -353,7 +358,7 @@ export default function SettingsCenter(props: Props) {
 
             {category === 'ai' && <>
               <SettingsSection title="任务分配" description="整理和翻译可使用不同的服务商与模型。">
-                <div className="provider-assignments"><label>AI 整理<select value={assignments.clean_provider_id} onChange={event=>setAssignments({...assignments,clean_provider_id:event.target.value})}>{providerCards.map(card=><option value={card.provider_id} key={card.provider_id}>{card.name}</option>)}</select></label><label>AI 翻译<select value={assignments.translate_provider_id} onChange={event=>setAssignments({...assignments,translate_provider_id:event.target.value})}>{providerCards.map(card=><option value={card.provider_id} key={card.provider_id}>{card.name}</option>)}</select></label><button className="button primary" onClick={()=>void api.saveAIAssignments(assignments).then(()=>setMessage('任务分配已保存')).catch(reason=>setError(reason.message))}>保存分配</button></div>
+                <div className="provider-assignments"><label>AI 整理<AppSelect value={assignments.clean_provider_id} onChange={clean_provider_id=>setAssignments({...assignments,clean_provider_id})} label="AI 整理供应商" options={providerCards.map(card=>({value:card.provider_id,label:card.name,description:card.model}))}/></label><label>AI 翻译<AppSelect value={assignments.translate_provider_id} onChange={translate_provider_id=>setAssignments({...assignments,translate_provider_id})} label="AI 翻译供应商" options={providerCards.map(card=>({value:card.provider_id,label:card.name,description:card.model}))}/></label><button className="button primary" onClick={()=>void api.saveAIAssignments(assignments).then(()=>setMessage('任务分配已保存')).catch(reason=>setError(reason.message))}>保存分配</button></div>
               </SettingsSection>
               <SettingsSection title="模型供应商" description="每张卡的地址、密钥和模型互相隔离，密钥只保存在本机。">
                 <div className="provider-card-grid">{providerCards.map(card=><article className="provider-card" key={card.provider_id}><header><strong>{card.name}</strong><span className={card.has_api_key?'ready':''}>{card.has_api_key?'已配置':'未配置'}</span></header><label>Base URL<input value={card.base_url} onChange={event=>updateProvider(card.provider_id,{base_url:event.target.value})}/></label><label>模型<input value={card.model} onChange={event=>updateProvider(card.provider_id,{model:event.target.value})}/></label>{!!card.models.length&&<div className="provider-model-chips">{card.models.map(model=><button type="button" className={model===card.model?'active':''} key={model} onClick={()=>updateProvider(card.provider_id,{model})}>{model}</button>)}</div>}<label>API Key<input type="password" value={card.api_key} placeholder={card.has_api_key?'留空保留现有密钥':'sk-…'} onChange={event=>updateProvider(card.provider_id,{api_key:event.target.value})}/></label><footer><button className="button secondary" disabled={busy||!card.has_api_key} onClick={()=>void api.testAIProvider(card.provider_id).then(result=>{updateProvider(card.provider_id,{last_test_status:'success',last_latency_ms:result.latency_ms});setMessage(`${card.name} ${result.latency_ms}ms`);}).catch(reason=>setError(reason.message))}>测试连接</button><button className="button primary" disabled={busy} onClick={()=>void saveProvider(card)}>保存</button></footer></article>)}</div>
@@ -363,7 +368,7 @@ export default function SettingsCenter(props: Props) {
             {category === 'translation' && <>
               <SettingsSection title="默认语言" description="目标语言支持直接输入自定义语言或语言代码。">
                 <label className="settings-field horizontal"><span><strong>目标语言</strong><small>用于新建项目和快速翻译</small></span><LanguagePicker mode="target" allowCustom value={resolvedTargetLanguage} onChange={translation_target_language => updateDraft({ translation_target_language })}/></label>
-                <label className="settings-field horizontal"><span><strong>双语顺序</strong><small>可在单个导出中临时覆盖</small></span><select value={String(draft.bilingual_order || 'original_first')} onChange={event => updateDraft({ bilingual_order: event.target.value })}><option value="original_first">原文在上</option><option value="translated_first">译文在上</option></select></label>
+                <label className="settings-field horizontal"><span><strong>双语顺序</strong><small>可在单个导出中临时覆盖</small></span><AppSelect value={String(draft.bilingual_order||'original_first')} onChange={bilingual_order=>updateDraft({bilingual_order})} label="双语顺序" options={[{value:'original_first',label:'原文在上'},{value:'translated_first',label:'译文在上'}]}/></label>
               </SettingsSection>
               <SettingsSection title="常用语言" description="保存后用于快速选择；可搜索内置语言，也可输入自定义语言代码。">
                 <div className="favorite-language-add"><LanguagePicker mode="target" allowCustom value={favoriteLanguage} onChange={setFavoriteLanguage}/><button className="button secondary" onClick={addFavoriteLanguage}>添加</button></div>
@@ -373,8 +378,8 @@ export default function SettingsCenter(props: Props) {
 
             {category === 'storage' && <>
               <SettingsSection title="下载偏好" description="YouTube 播放定位参数会自动移除，并下载完整视频。">
-                <label className="settings-field horizontal"><span><strong>画质</strong><small>高清画面与音频需要 FFmpeg 合并</small></span><select value={String(draft.download_quality || 'best')} onChange={event => updateDraft({ download_quality: event.target.value })}><option value="best">最佳可用</option><option value="1080p">最高 1080p</option><option value="720p">最高 720p</option></select></label>
-                <label className="settings-field horizontal"><span><strong>容器</strong></span><select value={draft.download_container || 'mp4'} onChange={event => updateDraft({ download_container: event.target.value as AppSettings['download_container'] })}><option value="mp4">MP4</option><option value="mkv">MKV</option><option value="webm">WebM</option></select></label>
+                <label className="settings-field horizontal"><span><strong>画质</strong><small>高清画面与音频需要 FFmpeg 合并</small></span><AppSelect value={String(draft.download_quality||'best')} onChange={download_quality=>updateDraft({download_quality})} label="下载画质" options={[{value:'best',label:'最佳可用'},{value:'1080p',label:'最高 1080p'},{value:'720p',label:'最高 720p'}]}/></label>
+                <label className="settings-field horizontal"><span><strong>容器</strong></span><AppSelect value={draft.download_container||'mp4'} onChange={download_container=>updateDraft({download_container:download_container as AppSettings['download_container']})} label="下载容器" options={[{value:'mp4',label:'MP4'},{value:'mkv',label:'MKV'},{value:'webm',label:'WebM'}]}/></label>
               </SettingsSection>
               <SettingsSection title="运行状态" description="下载前请确保所有关键项目均为可用。" action={<button className="button secondary" onClick={onRefreshHealth}>重新检查</button>}>
                 <RuntimeRow label="FFmpeg" value={runtimeCopy(runtime?.ffmpeg as any)}/>
@@ -392,7 +397,7 @@ export default function SettingsCenter(props: Props) {
             {category === 'appearance' && <>
               <SettingsSection title="外观" description="主题同时作用于 Web 界面和 macOS 原生标题栏。">
                 <Segmented value={theme} onChange={value => onThemeChange(value as 'light' | 'dark')} options={[['light', '浅色'], ['dark', '深色']]}/>
-                <label className="settings-field horizontal"><span><strong>界面密度</strong><small>紧凑模式适合小屏幕</small></span><select value={density} onChange={event => onDensityChange(event.target.value as 'comfortable' | 'compact')}><option value="comfortable">舒适</option><option value="compact">紧凑</option></select></label>
+                <label className="settings-field horizontal"><span><strong>界面密度</strong><small>紧凑模式适合小屏幕</small></span><AppSelect value={density} onChange={value=>onDensityChange(value as 'comfortable'|'compact')} label="界面密度" options={[{value:'comfortable',label:'舒适'},{value:'compact',label:'紧凑'}]}/></label>
               </SettingsSection>
               <SettingsSection title="动画" description="系统“减少动态效果”始终具有最高优先级。">
                 <Toggle label="界面动画" detail="状态反馈 120ms、常规过渡 180ms、弹窗和抽屉 240ms" checked={motionEnabled} onChange={onMotionEnabledChange}/>
@@ -404,7 +409,7 @@ export default function SettingsCenter(props: Props) {
                 <div className="shortcut-grid"><span>播放 / 暂停</span><kbd>Space</kbd><span>剧院模式</span><kbd>T</kbd><span>关闭弹窗或检查器</span><kbd>Esc</kbd><span>保存字幕编辑</span><kbd>Return</kbd></div>
               </SettingsSection>
               <SettingsSection title="关于字幕工厂" description="本地优先的专业字幕工作台。">
-                <div className="about-card"><strong>字幕工厂 {health?.version || '0.3.0'}</strong><span>Apple Silicon · 本地运行</span><small>服务状态：{health?.status || '正在连接'}</small></div>
+                <div className="about-card"><strong>字幕工厂 {health?.version || '0.3.1'}</strong><span>Apple Silicon · 本地运行</span><small>服务状态：{health?.status || '正在连接'}</small></div>
                 <div className="about-data-row"><span><strong>数据目录</strong><small>{health?.runtime?.data_directory || 'App 本地数据目录'}</small></span></div>
                 <div className="inline-actions"><button className="button secondary" onClick={() => void copyDiagnostics()}>复制诊断信息</button><button className="button secondary" onClick={() => { onClose(); onOpenLogs(); }}>查看处理日志</button></div>
                 <p className="settings-help">复制的诊断信息不包含本机路径或 API Key。自定义路径和密钥不会进入 Git、默认配置、日志或 Release。</p>

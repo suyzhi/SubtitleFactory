@@ -38,7 +38,7 @@ mark_interrupted_tasks()
 app = FastAPI(
     title="字幕工厂 API",
     description="YouTube 视频转写字幕桌面软件的 API 服务",
-    version="0.3.0",
+    version="0.3.1",
 )
 
 # ── CORS（允许 Tauri 前端访问）──
@@ -65,7 +65,7 @@ app.mount("/data", StaticFiles(directory=str(DATA_DIR)), name="data")
 def root():
     return {
         "name": "字幕工厂 API",
-        "version": "0.3.0",
+        "version": "0.3.1",
         "docs": "/docs",
     }
 
@@ -75,7 +75,7 @@ def health_check():
     return {
         "status": "ok",
         "service": "subtitle-factory-backend",
-        "version": "0.3.0",
+        "version": "0.3.1",
         "runtime": settings.get_runtime_health(),
     }
 
