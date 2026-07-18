@@ -3,6 +3,9 @@
 # 需要先安装依赖
 
 DIR="$(cd "$(dirname "$0")" && pwd)"
+DEV_TOKEN="subtitle-factory-local-development"
+export SUBTITLE_FACTORY_API_TOKEN="$DEV_TOKEN"
+export VITE_API_TOKEN="$DEV_TOKEN"
 
 echo "🎬 字幕工厂 - 一键启动"
 echo "======================="

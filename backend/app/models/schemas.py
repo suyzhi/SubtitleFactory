@@ -3,7 +3,7 @@
 """
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
-from typing import Literal, Optional, List
+from typing import Any, Literal, Optional, List
 
 
 # ── Project ─────────────────────────────────────────────
@@ -22,8 +22,10 @@ class ProjectResponse(BaseModel):
     source_type: str
     source_url: Optional[str] = None
     video_path: Optional[str] = None
+    video_url: Optional[str] = None
     audio_path: Optional[str] = None
     thumbnail_url: Optional[str] = None
+    thumbnail_access_url: Optional[str] = None
     group_name: Optional[str] = None
     language: str
     target_language: str
@@ -31,6 +33,8 @@ class ProjectResponse(BaseModel):
     updated_at: str
     deleted_at: Optional[str] = None
     segments_count: int = 0
+    edit_revision: int = 0
+    media_status: str = "ready"
 
 
 class ProjectUpdate(BaseModel):
@@ -74,13 +78,69 @@ class SegmentResponse(BaseModel):
     clean_text: str
     translated_text: str
     speaker: str
+    speaker_id: Optional[str] = None
     locked: bool
 
 
 class SegmentUpdate(BaseModel):
+    start: Optional[float] = Field(default=None, ge=0)
+    end: Optional[float] = Field(default=None, gt=0)
     clean_text: Optional[str] = None
     translated_text: Optional[str] = None
+    speaker_id: Optional[str] = None
     locked: Optional[bool] = None
+
+
+class SegmentOperationItem(BaseModel):
+    index: int = Field(ge=1)
+    start: Optional[float] = Field(default=None, ge=0)
+    end: Optional[float] = Field(default=None, gt=0)
+    clean_text: Optional[str] = None
+    translated_text: Optional[str] = None
+    speaker_id: Optional[str] = None
+    locked: Optional[bool] = None
+
+
+class SegmentOperationRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    expected_revision: int = Field(ge=0)
+    operation: Literal[
+        "update_many", "replace", "shift", "split", "merge", "assign_speaker"
+    ]
+    items: List[SegmentOperationItem] = Field(default_factory=list)
+    indices: List[int] = Field(default_factory=list)
+    include_locked: bool = False
+    search: Optional[str] = None
+    replacement: str = ""
+    fields: List[Literal["clean_text", "translated_text"]] = Field(
+        default_factory=lambda: ["clean_text", "translated_text"]
+    )
+    match_case: bool = True
+    delta: float = 0
+    split_index: Optional[int] = Field(default=None, ge=1)
+    split_at: Optional[float] = Field(default=None, ge=0)
+    text_offset: Optional[int] = Field(default=None, ge=0)
+    speaker_id: Optional[str] = None
+
+
+class SegmentDraftUpdate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    base_revision: int = Field(ge=0)
+    items: List[SegmentOperationItem]
+
+
+class EditorHistoryRequest(BaseModel):
+    expected_revision: int = Field(ge=0)
+
+
+class EditorOperationResponse(BaseModel):
+    revision: int
+    operation_id: Optional[str] = None
+    operation: str
+    affected_count: int
+    segments: List[dict[str, Any]]
 
 
 # ── Task ────────────────────────────────────────────────
@@ -104,6 +164,7 @@ class ExportRequest(BaseModel):
     format: str = Field(default="srt", pattern="^(srt|vtt|ass|srt-bilingual|mp4|mkv)$")
     bilingual: bool = False
     primary_language: str = "original"  # original | translated
+    style: Optional[dict[str, Any]] = None
 
 
 # ── Processing ──────────────────────────────────────────
@@ -119,6 +180,20 @@ class ProcessingConfig(BaseModel):
     enable_clean: bool = True
     enable_translate: bool = True
     bilingual: bool = False
+
+
+class MediaSelectionUpdate(BaseModel):
+    audio_track_index: int = Field(default=0, ge=0)
+    range_start: Optional[float] = Field(default=None, ge=0)
+    range_end: Optional[float] = Field(default=None, gt=0)
+
+    @field_validator("range_end")
+    @classmethod
+    def validate_range(cls, value, info):
+        start = info.data.get("range_start")
+        if value is not None and start is not None and value <= start:
+            raise ValueError("出点必须晚于入点")
+        return value
 
 
 class WorkflowRequest(BaseModel):

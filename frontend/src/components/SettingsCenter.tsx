@@ -78,6 +78,7 @@ export default function SettingsCenter(props: Props) {
   const [error, setError] = useState('');
   const [pathChecks, setPathChecks] = useState<Record<string, PathValidationResult>>({});
   const [preparingModel, setPreparingModel] = useState('');
+  const [backupState, setBackupState] = useState<{directory: string; backups: api.BackupRecord[]}>({ directory: '', backups: [] });
   const [validatingModel, setValidatingModel] = useState('');
   const [favoriteLanguage, setFavoriteLanguage] = useState('fr');
   const [providerCards,setProviderCards]=useState<api.AIProviderCard[]>([]);
@@ -99,6 +100,25 @@ export default function SettingsCenter(props: Props) {
     onRefreshHealth();
     onRefreshModels();
   }, [open, onRefreshHealth, onRefreshModels]);
+
+  useEffect(() => {
+    if (!open || category !== 'storage') return;
+    void api.getBackups().then(setBackupState).catch(reason => setError(reason.message));
+  }, [category, open]);
+
+  const backupNow = async () => {
+    setBusy(true);
+    try { await api.createBackup(); setBackupState(await api.getBackups()); setMessage('数据库备份已完成'); }
+    catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); }
+    finally { setBusy(false); }
+  };
+  const restoreSelectedBackup = async (name: string) => {
+    if (!window.confirm(`恢复“${name}”会替换当前数据库，继续吗？恢复前会自动再创建安全备份。`)) return;
+    setBusy(true);
+    try { await api.restoreBackup(name); setMessage('备份已恢复，请重新启动字幕工厂'); }
+    catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); }
+    finally { setBusy(false); }
+  };
 
   const scanModelFolder=async()=>{ try { const {open}=await import('@tauri-apps/plugin-dialog'); const path=await open({directory:true,multiple:false,title:'选择模型根目录'}); if(typeof path!=='string')return; setBusy(true); const result=await api.scanLocalModels(path); setScannedModels(result.models); setMessage(`发现 ${result.models.length} 个模型候选`); } catch(reason){setError(reason instanceof Error?reason.message:String(reason));} finally{setBusy(false);} };
   const updateProvider=(id:string,patch:Partial<api.AIProviderCard>)=>setProviderCards(items=>items.map(item=>item.provider_id===id?{...item,...patch}:item));
@@ -292,7 +312,7 @@ export default function SettingsCenter(props: Props) {
               <i>{item.icon}</i><span>{item.label}</span>
             </button>)}
           </nav>
-          <small className="settings-version">Version {health?.version || '0.3.1'}</small>
+          <small className="settings-version">Version {health?.version || '1.0.0'}</small>
         </aside>
 
         <div className="settings-content">
@@ -392,6 +412,13 @@ export default function SettingsCenter(props: Props) {
                 {renderPath('FFmpeg 自定义路径', 'ffmpeg_path', 'ffmpeg', '通常无需设置')}
                 {renderPath('yt-dlp 自定义路径', 'yt_dlp_path', 'yt_dlp', '通常无需设置')}
               </SettingsSection>
+              <SettingsSection title="数据库备份" description="默认保留 7 份每日备份和 4 份每周备份；恢复前会再创建安全备份。" action={<button className="button secondary" disabled={busy} onClick={() => void backupNow()}>立即备份</button>}>
+                <div className="backup-list">
+                  {!backupState.backups.length && <span className="settings-empty">尚无备份</span>}
+                  {backupState.backups.slice(0, 8).map(backup => <div className="backup-row" key={backup.name}><span><strong>{backup.name}</strong><small>{backup.modified_at} · {bytes(backup.size)}</small></span><button className="button secondary" disabled={busy} onClick={() => void restoreSelectedBackup(backup.name)}>恢复</button></div>)}
+                </div>
+                <button className="button secondary" disabled={!backupState.directory} onClick={() => void api.revealLocalPath(backupState.directory)}>在 Finder 中打开备份目录</button>
+              </SettingsSection>
             </>}
 
             {category === 'appearance' && <>
@@ -409,9 +436,9 @@ export default function SettingsCenter(props: Props) {
                 <div className="shortcut-grid"><span>播放 / 暂停</span><kbd>Space</kbd><span>剧院模式</span><kbd>T</kbd><span>关闭弹窗或检查器</span><kbd>Esc</kbd><span>保存字幕编辑</span><kbd>Return</kbd></div>
               </SettingsSection>
               <SettingsSection title="关于字幕工厂" description="本地优先的专业字幕工作台。">
-                <div className="about-card"><strong>字幕工厂 {health?.version || '0.3.1'}</strong><span>Apple Silicon · 本地运行</span><small>服务状态：{health?.status || '正在连接'}</small></div>
+                <div className="about-card"><strong>字幕工厂 {health?.version || '1.0.0'}</strong><span>Apple Silicon · 本地运行</span><small>服务状态：{health?.status || '正在连接'}</small></div>
                 <div className="about-data-row"><span><strong>数据目录</strong><small>{health?.runtime?.data_directory || 'App 本地数据目录'}</small></span></div>
-                <div className="inline-actions"><button className="button secondary" onClick={() => void copyDiagnostics()}>复制诊断信息</button><button className="button secondary" onClick={() => { onClose(); onOpenLogs(); }}>查看处理日志</button></div>
+                <div className="inline-actions"><button className="button secondary" onClick={() => void copyDiagnostics()}>复制诊断信息</button><button className="button secondary" onClick={() => void api.downloadDiagnostics().catch(reason => setError(reason.message))}>导出脱敏诊断包</button><button className="button secondary" onClick={() => { onClose(); onOpenLogs(); }}>查看处理日志</button></div>
                 <p className="settings-help">复制的诊断信息不包含本机路径或 API Key。自定义路径和密钥不会进入 Git、默认配置、日志或 Release。</p>
               </SettingsSection>
             </>}

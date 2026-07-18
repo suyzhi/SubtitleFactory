@@ -23,17 +23,28 @@ class TaskCancelled(Exception):
 class TaskManager:
     """全局任务管理器，管理所有后台任务的生命周期"""
 
-    def __init__(self, max_workers: int = 2):
+    def __init__(self, max_workers: int = 6):
         self._tasks: dict = {}
         self._executor = ThreadPoolExecutor(max_workers=max_workers)
         self._lock = threading.RLock()
         self._pause_conditions: dict[str, threading.Condition] = {}
         self._futures: dict[str, Future] = {}
+        self._resource_limits = {
+            "ml": threading.Semaphore(1), "ffmpeg": threading.Semaphore(1),
+            "io": threading.Semaphore(2), "network_ai": threading.Semaphore(2),
+        }
 
-    def create_task(self, project_id: Optional[str], task_type: str) -> str:
+    def create_task(
+        self, project_id: Optional[str], task_type: str, *, priority: int = 0,
+        resource_class: str | None = None, max_attempts: int | None = None,
+    ) -> str:
         """创建新任务，返回 task_id"""
         task_id = str(uuid.uuid4())
         now = time.strftime("%Y-%m-%d %H:%M:%S")
+        inferred_resource = resource_class or {
+            "transcribe": "ml", "workflow": "ml", "render": "ffmpeg",
+            "download": "io", "extract_audio": "io", "clean": "network_ai", "translate": "network_ai",
+        }.get(task_type, "io")
         task = {
             "id": task_id,
             "project_id": project_id,
@@ -52,6 +63,10 @@ class TaskManager:
             "available_actions": [],
             "parent_task_id": None,
             "attempt": 1,
+            "priority": priority,
+            "resource_class": inferred_resource,
+            "max_attempts": max_attempts or (3 if inferred_resource in {"io", "network_ai"} else 1),
+            "next_retry_at": None,
         }
         with self._lock:
             self._tasks[task_id] = task
@@ -190,8 +205,8 @@ class TaskManager:
                 """INSERT OR REPLACE INTO tasks
                    (id,project_id,type,status,step,progress,message,error,error_code,
                     recoverable,available_actions,parent_task_id,attempt,details,logs,
-                    created_at,updated_at)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    created_at,updated_at,priority,resource_class,max_attempts,next_retry_at)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (
                     task["id"], task.get("project_id"), task["type"], task["status"],
                     task.get("step", ""), task.get("progress", 0), task.get("message", ""),
@@ -200,7 +215,8 @@ class TaskManager:
                     task.get("parent_task_id"), task.get("attempt", 1),
                     json.dumps(task.get("details", {}), ensure_ascii=False),
                     json.dumps(task.get("logs", []), ensure_ascii=False),
-                    task["created_at"], task["updated_at"],
+                    task["created_at"], task["updated_at"], task.get("priority", 0),
+                    task.get("resource_class", "io"), task.get("max_attempts", 1), task.get("next_retry_at"),
                 ),
             )
             db.commit()
@@ -314,48 +330,63 @@ class TaskManager:
     def run_background(self, task_id: str, func: Callable, *args, **kwargs):
         """在线程池中执行后台任务"""
         def _wrapper():
+            resource = self._tasks.get(task_id, {}).get("resource_class", "io")
+            limiter = self._resource_limits.get(resource, self._resource_limits["io"])
             try:
-                self.checkpoint(task_id)
-                self.update_task(task_id, status="running", progress=0.0, message="准备开始...")
-                self.checkpoint(task_id)
-                logger.info(f"[TaskManager] 任务开始: {task_id}")
-                func(task_id, *args, **kwargs)
-                self.checkpoint(task_id)
-                current = self.get_task(task_id) or {}
-                if current.get("status") != "partial":
-                    self.update_task(task_id, status="success", progress=100.0, message="完成")
-                else:
-                    self.update_task(task_id, progress=100.0)
-                logger.info(f"[TaskManager] 任务完成: {task_id}")
-            except TaskCancelled:
-                # cancel_task already set the terminal state and user-facing
-                # message. This is an expected control-flow exit, not a failure.
-                logger.info(f"[TaskManager] 任务已终止: {task_id}")
-            except Exception as e:
-                logger.error(f"[TaskManager] 任务失败: {task_id} - {str(e)}", exc_info=True)
-                error_code = getattr(e, "error_code", "UNEXPECTED_ERROR")
-                recoverable = bool(getattr(e, "recoverable", False))
-                actions = list(getattr(e, "available_actions", ["retry"] if recoverable else []))
-                suggestion = getattr(e, "suggestion", "请复制诊断信息并检查运行日志")
-                self.update_task(
-                    task_id, status="failed", error=str(e), error_code=error_code,
-                    recoverable=recoverable, available_actions=actions,
-                    message=str(e), details={"failure_suggestion": suggestion},
-                )
-                self.add_log(task_id, "error", "任务失败", str(e), suggestion=suggestion)
-                try:
-                    from ..models.database import get_db
-                    db = get_db()
-                    db.execute(
-                        """UPDATE transcription_runs SET status='failed', error_code=?,
-                           error_message=?, finished_at=datetime('now','localtime')
-                           WHERE task_id=? AND status='running'""",
-                        (error_code, str(e), task_id),
-                    )
-                    db.commit()
-                    db.close()
-                except Exception:
-                    logger.debug("Unable to finalize failed transcription run", exc_info=True)
+                limiter.acquire()
+                while True:
+                    try:
+                        self.checkpoint(task_id)
+                        current = self.get_task(task_id) or {}
+                        self.update_task(task_id, status="running", progress=0.0, message="准备开始...", next_retry_at=None)
+                        self.checkpoint(task_id)
+                        logger.info(f"[TaskManager] 任务开始: {task_id}")
+                        func(task_id, *args, **kwargs)
+                        self.checkpoint(task_id)
+                        current = self.get_task(task_id) or {}
+                        if current.get("status") != "partial":
+                            self.update_task(task_id, status="success", progress=100.0, message="完成")
+                        else:
+                            self.update_task(task_id, progress=100.0)
+                        logger.info(f"[TaskManager] 任务完成: {task_id}")
+                        break
+                    except TaskCancelled:
+                        logger.info(f"[TaskManager] 任务已终止: {task_id}")
+                        break
+                    except Exception as e:
+                        error_code = str(getattr(e, "error_code", "UNEXPECTED_ERROR"))
+                        recoverable = bool(getattr(e, "recoverable", False))
+                        current = self.get_task(task_id) or {}
+                        attempt = int(current.get("attempt", 1)); maximum = int(current.get("max_attempts", 1))
+                        terminal_code = any(marker in error_code.upper() for marker in ("AUTH", "BALANCE", "PATH", "CANCEL"))
+                        if recoverable and not terminal_code and attempt < maximum:
+                            delay = min(30, 2 ** (attempt - 1))
+                            retry_at = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(time.time() + delay))
+                            self.update_task(task_id, status="pending", attempt=attempt + 1, next_retry_at=retry_at,
+                                             message=f"将在 {delay} 秒后自动重试", error=str(e), error_code=error_code)
+                            self.add_log(task_id, "warning", "自动重试", f"第 {attempt} 次尝试失败", detail=str(e), suggestion=f"{delay} 秒后重试")
+                            deadline = time.monotonic() + delay
+                            while time.monotonic() < deadline:
+                                self.checkpoint(task_id); time.sleep(min(.25, deadline - time.monotonic()))
+                            continue
+                        logger.error(f"[TaskManager] 任务失败: {task_id} - {str(e)}", exc_info=True)
+                        actions = list(getattr(e, "available_actions", ["retry"] if recoverable else []))
+                        suggestion = getattr(e, "suggestion", "请复制诊断信息并检查运行日志")
+                        self.update_task(task_id, status="failed", error=str(e), error_code=error_code,
+                                         recoverable=recoverable, available_actions=actions, message=str(e),
+                                         details={"failure_suggestion": suggestion})
+                        self.add_log(task_id, "error", "任务失败", str(e), suggestion=suggestion)
+                        try:
+                            from ..models.database import get_db
+                            db = get_db(); db.execute(
+                                """UPDATE transcription_runs SET status='failed', error_code=?,error_message=?,
+                                   finished_at=datetime('now','localtime') WHERE task_id=? AND status='running'""",
+                                (error_code, str(e), task_id)); db.commit(); db.close()
+                        except Exception:
+                            logger.debug("Unable to finalize failed transcription run", exc_info=True)
+                        break
+            finally:
+                limiter.release()
 
         future = self._executor.submit(_wrapper)
         with self._lock:

@@ -202,6 +202,8 @@ class ParakeetInferenceAdapterTests(unittest.TestCase):
         self.assertEqual([item.text for item in segments], ["My God", "Ha ha ha."])
         self.assertLessEqual(segments[0].end, 15.6)
         self.assertEqual(segments[1].start, 26.64)
+        self.assertEqual(segments[1].timings[0]["text"], " Ha")
+        self.assertEqual(segments[1].timings[0]["start"], 26.64)
 
     def test_coreml_runner_reads_json_without_real_inference(self):
         with tempfile.TemporaryDirectory() as folder:

@@ -1,5 +1,4 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
-import { getCurrentWindow } from '@tauri-apps/api/window';
 import type { SubtitleDisplayMode, SubtitleSegment, SubtitleStyleSettings } from '../types';
 import playIcon from '../assets/player-icons/play.png';
 import pauseIcon from '../assets/player-icons/pause.png';
@@ -16,12 +15,14 @@ interface Props {
   segments: SubtitleSegment[];
   style: SubtitleStyleSettings;
   activeIdx: number;
-  theaterMode: boolean;
+  presentationMode: PlayerPresentationMode;
   onTimeUpdate: (time: number) => void;
   onDurationChange?: (duration: number) => void;
   onStyleChange: (style: SubtitleStyleSettings) => void;
-  onTheaterModeChange: (enabled: boolean) => void;
+  onPresentationModeChange: (mode: PlayerPresentationMode) => void;
 }
+
+export type PlayerPresentationMode = 'normal' | 'theater' | 'fullscreen';
 
 export interface SubtitlePlayerHandle {
   seekTo: (time: number) => void;
@@ -50,8 +51,8 @@ function ControlIcon({ src }: { src: string }) {
 }
 
 const SubtitlePlayer = forwardRef<SubtitlePlayerHandle, Props>(function SubtitlePlayer({
-  videoUrl, segments, style, activeIdx, theaterMode, onTimeUpdate, onDurationChange,
-  onStyleChange, onTheaterModeChange,
+  videoUrl, segments, style, activeIdx, presentationMode, onTimeUpdate, onDurationChange,
+  onStyleChange, onPresentationModeChange,
 }, ref) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
@@ -62,10 +63,11 @@ const SubtitlePlayer = forwardRef<SubtitlePlayerHandle, Props>(function Subtitle
   const [volume, setVolume] = useState(1);
   const [muted, setMuted] = useState(false);
   const [rate, setRate] = useState(1);
+  const [loopCurrent, setLoopCurrent] = useState(false);
   const [showSubtitleMenu, setShowSubtitleMenu] = useState(false);
   const [controlsVisible, setControlsVisible] = useState(true);
-  const [fullscreen, setFullscreen] = useState(false);
-  const [fallbackFullscreen, setFallbackFullscreen] = useState(false);
+  const fullscreen = presentationMode === 'fullscreen';
+  const theaterMode = presentationMode === 'theater';
 
   const seekTo = useCallback((next: number) => {
     const video = videoRef.current;
@@ -88,10 +90,27 @@ const SubtitlePlayer = forwardRef<SubtitlePlayerHandle, Props>(function Subtitle
   }, [videoUrl]);
 
   useEffect(() => {
-    const update = () => setFullscreen(Boolean(document.fullscreenElement));
+    if ('__TAURI_INTERNALS__' in window) return;
+    const wrapper = wrapperRef.current;
+    if (!wrapper) return;
+
+    if (fullscreen && document.fullscreenElement !== wrapper) {
+      void wrapper.requestFullscreen().catch(() => undefined);
+    } else if (!fullscreen && document.fullscreenElement === wrapper) {
+      void document.exitFullscreen().catch(() => undefined);
+    }
+  }, [fullscreen]);
+
+  useEffect(() => {
+    if ('__TAURI_INTERNALS__' in window) return;
+    const update = () => {
+      if (!document.fullscreenElement && presentationMode === 'fullscreen') {
+        onPresentationModeChange('normal');
+      }
+    };
     document.addEventListener('fullscreenchange', update);
     return () => document.removeEventListener('fullscreenchange', update);
-  }, []);
+  }, [onPresentationModeChange, presentationMode]);
 
   const revealControls = useCallback(() => {
     setControlsVisible(true);
@@ -117,34 +136,9 @@ const SubtitlePlayer = forwardRef<SubtitlePlayerHandle, Props>(function Subtitle
     } else video.pause();
   }, []);
 
-  const toggleFullscreen = useCallback(async () => {
-    if (fallbackFullscreen) {
-      setFallbackFullscreen(false);
-      setFullscreen(false);
-      return;
-    }
-    try {
-      if ('__TAURI_INTERNALS__' in window) {
-        const appWindow = getCurrentWindow();
-        const next = !(await appWindow.isFullscreen());
-        await appWindow.setFullscreen(next);
-        setFullscreen(next);
-        return;
-      }
-      if (document.fullscreenElement) await document.exitFullscreen();
-      else {
-        await wrapperRef.current?.requestFullscreen();
-        if (!document.fullscreenElement) {
-          setFallbackFullscreen(true);
-          setFullscreen(true);
-        }
-      }
-    } catch (error) {
-      console.error('切换全屏失败', error);
-      setFallbackFullscreen(true);
-      setFullscreen(true);
-    }
-  }, [fallbackFullscreen]);
+  const toggleFullscreen = useCallback(() => {
+    onPresentationModeChange(fullscreen ? 'normal' : 'fullscreen');
+  }, [fullscreen, onPresentationModeChange]);
 
   const active = activeIdx >= 0 && activeIdx < segments.length ? segments[activeIdx] : null;
   const original = active?.clean_text || active?.raw_text || '';
@@ -161,7 +155,7 @@ const SubtitlePlayer = forwardRef<SubtitlePlayerHandle, Props>(function Subtitle
   const updateStyle = (partial: Partial<SubtitleStyleSettings>) => onStyleChange({ ...style, ...partial });
 
   return (
-    <div className={`pro-player ${controlsVisible ? 'controls-visible' : 'controls-hidden'} ${fallbackFullscreen ? 'fallback-fullscreen' : ''}`} ref={wrapperRef}
+    <div className={`pro-player ${controlsVisible ? 'controls-visible' : 'controls-hidden'} ${fullscreen ? 'player-fullscreen' : ''}`} ref={wrapperRef}
       tabIndex={0} onMouseMove={revealControls} onMouseEnter={revealControls}
       onMouseLeave={() => playing && !showSubtitleMenu && setControlsVisible(false)}
       onKeyDown={event => {
@@ -174,20 +168,22 @@ const SubtitlePlayer = forwardRef<SubtitlePlayerHandle, Props>(function Subtitle
         if (event.key === ' ') { event.preventDefault(); togglePlay(); }
         if (event.key === 'ArrowLeft') seekTo(time - 5);
         if (event.key === 'ArrowRight') seekTo(time + 5);
-        if (event.key.toLowerCase() === 'f') void toggleFullscreen();
-        if (event.key === 'Escape' && fallbackFullscreen) {
+        if (event.key === ',') seekTo(time - 1 / 25);
+        if (event.key === '.') seekTo(time + 1 / 25);
+        if (event.key.toLowerCase() === 'f') { event.preventDefault(); event.stopPropagation(); toggleFullscreen(); }
+        if (event.key === 'Escape' && fullscreen) {
           event.preventDefault();
           event.stopPropagation();
-          setFallbackFullscreen(false);
-          setFullscreen(false);
+          onPresentationModeChange('normal');
         }
       }}>
       <video ref={videoRef} className="pro-player-video" preload="metadata" playsInline
         onClick={togglePlay}
-        onDoubleClick={() => void toggleFullscreen()}
+        onDoubleClick={toggleFullscreen}
         onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)}
         onTimeUpdate={() => {
           const current = videoRef.current?.currentTime || 0;
+          if (loopCurrent && active && current >= active.end) { seekTo(active.start); return; }
           setTime(current); onTimeUpdate(current);
         }}
         onLoadedMetadata={() => {
@@ -225,6 +221,9 @@ const SubtitlePlayer = forwardRef<SubtitlePlayerHandle, Props>(function Subtitle
             <button className="player-icon-btn" aria-label={playing ? '暂停' : '播放'} onClick={togglePlay}>
               <ControlIcon src={playing ? pauseIcon : playIcon} />
             </button>
+            <button className="player-icon-btn player-step-btn" aria-label="后退一帧" title="后退一帧 (, )" onClick={() => seekTo(time - 1 / 25)}>‹</button>
+            <button className="player-icon-btn player-step-btn" aria-label="前进一帧" title="前进一帧 (. )" onClick={() => seekTo(time + 1 / 25)}>›</button>
+            <button className={`player-icon-btn player-step-btn ${loopCurrent ? 'active' : ''}`} aria-label="循环当前字幕" aria-pressed={loopCurrent} onClick={() => setLoopCurrent(value => !value)}>↻</button>
             <button className="player-icon-btn" aria-label={muted ? '取消静音' : '静音'} onClick={() => {
               const next = !muted; setMuted(next); if (videoRef.current) videoRef.current.muted = next;
             }}><ControlIcon src={muted || volume === 0 ? mutedIcon : volumeIcon} /></button>
@@ -232,15 +231,16 @@ const SubtitlePlayer = forwardRef<SubtitlePlayerHandle, Props>(function Subtitle
               onChange={event => { const next = Number(event.target.value); setVolume(next); if (videoRef.current) videoRef.current.volume = next; }} />
             <span className="player-time">{timecode(time)} / {timecode(duration)}</span>
             <span className="control-spacer" />
-            <AppSelect className="rate-select" label="播放速度" value={String(rate)} onChange={value=>{const next=Number(value);setRate(next);if(videoRef.current)videoRef.current.playbackRate=next;}} options={[0.5,0.75,1,1.25,1.5,2].map(value=>({value:String(value),label:`${value}×`}))}/>
+            <AppSelect className="rate-select" label="播放速度" popoverMinWidth={112} value={String(rate)} onChange={value=>{const next=Number(value);setRate(next);if(videoRef.current)videoRef.current.playbackRate=next;}} options={[0.5,0.75,1,1.25,1.5,2].map(value=>({value:String(value),label:`${value}×`}))}/>
             <button className={`player-icon-btn ${style.mode !== 'off' ? 'active' : ''}`} aria-label="字幕设置"
               aria-haspopup="dialog" aria-expanded={showSubtitleMenu}
               onClick={() => setShowSubtitleMenu(value => !value)}><ControlIcon src={captionsIcon} /></button>
             <button className={`player-icon-btn ${theaterMode ? 'active' : ''}`} aria-label={theaterMode ? '退出剧院模式' : '剧院模式'}
               aria-keyshortcuts="T" title={theaterMode ? '退出剧院模式 (T / Esc)' : '剧院模式 (T)'}
-              onClick={() => onTheaterModeChange(!theaterMode)}><ControlIcon src={theaterIcon} /></button>
+              onClick={() => onPresentationModeChange(theaterMode ? 'normal' : 'theater')}><ControlIcon src={theaterIcon} /></button>
             <button className={`player-icon-btn ${fullscreen ? 'active' : ''}`} aria-label={fullscreen ? '退出全屏' : '全屏'}
-              onClick={() => void toggleFullscreen()}><ControlIcon src={fullscreenIcon} /></button>
+              aria-keyshortcuts="F" title={fullscreen ? '退出全屏 (F / Esc)' : '视频全屏 (F)'}
+              onClick={toggleFullscreen}><ControlIcon src={fullscreenIcon} /></button>
           </div>
         </div>
       </div>

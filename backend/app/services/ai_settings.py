@@ -5,6 +5,7 @@ from urllib.parse import urlparse
 
 from ..models.database import get_db
 from ..utils.config import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL
+from .secret_store import get_secret, keychain_enabled, save_secret
 
 
 PROVIDER_PRESETS = [
@@ -39,6 +40,7 @@ def get_ai_settings(include_secret: bool = True) -> dict:
         row = db.execute("SELECT * FROM ai_settings WHERE id = 1").fetchone()
     result = dict(row)
     db.close()
+    result["api_key"] = get_secret(f"legacy:{result['provider']}", result.get("api_key", ""))
     if not include_secret:
         result["has_api_key"] = bool(result.get("api_key"))
         result["api_key"] = ""
@@ -59,12 +61,15 @@ def save_ai_settings(provider: str, base_url: str, model: str, api_key: str | No
     changed = any(current.get(key) != value for key, value in {
         "provider": provider, "base_url": base_url, "model": model,
     }.items())
+    save_secret(f"legacy:{provider}", secret)
+    stored_secret = "" if keychain_enabled() else secret
     db.execute(
-        """INSERT INTO ai_settings (id, provider, base_url, api_key, model, updated_at)
-           VALUES (1, ?, ?, ?, ?, ?)
+        """INSERT INTO ai_settings (id, provider, base_url, api_key, model, updated_at,has_api_key,keychain_ref)
+           VALUES (1, ?, ?, ?, ?, ?,?,?)
            ON CONFLICT(id) DO UPDATE SET provider=excluded.provider, base_url=excluded.base_url,
-             api_key=excluded.api_key, model=excluded.model, updated_at=excluded.updated_at""",
-        ((provider or "custom").strip(), base_url, secret, model, time.strftime("%Y-%m-%d %H:%M:%S")),
+             api_key=excluded.api_key, model=excluded.model, updated_at=excluded.updated_at,
+             has_api_key=excluded.has_api_key,keychain_ref=excluded.keychain_ref""",
+        ((provider or "custom").strip(), base_url, stored_secret, model, time.strftime("%Y-%m-%d %H:%M:%S"), int(bool(secret)), f"legacy:{provider}" if keychain_enabled() else None),
     )
     if changed:
         db.execute("UPDATE ai_settings SET last_test_status = '', last_test_at = '', last_latency_ms = 0 WHERE id = 1")

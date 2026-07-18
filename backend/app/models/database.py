@@ -5,8 +5,11 @@
 import os
 import re
 import sqlite3
+from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 from ..utils.config import DB_PATH
+from .migrations import run_migrations
+from ..security import signed_media_url
 
 
 def get_db() -> sqlite3.Connection:
@@ -85,6 +88,7 @@ def init_db():
             start REAL NOT NULL,
             end REAL NOT NULL,
             text TEXT NOT NULL,
+            timings_json TEXT NOT NULL DEFAULT '[]',
             is_draft INTEGER DEFAULT 1,
             FOREIGN KEY (run_id) REFERENCES transcription_runs(id) ON DELETE CASCADE,
             FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
@@ -221,6 +225,7 @@ def init_db():
         )
 
     conn.commit()
+    run_migrations(conn, Path(DB_PATH))
     conn.close()
     print(f"[DB] 数据库已初始化: {DB_PATH}")
 
@@ -228,6 +233,9 @@ def init_db():
 def mark_interrupted_tasks():
     """Mark workers from a previous backend process as explicitly recoverable."""
     conn = get_db()
+    rows = [dict(row) for row in conn.execute(
+        "SELECT * FROM tasks WHERE status IN ('pending','running','paused')"
+    )]
     conn.execute(
         """UPDATE tasks SET status='failed', error_code='APP_INTERRUPTED',
            error='应用在任务执行期间退出', recoverable=1,
@@ -237,6 +245,7 @@ def mark_interrupted_tasks():
     )
     conn.commit()
     conn.close()
+    return rows
 
 
 def segment_to_dict(row) -> dict:
@@ -248,6 +257,7 @@ def segment_to_dict(row) -> dict:
         source_stage = row["source_stage"] or "final"
     except (IndexError, KeyError):
         pass
+    row_keys = set(row.keys())
     return {
         "id": row["id"],
         "project_id": row["project_id"],
@@ -258,6 +268,7 @@ def segment_to_dict(row) -> dict:
         "clean_text": row["clean_text"],
         "translated_text": row["translated_text"],
         "speaker": row["speaker"],
+        "speaker_id": row["speaker_id"] if "speaker_id" in row_keys else None,
         "locked": bool(row["locked"]),
         "is_draft": is_draft,
         "source_stage": source_stage,
@@ -302,8 +313,14 @@ def project_to_dict(row) -> dict:
     thumbnail_url = source_thumbnail_url
     if not thumbnail_url and row["source_type"] == "youtube":
         thumbnail_url = _youtube_thumbnail_url(row["source_url"])
+    thumbnail_access_url = None
     if thumbnail_path and os.path.isfile(thumbnail_path):
         thumbnail_url = f"/api/projects/{row['id']}/thumbnail"
+        thumbnail_access_url = signed_media_url(thumbnail_url)
+
+    video_url = None
+    if row["video_path"] and os.path.isfile(row["video_path"]):
+        video_url = signed_media_url(f"/api/projects/{row['id']}/video")
 
     return {
         "id": row["id"],
@@ -311,12 +328,16 @@ def project_to_dict(row) -> dict:
         "source_type": row["source_type"],
         "source_url": row["source_url"],
         "video_path": row["video_path"],
+        "video_url": video_url,
         "audio_path": row["audio_path"],
         "thumbnail_url": thumbnail_url,
+        "thumbnail_access_url": thumbnail_access_url,
         "group_name": group_name,
         "language": row["language"],
         "target_language": row["target_language"],
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
         "deleted_at": deleted_at,
+        "edit_revision": int(row["edit_revision"] or 0) if "edit_revision" in row_keys else 0,
+        "media_status": (row["media_status"] or "ready") if "media_status" in row_keys else "ready",
     }

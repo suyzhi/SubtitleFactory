@@ -12,7 +12,10 @@ from ..utils.task_manager import task_manager
 logger = logging.getLogger(__name__)
 
 
-def extract_audio(task_id: str, video_path: str, project_id: str) -> str:
+def extract_audio(
+    task_id: str, video_path: str, project_id: str,
+    track_index: int = 0, range_start: float | None = None, range_end: float | None = None,
+) -> str:
     task_manager.update_task(task_id, step="extracting_audio", progress=5, message="正在提取音频...")
     task_manager.add_log(task_id, "info", "extracting_audio", "使用内置媒体引擎提取 16kHz 单声道音频")
 
@@ -24,7 +27,9 @@ def extract_audio(task_id: str, video_path: str, project_id: str) -> str:
         with av.open(video_path) as container:
             if not container.streams.audio:
                 raise ValueError("视频中没有可用音轨")
-            stream = container.streams.audio[0]
+            if track_index >= len(container.streams.audio):
+                raise ValueError("所选音轨不存在")
+            stream = container.streams.audio[track_index]
             duration_seconds = float(stream.duration * stream.time_base) if stream.duration else 0.0
             resampler = av.audio.resampler.AudioResampler(format="s16", layout="mono", rate=16000)
 
@@ -35,6 +40,11 @@ def extract_audio(task_id: str, video_path: str, project_id: str) -> str:
                 for packet in container.demux(stream):
                     task_manager.checkpoint(task_id)
                     for frame in packet.decode():
+                        frame_time = float(frame.time or 0)
+                        if range_start is not None and frame_time + float(frame.duration or 0) * float(frame.time_base) < range_start:
+                            continue
+                        if range_end is not None and frame_time >= range_end:
+                            break
                         for converted in resampler.resample(frame):
                             output.writeframes(bytes(converted.planes[0])[:converted.samples * 2])
                         if duration_seconds and frame.time is not None:

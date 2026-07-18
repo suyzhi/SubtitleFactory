@@ -20,10 +20,12 @@ from fastapi.responses import FileResponse
 from ..models.database import get_db, init_db, project_to_dict, segment_to_dict
 from ..models.schemas import (
     ProjectCreate, ProjectResponse, ProjectUpdate, SegmentResponse,
-    ProjectGroupUpdate, SegmentUpdate, ExportRequest, ProcessingConfig,
-    WorkflowRequest, TranscriptionRetryRequest, ModelPrepareRequest,
+    ProjectGroupUpdate, SegmentUpdate, SegmentOperationItem, SegmentOperationRequest, ExportRequest, ProcessingConfig,
+    WorkflowRequest, TranscriptionRetryRequest, ModelPrepareRequest, MediaSelectionUpdate,
     ModelScanRequest, ModelImportRequest,
 )
+from ..services.editor import EditorServiceError, execute_operation, import_segment_snapshot
+from ..services.subtitle_importer import parse_subtitle
 from ..utils.config import (
     DATA_DIR, PROJECTS_DIR, DOWNLOADS_DIR, AUDIO_DIR, SUBTITLES_DIR,
     EXPORTS_DIR,
@@ -32,6 +34,7 @@ from ..utils.task_manager import task_manager
 from ..services.app_settings import get_app_settings
 from ..services.downloader import download_video, get_video_info, normalize_youtube_url
 from ..services.audio_extractor import extract_audio
+from ..services.audio_preview import generate_track_preview
 from ..services.transcriber import (
     PARAKEET_MODEL_IDS,
     SUPPORTED_TRANSCRIPTION_MODELS,
@@ -58,6 +61,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api")
 
 VIDEO_EXTENSIONS = {".mp4", ".mkv", ".mov", ".webm", ".avi"}
+IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
 TRANSCRIPTION_LOCK = threading.Lock()
 
 RUNTIME_LABELS = {
@@ -439,21 +443,57 @@ def prepare_transcription_model(model_id: str, request: ModelPrepareRequest):
 # ============================
 
 @router.get("/projects")
-def list_projects(deleted: bool = False):
-    """获取项目列表；默认隐藏回收站项目。"""
+def list_projects(
+    deleted: bool = False, page: int = 1, page_size: int = 100,
+    search: str = "", source_type: str = "", group: str = "", status: str = "",
+    sort: str = "updated_desc", include_playlist_items: bool = False,
+):
+    """Paginated/searchable project library; defaults preserve the legacy response."""
     init_db()
+    page = max(1, int(page)); page_size = max(1, min(200, int(page_size)))
+    conditions = [f"p.deleted_at IS {'NOT ' if deleted else ''}NULL"]
+    values: list = []
+    if not deleted and not include_playlist_items:
+        conditions.append(
+            "NOT EXISTS (SELECT 1 FROM batch_items bi JOIN batches b ON b.id=bi.batch_id "
+            "WHERE bi.project_id=p.id AND b.kind='youtube_playlist')"
+        )
+    if search:
+        conditions.append("p.title LIKE ? ESCAPE '\\'")
+        escaped = search.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        values.append(f"%{escaped}%")
+    if source_type in {"local", "youtube"}:
+        conditions.append("p.source_type=?"); values.append(source_type)
+    if group:
+        conditions.append("COALESCE(p.group_name,'')=?"); values.append(group)
+    if status:
+        conditions.append("EXISTS (SELECT 1 FROM tasks tf WHERE tf.project_id=p.id AND tf.status=?)")
+        values.append(status)
+    order = {
+        "updated_desc": "COALESCE(p.deleted_at,p.updated_at) DESC",
+        "updated_asc": "COALESCE(p.deleted_at,p.updated_at) ASC",
+        "created_desc": "p.created_at DESC", "created_asc": "p.created_at ASC",
+        "name_asc": "p.title COLLATE NOCASE ASC", "name_desc": "p.title COLLATE NOCASE DESC",
+    }.get(sort, "COALESCE(p.deleted_at,p.updated_at) DESC")
+    where = " AND ".join(conditions)
     db = get_db()
+    total = db.execute(f"SELECT COUNT(*) FROM projects p WHERE {where}", values).fetchone()[0]
     rows = db.execute(
-        "SELECT p.*, (SELECT COUNT(*) FROM segments s WHERE s.project_id = p.id) as segments_count "
-        f"FROM projects p WHERE p.deleted_at IS {'NOT ' if deleted else ''}NULL "
-        "ORDER BY COALESCE(p.deleted_at, p.updated_at) DESC"
+        """SELECT p.*, (SELECT COUNT(*) FROM segments s WHERE s.project_id=p.id) segments_count,
+           (SELECT status FROM tasks t WHERE t.project_id=p.id ORDER BY updated_at DESC LIMIT 1) latest_task_status,
+           (SELECT message FROM tasks t WHERE t.project_id=p.id ORDER BY updated_at DESC LIMIT 1) latest_task_message
+           FROM projects p WHERE """ + where + f" ORDER BY {order} LIMIT ? OFFSET ?",
+        [*values, page_size, (page - 1) * page_size],
     ).fetchall()
     db.close()
     return {
         "projects": [
-            {**project_to_dict(r), "segments_count": r["segments_count"]}
+            {**project_to_dict(r), "segments_count": r["segments_count"],
+             "latest_task_status": r["latest_task_status"], "latest_task_message": r["latest_task_message"]}
             for r in rows
-        ]
+        ],
+        "page": page, "page_size": page_size, "total": total,
+        "pages": max(1, (total + page_size - 1) // page_size),
     }
 
 
@@ -847,6 +887,82 @@ async def import_local_video(
 # 音频提取
 # ============================
 
+@router.get("/projects/{project_id}/media-info")
+def get_media_info(project_id: str):
+    """Enumerate playable audio tracks without invoking an external process."""
+    import av
+
+    db = get_db()
+    row = db.execute(
+        "SELECT video_path,audio_track_index,range_start,range_end FROM projects WHERE id=?",
+        (project_id,),
+    ).fetchone()
+    db.close()
+    if not row:
+        raise HTTPException(404, "项目不存在")
+    if not row["video_path"] or not os.path.isfile(row["video_path"]):
+        raise HTTPException(404, "视频文件不存在")
+    with av.open(row["video_path"]) as container:
+        tracks = []
+        for index, stream in enumerate(container.streams.audio):
+            metadata = dict(stream.metadata or {})
+            tracks.append({
+                "index": index,
+                "codec": stream.codec_context.name,
+                "channels": stream.codec_context.channels,
+                "sample_rate": stream.codec_context.sample_rate,
+                "language": metadata.get("language", "und"),
+                "title": metadata.get("title") or f"音轨 {index + 1}",
+                "duration": float(stream.duration * stream.time_base) if stream.duration else None,
+            })
+        duration = float(container.duration / 1_000_000) if container.duration else None
+    return {
+        "audio_tracks": tracks,
+        "duration": duration,
+        "selection": {
+            "audio_track_index": row["audio_track_index"] or 0,
+            "range_start": row["range_start"],
+            "range_end": row["range_end"],
+        },
+    }
+
+
+@router.get("/projects/{project_id}/media-track-preview")
+def preview_media_track(project_id: str, track: int = Query(0, ge=0), start: float = Query(0, ge=0)):
+    db = get_db()
+    row = db.execute("SELECT video_path FROM projects WHERE id=?", (project_id,)).fetchone()
+    db.close()
+    if not row or not row["video_path"] or not os.path.isfile(row["video_path"]):
+        raise HTTPException(404, "项目视频不存在")
+    try:
+        path = generate_track_preview(project_id, row["video_path"], track, start)
+    except ValueError as error:
+        raise HTTPException(422, str(error)) from error
+    return FileResponse(path, media_type="audio/wav", filename=f"track-{track + 1}-preview.wav")
+
+
+@router.put("/projects/{project_id}/media-selection")
+def update_media_selection(project_id: str, request: MediaSelectionUpdate):
+    db = get_db()
+    try:
+        row = db.execute("SELECT video_path FROM projects WHERE id=?", (project_id,)).fetchone()
+        if not row:
+            raise HTTPException(404, "项目不存在")
+        if row["video_path"] and os.path.isfile(row["video_path"]):
+            import av
+            with av.open(row["video_path"]) as container:
+                if request.audio_track_index >= len(container.streams.audio):
+                    raise HTTPException(422, "所选音轨不存在")
+        db.execute(
+            """UPDATE projects SET audio_track_index=?,range_start=?,range_end=?,audio_path=NULL,
+               updated_at=datetime('now','localtime') WHERE id=?""",
+            (request.audio_track_index, request.range_start, request.range_end, project_id),
+        )
+        db.commit()
+        return {"selection": request.model_dump(), "audio_reextract_required": True}
+    finally:
+        db.close()
+
 @router.post("/projects/{project_id}/extract-audio")
 def start_extract_audio(project_id: str):
     """开始提取音频（后台任务）"""
@@ -865,7 +981,17 @@ def start_extract_audio(project_id: str):
 
 
 def _do_extract_audio(task_id: str, project_id: str, video_path: str):
-    audio_path = extract_audio(task_id, video_path, project_id)
+    db = get_db()
+    selection = db.execute(
+        "SELECT audio_track_index,range_start,range_end FROM projects WHERE id=?", (project_id,)
+    ).fetchone()
+    db.close()
+    audio_path = extract_audio(
+        task_id, video_path, project_id,
+        int(selection["audio_track_index"] or 0) if selection else 0,
+        selection["range_start"] if selection else None,
+        selection["range_end"] if selection else None,
+    )
     task_manager.checkpoint(task_id)
 
     db = get_db()
@@ -983,6 +1109,10 @@ def start_workflow(project_id: str, request: WorkflowRequest):
     mapping=dict(settings.get("transcription_runtime_by_model") or {});mapping[model]=runtime
     save_app_settings({"transcription_runtime_by_model":mapping})
     task_id = task_manager.create_task(project_id, "workflow")
+    task_manager.update_task(task_id, details={"resume_payload": {
+        "project_id": project_id, "model": model, "language": request.language,
+        "source_url": source_url if not row["video_path"] else None, "runtime": runtime,
+    }})
     task_manager.run_background(
         task_id, _do_workflow, project_id, model, request.language,
         source_url if not row["video_path"] else None, runtime,
@@ -1126,6 +1256,46 @@ def _do_translate(task_id: str, project_id: str, target_language: str, provider_
 # 字幕段管理
 # ============================
 
+@router.post("/projects/{project_id}/subtitles/import")
+async def import_subtitles_file(
+    project_id: str,
+    file: UploadFile = File(...),
+    expected_revision: int = Form(...),
+):
+    extension = Path(file.filename or "").suffix.lower()
+    if extension not in {".srt", ".vtt", ".ass"}:
+        raise HTTPException(422, "仅支持 SRT、VTT 和 ASS 字幕")
+    payload = await file.read(10 * 1024 * 1024 + 1)
+    if len(payload) > 10 * 1024 * 1024:
+        raise HTTPException(413, "字幕文件不能超过 10 MB")
+    try:
+        cues = parse_subtitle(payload, file.filename or f"subtitle{extension}")
+        result = import_segment_snapshot(project_id, expected_revision, cues)
+    except ValueError as error:
+        raise HTTPException(422, detail={
+            "code": "SUBTITLE_IMPORT_INVALID", "message": str(error),
+            "suggestion": "请修正字幕格式后重试", "recoverable": True,
+        }) from error
+    except EditorServiceError as error:
+        raise HTTPException(error.status_code, detail=error.as_detail()) from error
+
+    import_dir = Path(PROJECTS_DIR) / project_id / "imports"
+    import_dir.mkdir(parents=True, exist_ok=True)
+    original_path = import_dir / f"{result['operation_id']}{extension}"
+    original_path.write_bytes(payload)
+    db = get_db()
+    try:
+        db.execute(
+            """INSERT INTO project_assets(id,project_id,kind,path,metadata_json,created_at)
+               VALUES (?,?,?,?,?,datetime('now','localtime'))""",
+            (str(uuid.uuid4()), project_id, "subtitle_original", str(original_path),
+             json.dumps({"filename": Path(file.filename or "subtitle").name, "format": extension[1:]})),
+        )
+        db.commit()
+    finally:
+        db.close()
+    return result
+
 @router.get("/projects/{project_id}/segments")
 def get_segments(project_id: str, after_idx: int = 0):
     """获取项目的所有字幕段。after_idx>0 时只返回比该索引新的字幕（增量模式）。"""
@@ -1173,41 +1343,24 @@ def get_segments(project_id: str, after_idx: int = 0):
 
 @router.patch("/projects/{project_id}/segments/{segment_index}")
 def update_segment(project_id: str, segment_index: int, update: SegmentUpdate):
-    """修改某一条字幕"""
+    """兼容旧客户端的单条编辑接口；内部进入统一原子编辑引擎。"""
     db = get_db()
-    row = db.execute(
-        "SELECT * FROM segments WHERE project_id = ? AND idx = ?",
-        (project_id, segment_index)
-    ).fetchone()
-
-    if not row:
-        db.close()
-        raise HTTPException(404, "字幕段不存在")
-
-    updates = {}
-    if update.clean_text is not None:
-        updates["clean_text"] = update.clean_text
-    if update.translated_text is not None:
-        updates["translated_text"] = update.translated_text
-    if update.locked is not None:
-        updates["locked"] = 1 if update.locked else 0
-
-    if updates:
-        set_clause = ", ".join(f"{k} = ?" for k in updates)
-        values = list(updates.values()) + [project_id, segment_index]
-        db.execute(
-            f"UPDATE segments SET {set_clause} WHERE project_id = ? AND idx = ?",
-            values
-        )
-        db.commit()
-
-    updated_row = db.execute(
-        "SELECT * FROM segments WHERE project_id = ? AND idx = ?",
-        (project_id, segment_index)
-    ).fetchone()
+    project = db.execute("SELECT edit_revision FROM projects WHERE id=?", (project_id,)).fetchone()
     db.close()
-
-    return segment_to_dict(updated_row)
+    if not project:
+        raise HTTPException(404, "项目不存在")
+    values = update.model_dump(exclude_unset=True)
+    item = SegmentOperationItem(index=segment_index, **values)
+    try:
+        result = execute_operation(project_id, SegmentOperationRequest(
+            expected_revision=int(project["edit_revision"] or 0),
+            operation="update_many",
+            items=[item],
+            include_locked=set(values) == {"locked"},
+        ))
+    except EditorServiceError as error:
+        raise HTTPException(error.status_code, detail=error.as_detail()) from error
+    return next(segment for segment in result["segments"] if segment["index"] == segment_index)
 
 
 # ============================
@@ -1223,6 +1376,7 @@ def export_subtitles(project_id: str, req: ExportRequest):
         "SELECT * FROM segments WHERE project_id = ? ORDER BY idx",
         (project_id,)
     ).fetchall()
+    style_row = db.execute("SELECT settings_json FROM project_styles WHERE project_id=?", (project_id,)).fetchone()
     db.close()
 
     if not row:
@@ -1234,6 +1388,10 @@ def export_subtitles(project_id: str, req: ExportRequest):
 
     fmt = req.format
     bilingual = req.bilingual
+    style_settings = req.style
+    if style_settings is None and style_row:
+        try: style_settings = json.loads(style_row["settings_json"])
+        except json.JSONDecodeError: style_settings = None
 
     if fmt == "srt":
         out = get_subtitle_path(project_id, "srt")
@@ -1245,7 +1403,7 @@ def export_subtitles(project_id: str, req: ExportRequest):
         media_type = "text/vtt"
     elif fmt == "ass":
         out = get_subtitle_path(project_id, "ass")
-        export_ass(segments, out, bilingual=bilingual, primary_lang=req.primary_language)
+        export_ass(segments, out, bilingual=bilingual, primary_lang=req.primary_language, settings=style_settings)
         media_type = "text/plain"
     elif fmt == "srt-bilingual":
         out = get_subtitle_path(project_id, "bilingual.srt")
@@ -1257,7 +1415,7 @@ def export_subtitles(project_id: str, req: ExportRequest):
 
         # 先导出 ASS 字幕
         ass_path = get_subtitle_path(project_id, "ass")
-        export_ass(segments, ass_path, bilingual=bilingual, primary_lang=req.primary_language)
+        export_ass(segments, ass_path, bilingual=bilingual, primary_lang=req.primary_language, settings=style_settings)
 
         # 后台压制
         task_id = task_manager.create_task(project_id, "render")
@@ -1275,7 +1433,7 @@ def export_subtitles(project_id: str, req: ExportRequest):
 
 
 @router.get("/projects/{project_id}/export/download")
-def download_export(project_id: str, fmt: str = "srt"):
+def download_export(project_id: str, fmt: str = Query("srt", pattern="^(srt|vtt|ass|srt-bilingual|mp4|mkv)$")):
     """下载已导出的字幕文件"""
     if fmt in {"mp4", "mkv"}:
         from ..utils.config import EXPORTS_DIR
@@ -1298,9 +1456,10 @@ def get_video_file(project_id: str):
     db = get_db()
     row = db.execute("SELECT video_path FROM projects WHERE id = ?", (project_id,)).fetchone()
     db.close()
-    if not row or not row["video_path"] or not os.path.exists(row["video_path"]):
+    path = Path(row["video_path"]).expanduser().resolve(strict=False) if row and row["video_path"] else None
+    if not path or not path.is_file() or path.suffix.lower() not in VIDEO_EXTENSIONS:
         raise HTTPException(404, "视频文件不存在")
-    return FileResponse(row["video_path"])
+    return FileResponse(path)
 
 
 @router.get("/projects/{project_id}/thumbnail")
@@ -1311,9 +1470,10 @@ def get_thumbnail_file(project_id: str):
         "SELECT thumbnail_path FROM projects WHERE id = ?", (project_id,)
     ).fetchone()
     db.close()
-    if not row or not row["thumbnail_path"] or not os.path.isfile(row["thumbnail_path"]):
+    path = Path(row["thumbnail_path"]).expanduser().resolve(strict=False) if row and row["thumbnail_path"] else None
+    if not path or not path.is_file() or path.suffix.lower() not in IMAGE_EXTENSIONS:
         raise HTTPException(404, "视频封面不存在")
     return FileResponse(
-        row["thumbnail_path"],
+        path,
         headers={"Cache-Control": "no-cache"},
     )
