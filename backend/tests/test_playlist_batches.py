@@ -1,6 +1,8 @@
+import json
 import os
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -16,6 +18,7 @@ os.environ.setdefault("SUBTITLE_FACTORY_DATA_DIR", tempfile.mkdtemp(prefix="subt
 from app.api import batches, projects
 from app.models import database, migrations
 from app.services import playlist_batches
+from app.utils.task_manager import task_manager
 
 REAL_DISPATCH_BATCH = playlist_batches._dispatch_batch
 
@@ -46,7 +49,12 @@ class PlaylistBatchTests(unittest.TestCase):
         self.patches = [
             patch.object(database, "DB_PATH", self.root / "factory.db"),
             patch.object(playlist_batches, "PROJECTS_DIR", self.root / "projects"),
+            patch.object(projects, "DATA_DIR", self.root),
             patch.object(projects, "PROJECTS_DIR", self.root / "projects"),
+            patch.object(projects, "DOWNLOADS_DIR", self.root / "downloads"),
+            patch.object(projects, "AUDIO_DIR", self.root / "audio"),
+            patch.object(projects, "SUBTITLES_DIR", self.root / "subtitles"),
+            patch.object(projects, "EXPORTS_DIR", self.root / "exports"),
             patch.object(playlist_batches, "_dispatch_batch"),
         ]
         for item in self.patches:
@@ -70,14 +78,85 @@ class PlaylistBatchTests(unittest.TestCase):
 
     def test_v8_schema_is_migrated_and_local_batch_defaults_remain(self):
         db = database.get_db()
+        busy_timeout = db.execute("PRAGMA busy_timeout").fetchone()[0]
         version = db.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0]
         batch_columns = {row["name"] for row in db.execute("PRAGMA table_info(batches)")}
         stage_table = db.execute("SELECT name FROM sqlite_master WHERE name='batch_item_stages'").fetchone()
         db.close()
         self.assertEqual(version, migrations.CURRENT_SCHEMA_VERSION)
         self.assertEqual(version, 8)
+        self.assertEqual(busy_timeout, 30000)
         self.assertIn("source_external_id", batch_columns)
         self.assertIsNotNone(stage_table)
+
+    def test_task_memory_updates_do_not_deadlock_behind_stage_writer(self):
+        task_id = task_manager.create_task(None, "test")
+        writer = database.get_db()
+        writer.execute("BEGIN IMMEDIATE")
+        started = time.monotonic()
+        try:
+            task_manager.update_task(task_id, progress=25, message="still responsive")
+        finally:
+            writer.rollback()
+            writer.close()
+        self.assertLess(time.monotonic() - started, 1.0)
+        self.assertEqual(task_manager.get_task(task_id)["progress"], 25)
+
+    def test_successful_retry_resolves_old_failed_task_center_entries(self):
+        created = playlist_batches.create_or_sync_playlist(
+            playlist_fixture(("aaaaaaaaaaa",)), self.configuration,
+        )
+        db = database.get_db()
+        item = db.execute(
+            "SELECT id,project_id FROM batch_items WHERE batch_id=?",
+            (created["batch_id"],),
+        ).fetchone()
+        db.execute(
+            """INSERT INTO tasks(id,project_id,type,status,error,error_code,details,logs,
+                                 available_actions,created_at,updated_at)
+               VALUES (?,?,?,'failed','temporary failure','DOWNLOAD_FAILED',?,'[]','[\"retry\"]','now','now')""",
+            ("old-attempt", item["project_id"], "download", json.dumps({"batch_item_id": item["id"]})),
+        )
+        db.execute(
+            """INSERT INTO tasks(id,project_id,type,status,error,error_code,details,logs,
+                                 available_actions,created_at,updated_at)
+               VALUES (?,?,?,'failed','unrelated failure','DOWNLOAD_FAILED','{}','[]','[\"retry\"]','now','now')""",
+            ("unrelated-attempt", item["project_id"], "download"),
+        )
+        db.execute(
+            """INSERT INTO transcription_runs(id,project_id,task_id,model,status,started_at)
+               VALUES ('stale-run',?,'stale-task','small','running','now')""",
+            (item["project_id"],),
+        )
+        db.execute(
+            """INSERT INTO transcription_segments(id,run_id,project_id,idx,start,end,text)
+               VALUES ('stale-segment','stale-run',?,1,0,1,'draft')""",
+            (item["project_id"],),
+        )
+        db.commit()
+        db.close()
+
+        resolved = playlist_batches._resolve_previous_stage_attempts(
+            item["project_id"], item["id"], "download", "current-attempt",
+        )
+
+        db = database.get_db()
+        old = db.execute("SELECT * FROM tasks WHERE id='old-attempt'").fetchone()
+        unrelated = db.execute("SELECT * FROM tasks WHERE id='unrelated-attempt'").fetchone()
+        db.close()
+        self.assertEqual(resolved, 1)
+        self.assertEqual(old["status"], "success")
+        self.assertIsNone(old["error"])
+        self.assertEqual(old["message"], "后续重试已成功完成")
+        self.assertEqual(unrelated["status"], "failed")
+        removed = playlist_batches._resolve_previous_stage_attempts(
+            item["project_id"], item["id"], "transcribe", "current-transcribe",
+        )
+        db = database.get_db()
+        self.assertIsNone(db.execute("SELECT 1 FROM transcription_runs WHERE id='stale-run'").fetchone())
+        self.assertIsNone(db.execute("SELECT 1 FROM transcription_segments WHERE id='stale-segment'").fetchone())
+        db.close()
+        self.assertEqual(removed, 1)
 
     def test_create_hides_children_from_default_projects_and_preserves_detail(self):
         fixture = playlist_fixture()
@@ -119,6 +198,59 @@ class PlaylistBatchTests(unittest.TestCase):
         self.assertEqual(by_id["ccccccccccc"]["source_state"], "active")
         self.assertEqual(len(by_id), 3)
         self.assertEqual(self.client.get("/api/projects").json()["projects"], [])
+
+    def test_delete_playlist_purges_children_and_managed_files_only(self):
+        created = playlist_batches.create_or_sync_playlist(playlist_fixture(), self.configuration)
+        batch_id = created["batch_id"]
+        db = database.get_db()
+        rows = db.execute(
+            """SELECT p.* FROM projects p JOIN batch_items i ON i.project_id=p.id
+               WHERE i.batch_id=? ORDER BY i.position""",
+            (batch_id,),
+        ).fetchall()
+        unrelated_id = "unrelated-project"
+        unrelated_dir = self.root / "downloads" / unrelated_id
+        unrelated_dir.mkdir(parents=True)
+        unrelated_file = unrelated_dir / "keep.mp4"
+        unrelated_file.write_bytes(b"keep")
+        db.execute(
+            """INSERT INTO projects(id,title,source_type,video_path,created_at,updated_at)
+               VALUES (?,?, 'local',?,?,?)""",
+            (unrelated_id, "Keep me", str(unrelated_file), "now", "now"),
+        )
+        for row in rows:
+            video_dir = self.root / "downloads" / row["id"]
+            audio_dir = self.root / "audio" / row["id"]
+            video_dir.mkdir(parents=True)
+            audio_dir.mkdir(parents=True)
+            video = video_dir / "video.mp4"
+            audio = audio_dir / "audio.wav"
+            video.write_bytes(b"video")
+            audio.write_bytes(b"audio")
+            db.execute(
+                "UPDATE projects SET video_path=?,audio_path=? WHERE id=?",
+                (str(video), str(audio), row["id"]),
+            )
+        db.commit()
+        db.close()
+
+        required = self.client.delete(f"/api/batches/{batch_id}")
+        self.assertEqual(required.status_code, 400)
+        deleted = self.client.delete(
+            f"/api/batches/{batch_id}?confirm=true&terminate=true"
+        )
+        self.assertEqual(deleted.status_code, 200, deleted.text)
+        self.assertEqual(deleted.json()["deleted_projects"], 2)
+
+        db = database.get_db()
+        self.assertIsNone(db.execute("SELECT 1 FROM batches WHERE id=?", (batch_id,)).fetchone())
+        for row in rows:
+            self.assertIsNone(db.execute("SELECT 1 FROM projects WHERE id=?", (row["id"],)).fetchone())
+            self.assertFalse((self.root / "downloads" / row["id"]).exists())
+            self.assertFalse((self.root / "audio" / row["id"]).exists())
+        self.assertIsNotNone(db.execute("SELECT 1 FROM projects WHERE id=?", (unrelated_id,)).fetchone())
+        db.close()
+        self.assertTrue(unrelated_file.exists())
 
     def test_bulk_clean_enables_transcription_dependency_without_repeating_success(self):
         created = playlist_batches.create_or_sync_playlist(playlist_fixture(("aaaaaaaaaaa",)), self.configuration)

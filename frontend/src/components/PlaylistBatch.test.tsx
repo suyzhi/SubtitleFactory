@@ -10,7 +10,7 @@ vi.mock('../api/backend', () => ({
   previewPlaylist: vi.fn(), createPlaylistBatch: vi.fn(), pausePlaylistBatch: vi.fn(),
   resumePlaylistBatch: vi.fn(), cancelPlaylistBatch: vi.fn(), retryPlaylistBatch: vi.fn(),
   retryPlaylistItem: vi.fn(), runPlaylistStage: vi.fn(),
-  syncPlaylistBatch: vi.fn(),
+  syncPlaylistBatch: vi.fn(), deletePlaylistBatch: vi.fn(),
 }));
 
 const preview: PlaylistPreview = {
@@ -45,5 +45,39 @@ describe('playlist batches', () => {
     expect(screen.getByText('Piano course')).toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: /1\. Lesson 1/ }));
     await waitFor(() => expect(onOpenProject).toHaveBeenCalledWith(project));
+  });
+
+  it('permanently deletes a playlist only after explicit confirmation', async () => {
+    vi.mocked(api.deletePlaylistBatch).mockResolvedValue({ batch_id: detail.batch.id, deleted_projects: 2, message: 'deleted' });
+    const onChanged = vi.fn();
+    const onMessage = vi.fn();
+    const user = userEvent.setup();
+    render(<PlaylistBatchGroups batches={[detail]} search="" collapsed={new Set()} workflow={{}} onToggle={() => undefined} onOpenProject={() => undefined} onChanged={onChanged} onMessage={onMessage}/>);
+
+    await user.click(screen.getByRole('button', { name: '删除播放列表' }));
+    expect(screen.getByRole('dialog', { name: '永久删除播放列表？' })).toBeInTheDocument();
+    expect(screen.getByText(/本地下载视频、音频、字幕、封面、导出文件和任务记录/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '永久删除全部文件' })).toBeDisabled();
+    expect(api.deletePlaylistBatch).not.toHaveBeenCalled();
+
+    await user.type(screen.getByPlaceholderText('删除'), '删除');
+    await user.click(screen.getByRole('button', { name: '永久删除全部文件' }));
+
+    await waitFor(() => expect(api.deletePlaylistBatch).toHaveBeenCalledWith(detail.batch.id));
+    expect(onChanged).toHaveBeenCalled();
+    expect(onMessage).toHaveBeenCalledWith('播放列表及本地缓存已永久删除');
+  });
+
+  it('requires visible in-app authorization before starting a paid AI stage', async () => {
+    vi.mocked(api.runPlaylistStage).mockResolvedValue(detail);
+    const user = userEvent.setup();
+    render(<PlaylistBatchGroups batches={[detail]} search="" collapsed={new Set()} workflow={{ model: 'small' }} onToggle={() => undefined} onOpenProject={() => undefined} onChanged={() => undefined} onMessage={() => undefined}/>);
+
+    await user.click(screen.getByRole('button', { name: 'AI 整理' }));
+    expect(screen.getByRole('dialog', { name: '确认批量 AI 整理' })).toBeInTheDocument();
+    expect(api.runPlaylistStage).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole('button', { name: '授权并开始整理' }));
+    await waitFor(() => expect(api.runPlaylistStage).toHaveBeenCalledWith(detail.batch.id, 'clean', { model: 'small', ai_authorized: true }));
   });
 });

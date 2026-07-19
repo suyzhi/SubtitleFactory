@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Desktop build shells may inherit Python paths from Codex/Hermes or another
+# developer tool.  They must never leak into dependency resolution or the
+# PyInstaller module graph for the release sidecar.
+unset PYTHONPATH PYTHONHOME
+
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PYTHON="$ROOT/backend/.venv/bin/python"
 VENDOR_RUNTIME="${SUBTITLE_FACTORY_FFMPEG_VENDOR_DIR:-$ROOT/vendor/ffmpeg/darwin-arm64}"

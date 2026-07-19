@@ -166,6 +166,20 @@ def _download_options(
         "quiet": quiet,
         "no_warnings": quiet,
         "progress_hooks": [] if quiet else [progress_hook],
+        # Long playlist jobs must tolerate short proxy/CDN outages without
+        # turning one transient 503 into a permanently failed video.  yt-dlp
+        # keeps partial files and resumes them on the next attempt.
+        "retries": 10,
+        "fragment_retries": 10,
+        "extractor_retries": 5,
+        "file_access_retries": 5,
+        "socket_timeout": 30,
+        "continuedl": True,
+        "retry_sleep_functions": {
+            "http": lambda attempt: min(30, 2 ** max(0, attempt)),
+            "fragment": lambda attempt: min(20, 2 ** max(0, attempt)),
+            "extractor": lambda attempt: min(20, 2 ** max(0, attempt)),
+        },
         # merge_output_format only applies when separate streams are merged.
         # Remux a single-file fallback as well, without re-encoding its quality.
         "postprocessors": [{

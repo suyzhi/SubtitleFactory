@@ -141,12 +141,18 @@ class TaskManager:
         """获取任务状态（包含 details 和 logs 字段）"""
         with self._lock:
             task = self._tasks.get(task_id)
-            if task is None:
-                task = self._load(task_id)
-                if task is not None:
-                    self._tasks[task_id] = task
-                    self._pause_conditions[task_id] = threading.Condition(self._lock)
-            return dict(task) if task else None
+            if task is not None:
+                return dict(task)
+        # Disk restore can wait for another SQLite writer.  Never keep the
+        # in-memory task lock held while doing that I/O, otherwise every task
+        # update and the whole task-center API can appear frozen.
+        restored = self._load(task_id)
+        if restored is None:
+            return None
+        with self._lock:
+            task = self._tasks.setdefault(task_id, restored)
+            self._pause_conditions.setdefault(task_id, threading.Condition(self._lock))
+            return dict(task)
 
     def active_task_ids(self, project_id: str) -> list[str]:
         """Return pending/running/paused task IDs for a project.
@@ -200,7 +206,10 @@ class TaskManager:
         """Persist task state without making the task manager depend on DB import order."""
         try:
             from ..models.database import get_db
-            db = get_db()
+            # The authoritative live state is in memory.  Do not hold
+            # TaskManager's lock for the full stage-write timeout; a later
+            # progress update persists the complete snapshot after contention.
+            db = get_db(timeout=.25)
             db.execute(
                 """INSERT OR REPLACE INTO tasks
                    (id,project_id,type,status,step,progress,message,error,error_code,
@@ -345,7 +354,15 @@ class TaskManager:
                         self.checkpoint(task_id)
                         current = self.get_task(task_id) or {}
                         if current.get("status") != "partial":
-                            self.update_task(task_id, status="success", progress=100.0, message="完成")
+                            # A recoverable attempt may have populated error fields
+                            # before the same task succeeds on retry.  Terminal
+                            # success must not keep showing that stale failure in
+                            # the task center or diagnostics.
+                            self.update_task(
+                                task_id, status="success", progress=100.0, message="完成",
+                                error=None, error_code=None, recoverable=False,
+                                available_actions=[], next_retry_at=None,
+                            )
                         else:
                             self.update_task(task_id, progress=100.0)
                         logger.info(f"[TaskManager] 任务完成: {task_id}")

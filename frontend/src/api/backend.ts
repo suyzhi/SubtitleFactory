@@ -512,6 +512,10 @@ export async function syncPlaylistBatch(batchId: string): Promise<{action:'creat
   return request(`/api/batches/${batchId}/sync`, { method: 'POST' });
 }
 
+export async function deletePlaylistBatch(batchId: string): Promise<{batch_id:string;deleted_projects:number;message:string}> {
+  return request(`/api/batches/${batchId}?confirm=true&terminate=true`, { method: 'DELETE' });
+}
+
 export async function retryPlaylistItem(batchId: string, itemId: string): Promise<PlaylistBatchDetail> {
   return request(`/api/batches/${batchId}/items/${itemId}/retry`, { method: 'POST' });
 }

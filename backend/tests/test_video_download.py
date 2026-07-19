@@ -40,6 +40,11 @@ class DownloadQualityTests(unittest.TestCase):
         }])
         self.assertTrue(options["writethumbnail"])
         self.assertEqual(options["outtmpl"]["thumbnail"], "/tmp/thumbnail.%(ext)s")
+        self.assertEqual(options["retries"], 10)
+        self.assertEqual(options["extractor_retries"], 5)
+        self.assertEqual(options["socket_timeout"], 30)
+        self.assertTrue(options["continuedl"])
+        self.assertEqual(options["retry_sleep_functions"]["http"](8), 30)
 
     def test_quality_limit_and_container_settings_change_yt_dlp_options(self):
         limited = downloader._download_options(

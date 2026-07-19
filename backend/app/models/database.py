@@ -12,10 +12,15 @@ from .migrations import run_migrations
 from ..security import signed_media_url
 
 
-def get_db() -> sqlite3.Connection:
+def get_db(timeout: float = 30) -> sqlite3.Connection:
     """获取数据库连接（WAL模式，线程安全）"""
-    conn = sqlite3.connect(str(DB_PATH), check_same_thread=False)
+    # Playlist production deliberately overlaps downloads, transcription and
+    # network AI work.  Their short write transactions can occasionally meet
+    # at the same instant, so wait for the current writer instead of turning a
+    # harmless contention window into a failed video stage.
+    conn = sqlite3.connect(str(DB_PATH), timeout=timeout, check_same_thread=False)
     conn.row_factory = sqlite3.Row
+    conn.execute(f"PRAGMA busy_timeout={max(0, int(timeout * 1000))}")
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
     return conn

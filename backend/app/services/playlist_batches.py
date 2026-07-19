@@ -311,7 +311,10 @@ def _queue_stage(item_id: str, stage: str) -> str | None:
         db.commit()
     finally:
         db.close()
-    task_id = task_manager.create_task(context["project_id"], stage)
+    task_id = task_manager.create_task(
+        context["project_id"], stage,
+        max_attempts=5 if stage == "download" else None,
+    )
     task_manager.update_task(task_id, details={
         "batch_id": context["batch_id"], "batch_item_id": item_id,
         "batch_title": context["batch_title"], "batch_item_title": context["item_title"],
@@ -434,6 +437,37 @@ def _mark_later_stages(item_id: str, current_stage: str, status: str) -> None:
         db.close()
 
 
+def _resolve_previous_stage_attempts(
+    project_id: str, item_id: str, stage: str, current_task_id: str,
+) -> int:
+    """Keep the task center from showing failures already fixed by a retry."""
+    db = get_db()
+    try:
+        cursor = db.execute(
+            """UPDATE tasks SET status='success',progress=100,message='后续重试已成功完成',
+                      error=NULL,error_code=NULL,recoverable=0,available_actions='[]',
+                      updated_at=?
+               WHERE project_id=? AND type=? AND id<>?
+                 AND status IN ('failed','cancelled')
+                 AND json_extract(details,'$.batch_item_id')=?""",
+            (_now(), project_id, stage, current_task_id, item_id),
+        )
+        resolved = cursor.rowcount
+        if stage == "transcribe":
+            # Interrupted retries leave run-scoped draft rows behind.  Once a
+            # later run is published successfully they have no user-visible
+            # value; removing the old run cascades its staging segments.
+            resolved += db.execute(
+                """DELETE FROM transcription_runs
+                   WHERE project_id=? AND coalesce(task_id,'')<>? AND status<>'success'""",
+                (project_id, current_task_id),
+            ).rowcount
+        db.commit()
+        return resolved
+    finally:
+        db.close()
+
+
 def _run_stage(task_id: str, item_id: str, stage: str) -> None:
     context = _stage_context(item_id, stage)
     if not context:
@@ -470,6 +504,9 @@ def _run_stage(task_id: str, item_id: str, stage: str) -> None:
         if result_status == "partial":
             _mark_later_stages(item_id, stage, "blocked")
         else:
+            _resolve_previous_stage_attempts(
+                context["project_id"], item_id, stage, task_id,
+            )
             _dispatch_batch(context["batch_id"])
     except TaskCancelled:
         db = get_db()

@@ -372,6 +372,32 @@ class AIResultValidationTests(unittest.TestCase):
 
 
 class TaskPauseTests(unittest.TestCase):
+    def test_successful_automatic_retry_clears_transient_error_fields(self):
+        manager = TaskManager(max_workers=1)
+        task_id = manager.create_task("project", "download", max_attempts=2)
+        calls = 0
+
+        class RecoverableFailure(RuntimeError):
+            error_code = "DOWNLOAD_FAILED"
+            recoverable = True
+
+        def worker(_runtime_task_id):
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                raise RecoverableFailure("temporary network failure")
+
+        future = manager.run_background(task_id, worker)
+        future.result(timeout=4)
+        task = manager.get_task(task_id)
+        self.assertEqual(task["status"], "success")
+        self.assertEqual(task["attempt"], 2)
+        self.assertIsNone(task["error"])
+        self.assertIsNone(task["error_code"])
+        self.assertFalse(task["recoverable"])
+        self.assertEqual(task["available_actions"], [])
+        manager.shutdown()
+
     def test_worker_pauses_and_resumes_at_checkpoint(self):
         manager = TaskManager(max_workers=1)
         task_id = manager.create_task("project", "translate")
