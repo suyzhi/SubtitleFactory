@@ -38,6 +38,8 @@ jobs:
       - name: Frontend production build
         working-directory: frontend
         run: npm run build
+      - name: Prepare Tauri resource directory
+        run: mkdir -p frontend/src-tauri/backend-runtime
       - name: Rust check
         run: cargo check --locked --manifest-path frontend/src-tauri/Cargo.toml
       - name: Generate SBOM and license inventory
