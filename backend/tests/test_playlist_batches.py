@@ -99,7 +99,10 @@ class PlaylistBatchTests(unittest.TestCase):
         finally:
             writer.rollback()
             writer.close()
-        self.assertLess(time.monotonic() - started, 1.0)
+        # CI macOS runners can occasionally spend just over one second in
+        # SQLite connection setup.  Two seconds still distinguishes the fixed
+        # best-effort persistence path from the former 30-second lock wait.
+        self.assertLess(time.monotonic() - started, 2.0)
         self.assertEqual(task_manager.get_task(task_id)["progress"], 25)
 
     def test_successful_retry_resolves_old_failed_task_center_entries(self):
