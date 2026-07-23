@@ -1,16 +1,17 @@
 use std::{
     fs::{self, OpenOptions},
-    io::{Read, Write},
-    net::{SocketAddr, TcpStream},
+    io::Write,
+    net::TcpListener,
     path::PathBuf,
     process::{Child, Command, Stdio},
-    str::FromStr,
     sync::Mutex,
     thread,
     time::Duration,
 };
 
-use tauri::{Manager, RunEvent, WindowEvent};
+use serde::Serialize;
+use tauri::{Manager, RunEvent, State, WindowEvent};
+use uuid::Uuid;
 
 #[cfg(unix)]
 use std::os::unix::process::CommandExt;
@@ -19,6 +20,14 @@ struct BackendProcess {
     child: Mutex<Option<Child>>,
     process_group: Option<i32>,
     pid_file: PathBuf,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BackendSession {
+    base_url: String,
+    token: String,
+    port: u16,
 }
 
 impl BackendProcess {
@@ -44,28 +53,39 @@ impl BackendProcess {
     }
 }
 
-fn backend_health_ok() -> bool {
-    let address = SocketAddr::from_str("127.0.0.1:8000").expect("valid backend address");
-    let Ok(mut stream) = TcpStream::connect_timeout(&address, Duration::from_millis(300)) else {
-        return false;
-    };
-    let _ = stream.set_read_timeout(Some(Duration::from_millis(500)));
-    if stream
-        .write_all(b"GET /api/health HTTP/1.0\r\nHost: 127.0.0.1\r\n\r\n")
-        .is_err()
-    {
-        return false;
-    }
-    let mut response = String::new();
-    let expected_version = format!("\"version\":\"{}\"", env!("CARGO_PKG_VERSION"));
-    stream.read_to_string(&mut response).is_ok()
-        && response.contains("subtitle-factory-backend")
-        && response.contains(&expected_version)
+fn create_backend_session() -> Result<BackendSession, String> {
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .map_err(|error| format!("无法分配本地后端端口：{error}"))?;
+    let port = listener
+        .local_addr()
+        .map_err(|error| error.to_string())?
+        .port();
+    drop(listener);
+    Ok(BackendSession {
+        base_url: format!("http://127.0.0.1:{port}"),
+        token: format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple()),
+        port,
+    })
 }
 
-fn port_is_open() -> bool {
-    let address = SocketAddr::from_str("127.0.0.1:8000").expect("valid backend address");
-    TcpStream::connect_timeout(&address, Duration::from_millis(200)).is_ok()
+#[tauri::command]
+fn backend_session(session: State<'_, BackendSession>) -> BackendSession {
+    session.inner().clone()
+}
+
+#[tauri::command]
+fn reveal_path(path: String) -> Result<(), String> {
+    let candidate = PathBuf::from(path);
+    if !candidate.exists() {
+        return Err("路径不存在".into());
+    }
+    Command::new("/usr/bin/open")
+        .arg(&candidate)
+        .status()
+        .map_err(|error| error.to_string())?
+        .success()
+        .then_some(())
+        .ok_or_else(|| "无法在 Finder 中打开路径".into())
 }
 
 fn development_backend_dir() -> PathBuf {
@@ -98,7 +118,7 @@ fn stop_stale_process_group(pid_file: &PathBuf) {
     let _ = fs::remove_file(pid_file);
 }
 
-fn start_backend(app: &tauri::App) -> Result<BackendProcess, String> {
+fn start_backend(app: &tauri::App, session: &BackendSession) -> Result<BackendProcess, String> {
     let app_data = app
         .path()
         .app_data_dir()
@@ -118,18 +138,6 @@ fn start_backend(app: &tauri::App) -> Result<BackendProcess, String> {
         )
     };
 
-    if backend_health_ok() {
-        log::info!("using an existing verified subtitle backend");
-        return Ok(BackendProcess {
-            child: Mutex::new(None),
-            process_group: None,
-            pid_file,
-        });
-    }
-    if port_is_open() {
-        return Err("端口 8000 已被其他程序占用，字幕后端无法启动".into());
-    }
-
     let mut command = if cfg!(debug_assertions) {
         let backend_dir = development_backend_dir();
         let configured = std::env::var_os("SUBTITLE_FACTORY_PYTHON").map(PathBuf::from);
@@ -141,15 +149,16 @@ fn start_backend(app: &tauri::App) -> Result<BackendProcess, String> {
             return Err(format!("后端 Python 环境不存在：{}", python.display()));
         }
         let mut cmd = Command::new(python);
-        cmd.current_dir(backend_dir).args([
-            "-m",
-            "uvicorn",
-            "app.main:app",
-            "--host",
-            "127.0.0.1",
-            "--port",
-            "8000",
-        ]);
+        cmd.current_dir(backend_dir)
+            .args([
+                "-m",
+                "uvicorn",
+                "app.main:app",
+                "--host",
+                "127.0.0.1",
+                "--port",
+            ])
+            .arg(session.port.to_string());
         cmd
     } else {
         let binary_name = if cfg!(target_os = "windows") {
@@ -191,6 +200,12 @@ fn start_backend(app: &tauri::App) -> Result<BackendProcess, String> {
     command
         .env("SUBTITLE_FACTORY_DATA_DIR", app_data.join("data"))
         .env("SUBTITLE_FACTORY_APP_VERSION", env!("CARGO_PKG_VERSION"))
+        .env("SUBTITLE_FACTORY_PORT", session.port.to_string())
+        .env("SUBTITLE_FACTORY_API_TOKEN", &session.token)
+        .env(
+            "SUBTITLE_FACTORY_ALLOWED_ORIGINS",
+            "tauri://localhost,http://tauri.localhost,http://localhost:5173,http://127.0.0.1:5173",
+        )
         .env("PYTHONUNBUFFERED", "1")
         .stdin(Stdio::null())
         .stdout(Stdio::from(log_file))
@@ -220,6 +235,7 @@ fn stop_managed_backend(app: &tauri::AppHandle) {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let app = tauri::Builder::default()
+        .invoke_handler(tauri::generate_handler![backend_session, reveal_path])
         .plugin(tauri_plugin_dialog::init())
         .plugin(
             tauri_plugin_log::Builder::default()
@@ -227,7 +243,8 @@ pub fn run() {
                 .build(),
         )
         .setup(|app| {
-            let backend = match start_backend(app) {
+            let session = create_backend_session()?;
+            let backend = match start_backend(app, &session) {
                 Ok(backend) => backend,
                 Err(error) => {
                     log::error!("{error}");
@@ -243,6 +260,7 @@ pub fn run() {
                     }
                 }
             };
+            app.manage(session);
             app.manage(backend);
             Ok(())
         })

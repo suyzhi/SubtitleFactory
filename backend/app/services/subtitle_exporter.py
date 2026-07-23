@@ -121,6 +121,7 @@ def export_ass(segments: list, output_path: str, bilingual: bool = False,
                font_name: str = "Arial", font_size: int = 16,
                style_name: str = "Default",
                secondary_style: str = "Secondary",
+               settings: dict | None = None,
                task_id: str = None):
     """
     导出 ASS 格式字幕。
@@ -128,14 +129,44 @@ def export_ass(segments: list, output_path: str, bilingual: bool = False,
     """
     import pysubs2
 
+    settings = settings or {}
+    raw_font = str(settings.get("fontFamily") or font_name)
+    font_name = raw_font.split(",", 1)[0].strip().strip('"\'') or font_name
+    font_size = int(settings.get("originalFontSize") or settings.get("fontSize") or font_size)
+    secondary_size = int(settings.get("translatedFontSize") or max(8, font_size - 2))
+    vertical_position = max(5, min(95, float(settings.get("verticalPosition", 88))))
+    margin_vertical = max(8, round((100 - vertical_position) / 100 * 1080))
+    background_mode = settings.get("backgroundMode", "none")
+    shadow_enabled = bool(settings.get("shadow", True))
+
+    def color(value: str, fallback: tuple[int, int, int]):
+        value = str(value or "").lstrip("#")
+        try:
+            return pysubs2.Color(int(value[0:2], 16), int(value[2:4], 16), int(value[4:6], 16))
+        except (ValueError, IndexError):
+            return pysubs2.Color(*fallback)
+
+    original_color = color(settings.get("originalTextColor") or settings.get("textColor"), (255, 255, 255))
+    translated_color = color(settings.get("translatedTextColor") or settings.get("textColor"), (220, 220, 220))
+    def ass_color(value: str, fallback: str) -> str:
+        raw = str(value or fallback).lstrip("#")
+        try: red, green, blue = int(raw[0:2], 16), int(raw[2:4], 16), int(raw[4:6], 16)
+        except (ValueError, IndexError): red, green, blue = 255, 255, 255
+        return f"&H{blue:02X}{green:02X}{red:02X}&"
+    original_override = ass_color(settings.get("originalTextColor") or settings.get("textColor"), "#ffffff")
+    translated_override = ass_color(settings.get("translatedTextColor") or settings.get("textColor"), "#dddddd")
+    box_color = pysubs2.Color(255, 255, 255) if background_mode == "white" else pysubs2.Color(0, 0, 0)
+
     subs = pysubs2.SSAFile()
+    subs.info["PlayResX"] = "1920"
+    subs.info["PlayResY"] = "1080"
     subs.styles[style_name] = pysubs2.SSAStyle(
         fontname=font_name,
         fontsize=font_size,
-        primarycolor=pysubs2.Color(255, 255, 255),
+        primarycolor=original_color,
         secondarycolor=pysubs2.Color(255, 255, 255),
         outlinecolor=pysubs2.Color(0, 0, 0),
-        backcolor=pysubs2.Color(0, 0, 0),
+        backcolor=box_color,
         bold=False,
         italic=False,
         underline=False,
@@ -144,24 +175,24 @@ def export_ass(segments: list, output_path: str, bilingual: bool = False,
         scaley=100,
         spacing=0,
         angle=0,
-        borderstyle=1,
-        outline=1.5,
-        shadow=1,
+        borderstyle=3 if background_mode in {"black", "white"} else 1,
+        outline=1.5 if background_mode == "none" else 0,
+        shadow=1 if shadow_enabled else 0,
         alignment=pysubs2.Alignment.BOTTOM_CENTER,
         marginl=20,
         marginr=20,
-        marginv=10,
+        marginv=margin_vertical,
         alphalevel=0,
         encoding=1,
     )
 
     subs.styles[secondary_style] = pysubs2.SSAStyle(
         fontname=font_name,
-        fontsize=font_size - 2,
-        primarycolor=pysubs2.Color(200, 200, 200),
+        fontsize=secondary_size,
+        primarycolor=translated_color,
         secondarycolor=pysubs2.Color(200, 200, 200),
         outlinecolor=pysubs2.Color(0, 0, 0),
-        backcolor=pysubs2.Color(0, 0, 0),
+        backcolor=box_color,
         bold=False,
         italic=False,
         underline=False,
@@ -170,13 +201,13 @@ def export_ass(segments: list, output_path: str, bilingual: bool = False,
         scaley=100,
         spacing=0,
         angle=0,
-        borderstyle=1,
-        outline=1.0,
-        shadow=1,
+        borderstyle=3 if background_mode in {"black", "white"} else 1,
+        outline=1.0 if background_mode == "none" else 0,
+        shadow=1 if shadow_enabled else 0,
         alignment=pysubs2.Alignment.BOTTOM_CENTER,
         marginl=20,
         marginr=20,
-        marginv=28,
+        marginv=margin_vertical,
         alphalevel=0,
         encoding=1,
     )
@@ -190,11 +221,11 @@ def export_ass(segments: list, output_path: str, bilingual: bool = False,
 
         if bilingual and translated:
             if primary_lang == "original":
-                subtitle_text = f"{{\\an2}}{text}\\N{{\\an8}}{translated}"
+                subtitle_text = f"{{\\fs{font_size}\\c{original_override}}}{text}\\N{{\\fs{secondary_size}\\c{translated_override}}}{translated}"
             else:
-                subtitle_text = f"{{\\an2}}{translated}\\N{{\\an8}}{text}"
+                subtitle_text = f"{{\\fs{secondary_size}\\c{translated_override}}}{translated}\\N{{\\fs{font_size}\\c{original_override}}}{text}"
         else:
-            subtitle_text = f"{{\\an2}}{text}"
+            subtitle_text = text
 
         event = pysubs2.SSAEvent(
             start=start_ms,

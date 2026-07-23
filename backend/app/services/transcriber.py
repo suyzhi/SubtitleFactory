@@ -13,6 +13,7 @@
 import uuid
 import re
 import math
+import json
 import time as time_module
 import logging
 import sys
@@ -302,6 +303,8 @@ def transcribe_audio(task_id: str, audio_path: str, project_id: str, language: s
            VALUES (?,?,?,?,?,'running',datetime('now','localtime'))""",
         (run_id, project_id, task_id, model_id, language),
     )
+    project_timing = db_run.execute("SELECT range_start FROM projects WHERE id=?", (project_id,)).fetchone()
+    time_offset = float(project_timing["range_start"] or 0) if project_timing else 0.0
     db_run.commit()
     db_run.close()
     logger.info("[Transcriber] 加载模型: %s, 来源: %s, 语言: %s", model_id, resolution.source, language)
@@ -358,7 +361,10 @@ def transcribe_audio(task_id: str, audio_path: str, project_id: str, language: s
             language=lang, word_timestamps=True,
         )
         mlx_segments = [
-            SimpleNamespace(start=float(item["start"]), end=float(item["end"]), text=str(item["text"]))
+            SimpleNamespace(
+                start=float(item["start"]), end=float(item["end"]), text=str(item["text"]),
+                words=item.get("words") or [],
+            )
             for item in result.get("segments", [])
         ]
         segments_gen = iter(mlx_segments)
@@ -389,6 +395,7 @@ def transcribe_audio(task_id: str, audio_path: str, project_id: str, language: s
             beam_size=5,
             vad_filter=True,
             vad_parameters=dict(min_silence_duration_ms=500),
+            word_timestamps=True,
         )
         detected_lang = info.language
         audio_duration = info.duration
@@ -442,13 +449,17 @@ def transcribe_audio(task_id: str, audio_path: str, project_id: str, language: s
         if not text:
             continue
         generated_count += 1
+        timings_json = json.dumps(
+            _segment_word_timings(segment, time_offset), ensure_ascii=False, separators=(",", ":")
+        )
 
         db_writer = get_db()
         db_writer.execute(
             """INSERT INTO transcription_segments
-               (id, run_id, project_id, idx, start, end, text, is_draft)
-               VALUES (?, ?, ?, ?, ?, ?, ?, 1)""",
-            (seg_id, run_id, project_id, generated_count, segment.start, segment.end, text)
+               (id, run_id, project_id, idx, start, end, text, timings_json, is_draft)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)""",
+            (seg_id, run_id, project_id, generated_count, segment.start + time_offset,
+             segment.end + time_offset, text, timings_json)
         )
         db_writer.commit()
         db_writer.close()
@@ -476,8 +487,8 @@ def transcribe_audio(task_id: str, audio_path: str, project_id: str, language: s
             "audio_duration": round(audio_duration, 1),
             "latest_segment": {
                 "index": generated_count,
-                "start": round(segment.start, 3),
-                "end": round(segment.end, 3),
+                "start": round(segment.start + time_offset, 3),
+                "end": round(segment.end + time_offset, 3),
                 "text": text,
             },
         }
@@ -527,7 +538,7 @@ def transcribe_audio(task_id: str, audio_path: str, project_id: str, language: s
     # Read only this run's staged segments.
     db_reader = get_db()
     draft_rows = db_reader.execute(
-        "SELECT id, idx, start, end, text FROM transcription_segments WHERE run_id=? ORDER BY idx",
+        "SELECT id, idx, start, end, text, timings_json FROM transcription_segments WHERE run_id=? ORDER BY idx",
         (run_id,)
     ).fetchall()
     db_reader.close()
@@ -540,6 +551,7 @@ def transcribe_audio(task_id: str, audio_path: str, project_id: str, language: s
             "start": r["start"],
             "end": r["end"],
             "text": r["text"],
+            "timings": _decode_timings(r["timings_json"]),
         })
 
     if draft_segments:
@@ -566,7 +578,9 @@ def transcribe_audio(task_id: str, audio_path: str, project_id: str, language: s
                    finished_at=datetime('now','localtime') WHERE id=?""",
                 (len(processed), run_id),
             )
-            db_writer.execute("DELETE FROM transcription_segments WHERE run_id=?", (run_id,))
+            # Preserve the model's raw segment/token timeline for diagnostics and
+            # future reprocessing.  Published subtitles remain in ``segments``.
+            db_writer.execute("UPDATE transcription_segments SET is_draft=0 WHERE run_id=?", (run_id,))
             task_manager.checkpoint(task_id)
             db_writer.commit()
         except Exception:
@@ -615,6 +629,7 @@ def transcribe_audio(task_id: str, audio_path: str, project_id: str, language: s
             "audio_duration": round(audio_duration, 3),
             "merged_short": merge_count,
             "split_long": split_count,
+            "timestamp_strategy": "word_or_token_aligned",
             "min_duration": round(min_dur, 3),
             "max_duration": round(max_dur, 3),
             "avg_duration": round(avg_dur, 3),
@@ -642,6 +657,32 @@ def transcribe_audio(task_id: str, audio_path: str, project_id: str, language: s
     return processed if draft_segments else []
 
 
+def _decode_timings(value) -> list[dict]:
+    try:
+        parsed = json.loads(value or "[]") if isinstance(value, str) else value
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return []
+    return parsed if isinstance(parsed, list) else []
+
+
+def _segment_word_timings(segment, time_offset: float = 0.0) -> list[dict]:
+    """Normalize Parakeet/Whisper token objects into one durable timing format."""
+    source = getattr(segment, "timings", None) or getattr(segment, "words", None) or []
+    result: list[dict] = []
+    for item in source:
+        getter = item.get if isinstance(item, dict) else lambda key, default=None: getattr(item, key, default)
+        text = str(getter("text") or getter("word") or getter("token") or "")
+        try:
+            start = float(getter("start", getter("startTime", 0.0))) + time_offset
+            end = float(getter("end", getter("endTime", start - time_offset + 0.04))) + time_offset
+        except (TypeError, ValueError):
+            continue
+        if not text or end <= start:
+            continue
+        result.append({"text": text, "start": round(max(0.0, start), 4), "end": round(end, 4)})
+    return result
+
+
 def _fmt_time(seconds: float) -> str:
     """格式化时间: 00:04:32"""
     if not seconds:
@@ -655,13 +696,13 @@ def _fmt_time(seconds: float) -> str:
 def _post_process_segments(raw_segments: list) -> tuple:
     """
     后处理字幕段：
-    1. 合并持续时间 < MIN_DURATION 且相邻的短字幕
-    2. 拆分文本过长的字幕
-    3. 应用持续时间约束
+    1. 规范非法或重叠的时间区间
+    2. 只合并没有完整句界、持续时间 < MIN_DURATION 的相邻碎片
+    3. 保留模型识别出的完整语义句，不再按显示长度或时长硬拆
 
     Returns: (final_segments, merge_count, split_count)
     """
-    logger.info("[Transcriber] 后处理: 规范时间轴、合并短句、拆分长句")
+    logger.info("[Transcriber] 后处理: 规范时间轴并保留完整语义句")
     merge_count = 0
     split_count = 0
 
@@ -678,48 +719,52 @@ def _post_process_segments(raw_segments: list) -> tuple:
             start = previous_end
         if end <= start:
             continue
-        normalized.append({"start": start, "end": end, "text": text})
+        timings = [
+            item for item in _decode_timings(raw.get("timings", []))
+            if isinstance(item, dict) and float(item.get("end", 0) or 0) > start
+            and float(item.get("start", 0) or 0) < end
+        ]
+        normalized.append({"start": start, "end": end, "text": text, "timings": timings})
         previous_end = end
 
-    # 合并极短字幕，但不跨越明显静音，也不制造超过最大时长的段。
+    # 合并极短的非完整碎片，但不跨越明显静音、完整句界，也不制造
+    # 超过最大显示时长的段。短而完整的问候或回答必须保持独立。
     merged: List[dict] = []
     i = 0
     while i < len(normalized):
         seg = dict(normalized[i])
         duration = seg["end"] - seg["start"]
-        if duration < MIN_DURATION and merged:
+        has_sentence_end = _has_sentence_end(seg["text"])
+        if duration < MIN_DURATION and not has_sentence_end and merged:
             prev = merged[-1]
             gap = seg["start"] - prev["end"]
-            if gap <= 0.75 and seg["end"] - prev["start"] <= MAX_DURATION:
+            if (
+                not _has_sentence_end(prev["text"])
+                and gap <= 0.75
+                and seg["end"] - prev["start"] <= MAX_DURATION
+            ):
                 prev["end"] = seg["end"]
                 prev["text"] = _smart_merge(prev["text"], seg["text"])
+                prev["timings"] = [*prev.get("timings", []), *seg.get("timings", [])]
                 merge_count += 1
                 i += 1
                 continue
-        if duration < MIN_DURATION and i + 1 < len(normalized):
+        if duration < MIN_DURATION and not has_sentence_end and i + 1 < len(normalized):
             nxt = normalized[i + 1]
             gap = nxt["start"] - seg["end"]
             if gap <= 0.75 and nxt["end"] - seg["start"] <= MAX_DURATION:
                 seg["end"] = nxt["end"]
                 seg["text"] = _smart_merge(seg["text"], nxt["text"])
+                seg["timings"] = [*seg.get("timings", []), *nxt.get("timings", [])]
                 merge_count += 1
                 i += 1
         merged.append(seg)
         i += 1
 
-    # 同时按可读字符数和最大显示时长拆分，包含无标点长句的兜底。
-    final: List[dict] = []
-    for seg in merged:
-        duration = seg["end"] - seg["start"]
-        max_chars = _max_chars_for_text(seg["text"])
-        required_parts = max(1, math.ceil(duration / MAX_DURATION), math.ceil(len(seg["text"]) / max_chars))
-        if required_parts > 1:
-            pieces = _split_text_into_pieces(seg["text"], max_chars, required_parts)
-            split = _allocate_piece_times(seg["start"], seg["end"], pieces)
-            final.extend(split)
-            split_count += len(split) - 1
-        else:
-            final.append(seg)
+    # 长度和显示时长属于质检问题，不应在转写阶段破坏语义句界。旧版在
+    # 这里按 42 字/7 秒硬拆，导致 Parakeet 的自然句被放大成大量 ASR
+    # 碎片，再让 AI 反向拼接。保留 split_count 供现有任务详情兼容。
+    final = merged
 
     # 重新分配稳定的一基索引。
     output = []
@@ -732,6 +777,10 @@ def _post_process_segments(raw_segments: list) -> tuple:
         })
 
     return output, merge_count, split_count
+
+
+def _has_sentence_end(text: str) -> bool:
+    return bool(re.search(r"[.!?。！？][\"'”’)]?$", (text or "").strip()))
 
 
 def _smart_merge(text1: str, text2: str) -> str:
@@ -783,22 +832,88 @@ def _split_text_into_pieces(text: str, max_chars: int, min_parts: int = 1) -> Li
         value = pieces[idx]
         if len(value) < 2:
             break
-        cut = len(value) // 2
+        midpoint = len(value) // 2
+        whitespace = [match.start() for match in re.finditer(r"\s+", value)]
+        cut = min(whitespace, key=lambda position: abs(position - midpoint)) if whitespace else midpoint
+        if cut <= 0 or cut >= len(value):
+            cut = midpoint
         left = value[:cut].rstrip()
         right = value[cut:].lstrip()
         pieces[idx:idx + 1] = [left, right]
     return [piece for piece in pieces if piece]
 
 
-def _allocate_piece_times(start: float, end: float, pieces: List[str]) -> List[dict]:
+def _allocate_piece_times(
+    start: float, end: float, pieces: List[str], timings: list[dict] | None = None,
+) -> List[dict]:
+    """Allocate text pieces on real token boundaries, never equal-duration slices.
+
+    Core ML Parakeet and Whisper expose token/word timestamps.  When an engine
+    cannot provide them, character weight is a more faithful fallback than the
+    former ``duration / piece_count`` calculation.
+    """
     if not pieces:
         return []
-    duration = end - start
-    per_duration = duration / len(pieces)
+    if len(pieces) == 1:
+        return [{"start": round(start, 3), "end": round(end, 3), "text": pieces[0]}]
+
+    valid_timings = []
+    for item in timings or []:
+        try:
+            token_start = max(start, float(item.get("start")))
+            token_end = min(end, float(item.get("end")))
+        except (AttributeError, TypeError, ValueError):
+            continue
+        token_text = str(item.get("text") or item.get("word") or item.get("token") or "")
+        if token_text and token_end > token_start:
+            valid_timings.append({"text": token_text, "start": token_start, "end": token_end})
+    valid_timings.sort(key=lambda item: (item["start"], item["end"]))
+
+    boundaries: list[float] = []
+    if len(valid_timings) >= len(pieces):
+        token_weights = [max(1, len(re.sub(r"\s+", "", item["text"]))) for item in valid_timings]
+        piece_weights = [max(1, len(re.sub(r"\s+", "", piece))) for piece in pieces]
+        total_token_weight = sum(token_weights)
+        total_piece_weight = sum(piece_weights)
+        token_cumulative = []
+        running = 0
+        for weight in token_weights:
+            running += weight
+            token_cumulative.append(running)
+        previous_cut = 0
+        piece_running = 0
+        for piece_index, piece_weight in enumerate(piece_weights[:-1]):
+            piece_running += piece_weight
+            target = total_token_weight * piece_running / total_piece_weight
+            minimum_cut = previous_cut + 1
+            maximum_cut = len(valid_timings) - (len(pieces) - piece_index - 1)
+            cut = min(
+                range(minimum_cut, maximum_cut + 1),
+                key=lambda value: abs(token_cumulative[value - 1] - target),
+            )
+            left = valid_timings[cut - 1]
+            right = valid_timings[cut]
+            boundary = right["start"] if right["start"] >= left["end"] else left["end"]
+            boundaries.append(max(start, min(end, boundary)))
+            previous_cut = cut
+
+    if len(boundaries) != len(pieces) - 1:
+        # Engines without token timestamps use proportional text weight.  This
+        # still avoids falsely implying evenly spaced speech.
+        duration = max(0.001, end - start)
+        weights = [max(1, len(re.sub(r"\s+", "", piece))) for piece in pieces]
+        total_weight = sum(weights)
+        running = 0
+        boundaries = []
+        for weight in weights[:-1]:
+            running += weight
+            boundaries.append(start + duration * running / total_weight)
+
     cursor = start
     result = []
     for index, piece in enumerate(pieces):
-        piece_end = end if index == len(pieces) - 1 else start + (index + 1) * per_duration
+        piece_end = end if index == len(pieces) - 1 else boundaries[index]
+        piece_end = max(cursor + 0.001, min(end, piece_end))
         result.append({"start": round(cursor, 3), "end": round(piece_end, 3), "text": piece})
         cursor = piece_end
     return result

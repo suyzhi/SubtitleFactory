@@ -1,6 +1,6 @@
 [package]
 name = "app"
-version = "0.3.1"
+version = "1.0.0"
 description = "Apple Silicon subtitle production desktop app"
 authors = ["Subtitle Factory"]
 license = ""
@@ -25,3 +25,4 @@ libc = "0.2"
 tauri = { version = "2.11.3", features = [] }
 tauri-plugin-dialog = "2.7.1"
 tauri-plugin-log = "2"
+uuid = { version = "1", features = ["v4"] }

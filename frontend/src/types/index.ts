@@ -6,7 +6,9 @@ export interface Project {
   source_type: 'youtube' | 'local';
   source_url: string | null;
   video_path: string | null;
+  video_url?: string | null;
   thumbnail_url: string | null;
+  thumbnail_access_url?: string | null;
   group_name: string | null;
   audio_path: string | null;
   language: string;
@@ -15,7 +17,82 @@ export interface Project {
   updated_at: string;
   deleted_at?: string | null;
   segments_count: number;
+  edit_revision?: number;
+  media_status?: string;
   status?: string;
+  latest_task_status?: string | null;
+  latest_task_message?: string | null;
+}
+
+export type PlaylistStageName = 'download' | 'extract_audio' | 'transcribe' | 'clean' | 'translate';
+export type PlaylistStageStatus = 'waiting' | 'queued' | 'running' | 'paused' | 'success' | 'partial' | 'failed' | 'blocked' | 'cancelled' | 'skipped';
+
+export interface PlaylistPreviewItem {
+  source_id: string;
+  video_id: string | null;
+  position: number;
+  title: string;
+  url: string | null;
+  duration: number;
+  thumbnail_url: string | null;
+  availability: 'active' | 'unavailable';
+}
+
+export interface PlaylistPreview {
+  playlist: {
+    id: string; title: string; url: string; channel: string; thumbnail_url: string | null;
+    item_count: number; available_count: number; unavailable_count: number; total_duration: number;
+  };
+  items: PlaylistPreviewItem[];
+  warnings: string[];
+}
+
+export interface PlaylistBatchStage {
+  status: PlaylistStageStatus;
+  task_id: string | null;
+  attempt: number;
+  error_code: string | null;
+  error: string | null;
+  progress: number;
+}
+
+export interface PlaylistBatchItem {
+  id: string;
+  project_id: string | null;
+  source_id: string;
+  source_url: string | null;
+  position: number;
+  title: string;
+  duration: number;
+  thumbnail_url: string | null;
+  source_state: 'active' | 'removed' | 'unavailable';
+  status: string;
+  error: string | null;
+  project: Project | null;
+  stages: Partial<Record<PlaylistStageName, PlaylistBatchStage>>;
+}
+
+export interface PlaylistBatchSummary {
+  id: string;
+  name: string;
+  title: string;
+  status: string;
+  source_url: string;
+  source_external_id: string;
+  channel: string;
+  thumbnail_url: string | null;
+  paused: number | boolean;
+  configuration: Record<string, any>;
+  item_count: number;
+  completed_count: number;
+  failed_count: number;
+  progress: number;
+  updated_at: string;
+}
+
+export interface PlaylistBatchDetail {
+  batch: PlaylistBatchSummary;
+  items: PlaylistBatchItem[];
 }
 
 export interface SubtitleSegment {
@@ -28,9 +105,22 @@ export interface SubtitleSegment {
   clean_text: string;
   translated_text: string;
   speaker: string;
+  speaker_id?: string | null;
   locked: boolean;
   is_draft: boolean;
   source_stage: string;
+}
+
+export interface QualityIssue {
+  id: string;
+  rule_id: string;
+  segment_id?: string | null;
+  segment_index?: number | null;
+  severity: 'error' | 'warning' | 'info';
+  message: string;
+  suggestion: string;
+  status: 'open' | 'ignored' | 'resolved';
+  details?: Record<string, unknown>;
 }
 
 // ── Enhanced Task System ──
@@ -91,6 +181,16 @@ export interface TaskStatus {
   available_actions?: string[];
   parent_task_id?: string | null;
   attempt?: number;
+}
+
+export interface FailedCleanBatch {
+  batch_index: number;
+  segment_count: number;
+  start: number | null;
+  end: number | null;
+  attempts: number;
+  error: string;
+  updated_at: string;
 }
 
 // ── Process Timeline ──
@@ -177,15 +277,47 @@ export interface ProjectCreate {
 }
 
 export interface SegmentUpdate {
+  start?: number;
+  end?: number;
   clean_text?: string;
   translated_text?: string;
+  speaker_id?: string | null;
   locked?: boolean;
+}
+
+export type SegmentOperationKind =
+  | 'update_many' | 'replace' | 'shift' | 'split' | 'merge' | 'assign_speaker';
+
+export interface SegmentOperationRequest {
+  expected_revision: number;
+  operation: SegmentOperationKind;
+  items?: Array<SegmentUpdate & { index: number }>;
+  indices?: number[];
+  include_locked?: boolean;
+  search?: string;
+  replacement?: string;
+  fields?: Array<'clean_text' | 'translated_text'>;
+  match_case?: boolean;
+  delta?: number;
+  split_index?: number;
+  split_at?: number;
+  text_offset?: number;
+  speaker_id?: string | null;
+}
+
+export interface EditorOperationResponse {
+  revision: number;
+  operation_id?: string | null;
+  operation: string;
+  affected_count: number;
+  segments: SubtitleSegment[];
 }
 
 export interface ExportRequest {
   format: 'srt' | 'vtt' | 'ass' | 'srt-bilingual' | 'mp4' | 'mkv';
   bilingual: boolean;
   primary_language: 'original' | 'translated';
+  style?: SubtitleStyleSettings;
 }
 
 export interface ProcessingConfig {

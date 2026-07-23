@@ -202,6 +202,8 @@ class ParakeetInferenceAdapterTests(unittest.TestCase):
         self.assertEqual([item.text for item in segments], ["My God", "Ha ha ha."])
         self.assertLessEqual(segments[0].end, 15.6)
         self.assertEqual(segments[1].start, 26.64)
+        self.assertEqual(segments[1].timings[0]["text"], " Ha")
+        self.assertEqual(segments[1].timings[0]["start"], 26.64)
 
     def test_coreml_runner_reads_json_without_real_inference(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -313,7 +315,10 @@ class ParakeetInferenceAdapterTests(unittest.TestCase):
                 create_task=lambda _project_id, _kind: "parakeet-task",
                 run_background=lambda *_args, **_kwargs: None,
             )
-            with patch("app.api.projects.task_manager", fake_manager):
+            with patch("app.api.projects.task_manager", fake_manager), patch(
+                "app.api.projects.get_transcription_model_status",
+                return_value={"ready": True},
+            ):
                 response = start_transcribe(project_id, "auto", PARAKEET_MODEL_ID)
 
         self.assertEqual(response["task_id"], "parakeet-task")
@@ -446,6 +451,9 @@ class ParakeetInferenceAdapterTests(unittest.TestCase):
         )
         task_id = task_manager.create_task(project_id, "transcribe")
         with patch(
+            "app.services.transcriber.get_parakeet_model_status",
+            return_value={"ready": True, "source": "external_detected"},
+        ), patch(
             "app.services.transcriber.create_parakeet_session", return_value=session
         ):
             result = transcribe_audio(
@@ -490,7 +498,10 @@ class ParakeetInferenceAdapterTests(unittest.TestCase):
             device="cpu", compute_type="int8", model_label="empty test", progress_start=5.0,
         )
         task_id = task_manager.create_task(project_id, "transcribe")
-        with patch("app.services.transcriber.create_parakeet_session", return_value=session):
+        with patch(
+            "app.services.transcriber.get_parakeet_model_status",
+            return_value={"ready": True, "source": "external_detected"},
+        ), patch("app.services.transcriber.create_parakeet_session", return_value=session):
             with self.assertRaisesRegex(RuntimeError, "原有字幕已安全保留"):
                 transcribe_audio(task_id, "/unused.wav", project_id, "auto", PARAKEET_MODEL_ID)
         db = get_db()

@@ -106,6 +106,7 @@ class ParakeetSegment:
     start: float
     end: float
     text: str
+    timings: tuple[dict, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -348,7 +349,11 @@ def _segments_from_coreml_json(payload: dict) -> tuple[list[ParakeetSegment], fl
         if duration:
             end = min(duration, end)
         if end > start:
-            segments.append(ParakeetSegment(start=start, end=end, text=text))
+            segment_timings = tuple(
+                {"text": item["token"], "start": item["start"], "end": item["end"]}
+                for item in group
+            )
+            segments.append(ParakeetSegment(start=start, end=end, text=text, timings=segment_timings))
     return segments, duration
 
 

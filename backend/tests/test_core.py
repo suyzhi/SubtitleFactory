@@ -14,6 +14,7 @@ os.environ["SUBTITLE_FACTORY_DATA_DIR"] = tempfile.mkdtemp(prefix="subtitle-fact
 
 from app.models.database import get_db, init_db
 from app.services.subtitle_cleaner import (
+    _build_semantic_batches,
     _compose_final_segments,
     _fingerprint,
     _validate_batch_results,
@@ -21,6 +22,7 @@ from app.services.subtitle_cleaner import (
     _commit_restructured_segments,
     _call_llm_group,
     clean_subtitles,
+    retry_clean_batch,
     undo_last_clean,
 )
 from app.services.subtitle_exporter import export_ass, export_srt
@@ -28,7 +30,7 @@ from app.services.subtitle_translator import _call_llm_translate
 from app.services.video_renderer import burn_subtitles
 from app.services.transcriber import _post_process_segments
 from app.services.ai_settings import get_ai_settings, save_ai_settings
-from app.utils.task_manager import TaskManager
+from app.utils.task_manager import TaskManager, task_manager
 
 
 class TimestampSegmentationTests(unittest.TestCase):
@@ -42,15 +44,15 @@ class TimestampSegmentationTests(unittest.TestCase):
         self.assertGreaterEqual(merged, 1)
         self.assertEqual(output[-1]["start"], 5.0)
 
-    def test_long_unpunctuated_text_and_duration_are_split(self):
+    def test_long_unpunctuated_text_and_duration_are_preserved(self):
         text = "这是一个没有标点但是非常非常长的字幕文本需要按照可读长度进行可靠拆分"
         output, _, split = _post_process_segments([
             {"start": 0.0, "end": 16.0, "text": text},
         ])
-        self.assertGreater(split, 0)
-        self.assertEqual("".join(item["text"] for item in output), text)
-        self.assertTrue(all(item["end"] - item["start"] <= 7.001 for item in output))
-        self.assertTrue(all(len(item["text"]) <= 20 for item in output))
+        self.assertEqual(split, 0)
+        self.assertEqual(len(output), 1)
+        self.assertEqual(output[0]["text"], text)
+        self.assertEqual(output[0]["end"], 16.0)
 
     def test_overlaps_are_normalized_and_indices_are_stable(self):
         output, _, _ = _post_process_segments([
@@ -62,6 +64,33 @@ class TimestampSegmentationTests(unittest.TestCase):
         for previous, current in zip(output, output[1:]):
             self.assertLessEqual(previous["end"], current["start"])
             self.assertGreater(current["end"], current["start"])
+
+    def test_long_complete_english_sentence_is_not_split(self):
+        output, _, split = _post_process_segments([{
+            "start": 0.0,
+            "end": 10.0,
+            "text": "This complete English sentence is intentionally longer than forty two display characters.",
+            "timings": [
+                {"text": "This", "start": 0.0, "end": 0.4},
+                {"text": " complete", "start": 0.4, "end": 1.0},
+                {"text": " sentence", "start": 8.0, "end": 8.5},
+                {"text": ".", "start": 8.5, "end": 10.0},
+            ],
+        }])
+        self.assertEqual(split, 0)
+        self.assertEqual(len(output), 1)
+        self.assertGreater(len(output[0]["text"]), 42)
+        self.assertEqual(output[0]["end"], 10.0)
+
+    def test_short_complete_sentence_is_not_merged(self):
+        output, merged, _ = _post_process_segments([
+            {"start": 0.0, "end": 0.6, "text": "Yes."},
+            {"start": 0.7, "end": 2.0, "text": "The next sentence starts here."},
+        ])
+        self.assertEqual(merged, 0)
+        self.assertEqual([item["text"] for item in output], [
+            "Yes.", "The next sentence starts here.",
+        ])
 
 
 class AIResultValidationTests(unittest.TestCase):
@@ -82,6 +111,91 @@ class AIResultValidationTests(unittest.TestCase):
         self.assertIn("不是长度限制", prompt)
         self.assertIn("必须保留完整句并允许超长", prompt)
         self.assertEqual(result[0]["ids"], ["1", "2"])
+
+    def test_deepseek_cleaner_requests_strict_json_object(self):
+        batch = [{"idx": 1, "start": 0.0, "end": 1.0, "raw_text": "Hello"}]
+        response = SimpleNamespace(
+            raise_for_status=lambda: None,
+            json=lambda: {"choices": [{"finish_reason": "stop", "message": {
+                "content": '{"groups":[{"ids":["1"],"clean_text":"Hello."}]}'
+            }}]},
+        )
+        ai = {"provider": "deepseek", "model": "deepseek-chat", "base_url": "http://example.test/v1", "api_key": "secret"}
+        with patch("httpx.post", return_value=response) as post:
+            result = _call_llm_group(batch, ai)
+        payload = post.call_args.kwargs["json"]
+        self.assertEqual(payload["response_format"], {"type": "json_object"})
+        self.assertIn("required_output_schema", payload["messages"][1]["content"])
+        self.assertEqual(result[0]["ids"], ["1"])
+
+    def test_cleaner_length_finish_adaptively_splits_and_recovers(self):
+        batch = [
+            {"idx": idx, "start": float(idx - 1), "end": float(idx), "raw_text": text}
+            for idx, text in enumerate(["One.", "Two.", "Three.", "Four."], 1)
+        ]
+        responses = [
+            SimpleNamespace(
+                raise_for_status=lambda: None,
+                json=lambda: {"choices": [{"finish_reason": "length", "message": {"content": "{"}}]},
+            ),
+            SimpleNamespace(
+                raise_for_status=lambda: None,
+                json=lambda: {"choices": [{"finish_reason": "stop", "message": {"content":
+                    '{"groups":[{"ids":["1"],"clean_text":"One."},{"ids":["2"],"clean_text":"Two."}]}'
+                }}]},
+            ),
+            SimpleNamespace(
+                raise_for_status=lambda: None,
+                json=lambda: {"choices": [{"finish_reason": "stop", "message": {"content":
+                    '{"groups":[{"ids":["3"],"clean_text":"Three."},{"ids":["4"],"clean_text":"Four."}]}'
+                }}]},
+            ),
+        ]
+        ai = {"provider": "deepseek", "model": "test", "base_url": "http://example.test/v1", "api_key": "secret"}
+        diagnostics = {}
+        with patch("httpx.post", side_effect=responses):
+            result = _call_llm_group(batch, ai, diagnostics=diagnostics)
+        self.assertEqual([group["ids"] for group in result], [["1"], ["2"], ["3"], ["4"]])
+        self.assertEqual(diagnostics["request_attempts"], 3)
+        self.assertEqual(diagnostics["length_recoveries"], 1)
+        self.assertEqual(diagnostics["adaptive_splits"], 1)
+
+    def test_cleaner_invalid_json_retries_once_then_splits(self):
+        batch = [
+            {"idx": idx, "start": float(idx - 1), "end": float(idx), "raw_text": text}
+            for idx, text in enumerate(["One.", "Two.", "Three.", "Four."], 1)
+        ]
+        invalid = lambda: SimpleNamespace(
+            raise_for_status=lambda: None,
+            json=lambda: {"choices": [{"finish_reason": "stop", "message": {"content": "not-json"}}]},
+        )
+        left = SimpleNamespace(
+            raise_for_status=lambda: None,
+            json=lambda: {"choices": [{"finish_reason": "stop", "message": {"content":
+                '{"groups":[{"ids":["1","2"],"clean_text":"One. Two."}]}'
+            }}]},
+        )
+        right = SimpleNamespace(
+            raise_for_status=lambda: None,
+            json=lambda: {"choices": [{"finish_reason": "stop", "message": {"content":
+                '{"groups":[{"ids":["3","4"],"clean_text":"Three. Four."}]}'
+            }}]},
+        )
+        ai = {"provider": "deepseek", "model": "test", "base_url": "http://example.test/v1", "api_key": "secret"}
+        diagnostics = {}
+        with patch("httpx.post", side_effect=[invalid(), invalid(), left, right]), patch("time.sleep"):
+            result = _call_llm_group(batch, ai, diagnostics=diagnostics)
+        self.assertEqual([value for group in result for value in group["ids"]], ["1", "2", "3", "4"])
+        self.assertEqual(diagnostics["request_attempts"], 4)
+        self.assertEqual(diagnostics["adaptive_splits"], 1)
+
+    def test_semantic_batches_are_bounded_to_32_rows(self):
+        rows = [
+            {"idx": idx, "raw_text": f"Sentence {idx}.", "locked": 0}
+            for idx in range(1, 66)
+        ]
+        batches = _build_semantic_batches(rows)
+        self.assertEqual([len(batch) for batch in batches], [32, 32, 1])
 
     def test_translator_sends_bounded_context_but_validates_only_items(self):
         response = SimpleNamespace(
@@ -199,8 +313,91 @@ class AIResultValidationTests(unittest.TestCase):
         db.close()
         self.assertEqual([row["raw_text"] for row in restored], ["I want to", "show you this", "Locked line"])
 
+    def test_failed_clean_batch_retry_only_reconciles_stored_range(self):
+        init_db()
+        project_id = str(__import__("uuid").uuid4())
+        now = time.strftime("%Y-%m-%d %H:%M:%S")
+        db = get_db()
+        db.execute(
+            "INSERT INTO projects (id,title,source_type,language,target_language,created_at,updated_at) VALUES (?,?,?,?,?,?,?)",
+            (project_id, "single batch retry", "local", "en", "zh", now, now),
+        )
+        rows = []
+        for idx, text in enumerate(["Keep this.", "Merge", "these", "Keep that."], 1):
+            row = {
+                "id": str(__import__("uuid").uuid4()), "project_id": project_id, "idx": idx,
+                "start": float(idx - 1), "end": float(idx), "raw_text": text, "clean_text": text,
+                "translated_text": "", "speaker": "", "locked": 0, "is_draft": 0,
+                "source_stage": "postprocessed",
+            }
+            rows.append(row)
+            db.execute(
+                "INSERT INTO segments (id,project_id,idx,start,end,raw_text,clean_text,translated_text,speaker,locked,is_draft,source_stage) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                tuple(row[key] for key in ["id","project_id","idx","start","end","raw_text","clean_text","translated_text","speaker","locked","is_draft","source_stage"]),
+            )
+        original_task = task_manager.create_task(project_id, "clean")
+        retry_task = task_manager.create_task(project_id, "clean", max_attempts=1)
+        fingerprint = __import__("json").dumps({
+            "segments": _fingerprint(rows[1:3]), "provider": "deepseek",
+            "model": "deepseek-chat", "target_length": 42,
+        }, ensure_ascii=False, sort_keys=True)
+        db.execute(
+            """INSERT INTO ai_batch_results
+               (task_id,project_id,operation,batch_index,input_fingerprint,status,result_json,attempts,error,updated_at)
+               VALUES (?,?,?,?,?,'failed','[]',3,'invalid json',?)""",
+            (original_task, project_id, "clean", 2, fingerprint, now),
+        )
+        db.commit(); db.close()
+
+        provider = {"provider": "deepseek", "model": "deepseek-chat", "base_url": "http://example.test/v1", "api_key": "secret"}
+        with patch("app.services.subtitle_cleaner.assigned_provider", return_value=provider), patch(
+            "app.services.subtitle_cleaner._call_llm_group",
+            return_value=[{"ids": ["2", "3"], "clean_text": "Merge these."}],
+        ) as call:
+            retry_clean_batch(retry_task, original_task, 2)
+
+        call.assert_called_once()
+        self.assertEqual([row["idx"] for row in call.call_args.args[0]], [2, 3])
+        db = get_db()
+        published = db.execute(
+            "SELECT raw_text,clean_text FROM segments WHERE project_id=? ORDER BY idx", (project_id,),
+        ).fetchall()
+        batch_status = db.execute(
+            "SELECT status FROM ai_batch_results WHERE task_id=? AND batch_index=2", (original_task,),
+        ).fetchone()["status"]
+        db.close()
+        self.assertEqual([row["raw_text"] for row in published], ["Keep this.", "Merge these", "Keep that."])
+        self.assertEqual(published[1]["clean_text"], "Merge these.")
+        self.assertEqual(batch_status, "success")
+
 
 class TaskPauseTests(unittest.TestCase):
+    def test_successful_automatic_retry_clears_transient_error_fields(self):
+        manager = TaskManager(max_workers=1)
+        task_id = manager.create_task("project", "download", max_attempts=2)
+        calls = 0
+
+        class RecoverableFailure(RuntimeError):
+            error_code = "DOWNLOAD_FAILED"
+            recoverable = True
+
+        def worker(_runtime_task_id):
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                raise RecoverableFailure("temporary network failure")
+
+        future = manager.run_background(task_id, worker)
+        future.result(timeout=4)
+        task = manager.get_task(task_id)
+        self.assertEqual(task["status"], "success")
+        self.assertEqual(task["attempt"], 2)
+        self.assertIsNone(task["error"])
+        self.assertIsNone(task["error_code"])
+        self.assertFalse(task["recoverable"])
+        self.assertEqual(task["available_actions"], [])
+        manager.shutdown()
+
     def test_worker_pauses_and_resumes_at_checkpoint(self):
         manager = TaskManager(max_workers=1)
         task_id = manager.create_task("project", "translate")
@@ -332,7 +529,7 @@ class TaskCancellationTests(unittest.TestCase):
         llm_started = threading.Event()
         release_llm = threading.Event()
 
-        def fake_group(_batch, _ai, _target_length, task_id=None):
+        def fake_group(_batch, _ai, _target_length, task_id=None, diagnostics=None):
             llm_started.set()
             release_llm.wait(2)
             return [{
