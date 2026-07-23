@@ -40,6 +40,7 @@ def init_db():
             thumbnail_url TEXT,
             thumbnail_path TEXT,
             group_name TEXT,
+            media_mode TEXT NOT NULL DEFAULT 'local',
             language TEXT DEFAULT 'auto',
             target_language TEXT DEFAULT 'zh',
             created_at TEXT NOT NULL,
@@ -208,6 +209,12 @@ def init_db():
             conn.execute(f"ALTER TABLE projects ADD COLUMN {column} TEXT")
         except sqlite3.OperationalError:
             pass
+    try:
+        conn.execute(
+            "ALTER TABLE projects ADD COLUMN media_mode TEXT NOT NULL DEFAULT 'local'"
+        )
+    except sqlite3.OperationalError:
+        pass
     for column, definition in [
         ("last_test_status", "TEXT DEFAULT ''"),
         ("last_test_at", "TEXT DEFAULT ''"),
@@ -283,8 +290,8 @@ def segment_to_dict(row) -> dict:
 _YOUTUBE_VIDEO_ID = re.compile(r"^[A-Za-z0-9_-]{11}$")
 
 
-def _youtube_thumbnail_url(source_url: str | None) -> str | None:
-    """Derive a stable public thumbnail for common legacy YouTube URLs."""
+def _youtube_video_id(source_url: str | None) -> str | None:
+    """Extract a stable video id from common YouTube URL shapes."""
     if not source_url:
         return None
     candidate_url = source_url.strip()
@@ -303,9 +310,13 @@ def _youtube_thumbnail_url(source_url: str | None) -> str | None:
         elif len(path_parts) >= 2 and path_parts[0] in {"embed", "live", "shorts"}:
             video_id = path_parts[1]
 
-    if not video_id or not _YOUTUBE_VIDEO_ID.fullmatch(video_id):
-        return None
-    return f"https://i.ytimg.com/vi/{video_id}/hqdefault.jpg"
+    return video_id if video_id and _YOUTUBE_VIDEO_ID.fullmatch(video_id) else None
+
+
+def _youtube_thumbnail_url(source_url: str | None) -> str | None:
+    """Derive a stable public thumbnail for common legacy YouTube URLs."""
+    video_id = _youtube_video_id(source_url)
+    return f"https://i.ytimg.com/vi/{video_id}/hqdefault.jpg" if video_id else None
 
 
 def project_to_dict(row) -> dict:
@@ -315,6 +326,9 @@ def project_to_dict(row) -> dict:
     thumbnail_path = row["thumbnail_path"] if "thumbnail_path" in row_keys else None
     group_name = row["group_name"] if "group_name" in row_keys else None
     deleted_at = row["deleted_at"] if "deleted_at" in row_keys else None
+    media_mode = row["media_mode"] if "media_mode" in row_keys else "local"
+    if media_mode not in {"local", "web"}:
+        media_mode = "local"
     thumbnail_url = source_thumbnail_url
     if not thumbnail_url and row["source_type"] == "youtube":
         thumbnail_url = _youtube_thumbnail_url(row["source_url"])
@@ -345,4 +359,11 @@ def project_to_dict(row) -> dict:
         "deleted_at": deleted_at,
         "edit_revision": int(row["edit_revision"] or 0) if "edit_revision" in row_keys else 0,
         "media_status": (row["media_status"] or "ready") if "media_status" in row_keys else "ready",
+        "media_mode": media_mode,
+        "youtube_video_id": (
+            _youtube_video_id(row["source_url"])
+            if row["source_type"] == "youtube" else None
+        ),
+        "video_available": bool(row["video_path"] and os.path.isfile(row["video_path"])),
+        "audio_available": bool(row["audio_path"] and os.path.isfile(row["audio_path"])),
     }

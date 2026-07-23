@@ -14,6 +14,7 @@ class ProjectCreate(BaseModel):
     title: Optional[str] = None
     language: str = "auto"
     target_language: str = "zh"
+    media_mode: Optional[Literal["local", "web"]] = None
 
 
 class ProjectResponse(BaseModel):
@@ -35,6 +36,10 @@ class ProjectResponse(BaseModel):
     segments_count: int = 0
     edit_revision: int = 0
     media_status: str = "ready"
+    media_mode: Literal["local", "web"] = "local"
+    youtube_video_id: Optional[str] = None
+    video_available: bool = False
+    audio_available: bool = False
 
 
 class ProjectUpdate(BaseModel):
@@ -64,6 +69,10 @@ class ProjectGroupUpdate(BaseModel):
         if len(normalized) > 40:
             raise ValueError("分组名最多 40 个字符")
         return normalized or None
+
+
+class ProjectMediaModeUpdate(BaseModel):
+    media_mode: Literal["local", "web"]
 
 
 # ── Segment ─────────────────────────────────────────────
@@ -270,6 +279,7 @@ class AppSettingsUpdate(BaseModel):
     translation_target_language: Optional[str] = None
     bilingual_order: Optional[Literal["original_first", "translated_first"]] = None
     favorite_languages: Optional[List[str]] = None
+    youtube_media_mode: Optional[Literal["local", "web"]] = None
     download_quality: Optional[str] = None
     download_container: Optional[Literal["mp4", "mkv", "webm"]] = None
     ffmpeg_path: Optional[str] = None

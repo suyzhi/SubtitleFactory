@@ -19,6 +19,10 @@ export interface Project {
   segments_count: number;
   edit_revision?: number;
   media_status?: string;
+  media_mode: 'local' | 'web';
+  youtube_video_id: string | null;
+  video_available: boolean;
+  audio_available: boolean;
   status?: string;
   latest_task_status?: string | null;
   latest_task_message?: string | null;
@@ -274,6 +278,7 @@ export interface ProjectCreate {
   title?: string;
   language?: string;
   target_language?: string;
+  media_mode?: 'local' | 'web';
 }
 
 export interface SegmentUpdate {
@@ -399,6 +404,7 @@ export interface AppSettings {
   download_quality?: string;
   download_container?: 'mp4' | 'mkv' | 'webm';
   download_directory?: string;
+  youtube_media_mode?: 'local' | 'web';
   ffmpeg_path?: string;
   yt_dlp_path?: string;
   custom_model_path?: string;

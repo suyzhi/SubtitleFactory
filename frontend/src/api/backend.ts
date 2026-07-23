@@ -62,7 +62,17 @@ async function parseError(res: Response): Promise<BackendError> {
   let payload: any = null;
   try { payload = await res.json(); } catch { /* handled below */ }
   const error = payload?.error || (typeof payload?.detail === 'object' ? payload.detail : null);
-  return new BackendError(res.status, error || {
+  if (error) {
+    const { code, message, suggestion, recoverable, details, ...extraDetails } = error;
+    return new BackendError(res.status, {
+      code,
+      message,
+      suggestion,
+      recoverable,
+      details: { ...extraDetails, ...(details || {}) },
+    });
+  }
+  return new BackendError(res.status, {
     code: `HTTP_${res.status}`,
     message: typeof payload?.detail === 'string' ? payload.detail : `请求失败 (${res.status})`,
     details: {}, recoverable: res.status < 500,
@@ -143,6 +153,67 @@ export async function startDownload(projectId: string, url: string): Promise<{ t
   const res = await authorizedFetch(`/api/projects/${projectId}/download`, { method: 'POST', body: form }, false);
   if (!res.ok) throw await parseError(res);
   return res.json();
+}
+
+export async function prepareProjectAudio(projectId: string): Promise<{ task_id: string; message: string }> {
+  return request(`/api/projects/${projectId}/prepare-audio`, { method: 'POST' });
+}
+
+export async function updateProjectMediaMode(
+  projectId: string, mediaMode: 'local' | 'web',
+): Promise<{ project: Project; task_id?: string; message: string }> {
+  return request(`/api/projects/${projectId}/media-mode`, {
+    method: 'PATCH',
+    body: JSON.stringify({ media_mode: mediaMode }),
+  });
+}
+
+export async function materializeProjectVideo(
+  projectId: string, reason: 'manual' | 'player_fallback' | 'offline' = 'manual',
+): Promise<{ project?: Project; task_id?: string; message: string }> {
+  const endpoint = `/api/projects/${projectId}/materialize-video?reason=${reason}`;
+  let conflictRetries = 0;
+  while (true) {
+    try {
+      return await request(endpoint, { method: 'POST' });
+    } catch (error) {
+      const taskIds = error instanceof BackendError && Array.isArray(error.details.task_ids)
+        ? error.details.task_ids.filter((item): item is string => typeof item === 'string')
+        : [];
+      const shouldWaitForAudio = reason === 'player_fallback'
+        && error instanceof BackendError
+        && error.status === 409
+        && error.code === 'MEDIA_TASK_ACTIVE'
+        && taskIds.length > 0
+        && conflictRetries < 2;
+      if (!shouldWaitForAudio) throw error;
+
+      conflictRetries += 1;
+      for (let attempt = 0; attempt < 600; attempt += 1) {
+        const statuses = await Promise.all(taskIds.map(taskId => getTaskStatus(taskId)));
+        if (statuses.every(status => ['success', 'failed', 'cancelled', 'partial'].includes(status.status))) {
+          break;
+        }
+        await new Promise(resolve => window.setTimeout(resolve, 1000));
+        if (attempt === 599) {
+          throw new BackendError(409, {
+            code: 'MEDIA_TASK_WAIT_TIMEOUT',
+            message: '等待当前媒体任务结束超时，请稍后手动下载本地副本',
+            details: { task_ids: taskIds },
+          });
+        }
+      }
+    }
+  }
+}
+
+export async function createYoutubePlayerSession(
+  videoId: string, channel: string,
+): Promise<string> {
+  const result = await request<{ url: string }>(
+    `/api/player/youtube/${encodeURIComponent(videoId)}/session?channel=${encodeURIComponent(channel)}`,
+  );
+  return getBackendMediaUrl(result.url) || result.url;
 }
 
 export async function importLocalVideo(

@@ -11,16 +11,17 @@ import logging
 import wave
 import threading
 import importlib.util
+import re
 from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Query
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse
 
 from ..models.database import get_db, init_db, project_to_dict, segment_to_dict
 from ..models.schemas import (
     ProjectCreate, ProjectResponse, ProjectUpdate, SegmentResponse,
-    ProjectGroupUpdate, SegmentUpdate, SegmentOperationItem, SegmentOperationRequest, ExportRequest, ProcessingConfig,
+    ProjectGroupUpdate, ProjectMediaModeUpdate, SegmentUpdate, SegmentOperationItem, SegmentOperationRequest, ExportRequest, ProcessingConfig,
     WorkflowRequest, TranscriptionRetryRequest, ModelPrepareRequest, MediaSelectionUpdate,
     ModelScanRequest, ModelImportRequest,
 )
@@ -31,8 +32,11 @@ from ..utils.config import (
     EXPORTS_DIR,
 )
 from ..utils.task_manager import task_manager
+from ..security import signed_media_url
 from ..services.app_settings import get_app_settings
-from ..services.downloader import download_video, get_video_info, normalize_youtube_url
+from ..services.downloader import (
+    download_audio_source, download_video, get_video_info, normalize_youtube_url,
+)
 from ..services.audio_extractor import extract_audio
 from ..services.audio_preview import generate_track_preview
 from ..services.transcriber import (
@@ -59,6 +63,8 @@ from ..services.local_models import scan_models, register_model, get_imported, v
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api")
+_YOUTUBE_PLAYER_ID = re.compile(r"^[A-Za-z0-9_-]{11}$")
+_PLAYER_CHANNEL = re.compile(r"^[A-Za-z0-9_-]{8,80}$")
 
 VIDEO_EXTENSIONS = {".mp4", ".mkv", ".mov", ".webm", ".avi"}
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
@@ -571,13 +577,31 @@ def create_project(req: ProjectCreate):
     init_db()
     project_id = str(uuid.uuid4())
     now = time.strftime("%Y-%m-%d %H:%M:%S")
+    source_url = (
+        normalize_youtube_url(req.source_url or "")
+        if req.source_type == "youtube" and req.source_url else req.source_url
+    )
+    if req.source_type == "local":
+        media_mode = "local"
+    else:
+        try:
+            default_mode = get_app_settings().get("youtube_media_mode")
+        except Exception:
+            default_mode = "local"
+        media_mode = req.media_mode or default_mode
+        if media_mode not in {"local", "web"}:
+            media_mode = "local"
 
     db = get_db()
     db.execute(
-        """INSERT INTO projects (id, title, source_type, source_url, language, target_language, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-        (project_id, req.title or "未命名项目", req.source_type, req.source_url,
-         req.language, req.target_language, now, now)
+        """INSERT INTO projects
+           (id, title, source_type, source_url, media_mode, language,
+            target_language, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (
+            project_id, req.title or "未命名项目", req.source_type, source_url,
+            media_mode, req.language, req.target_language, now, now,
+        )
     )
     db.commit()
     db.close()
@@ -748,6 +772,91 @@ def update_project_group(project_id: str, update: ProjectGroupUpdate):
     return {**project_to_dict(row), "segments_count": row["segments_count"]}
 
 
+@router.patch("/projects/{project_id}/media-mode")
+def update_project_media_mode(project_id: str, update: ProjectMediaModeUpdate):
+    row = _project_row(project_id)
+    if not row:
+        raise HTTPException(404, "项目不存在")
+    if row["source_type"] != "youtube":
+        raise HTTPException(400, "本地导入项目只能使用本地模式")
+    if update.media_mode == row["media_mode"]:
+        return {"project": get_project(project_id), "message": "项目已使用该媒体模式"}
+    active = _active_task_conflict(project_id)
+    if active:
+        raise HTTPException(
+            409,
+            detail={
+                "code": "MEDIA_TASK_ACTIVE",
+                "message": "项目已有任务正在运行，完成后再切换媒体模式",
+                "task_ids": active,
+            },
+        )
+    if update.media_mode == "web":
+        db = get_db()
+        db.execute(
+            "UPDATE projects SET media_mode='web',updated_at=? WHERE id=?",
+            (time.strftime("%Y-%m-%d %H:%M:%S"), project_id),
+        )
+        db.commit()
+        db.close()
+        return {
+            "project": get_project(project_id),
+            "message": "已改用网页播放，本地视频副本继续保留",
+        }
+    if row["video_path"] and os.path.isfile(row["video_path"]):
+        db = get_db()
+        db.execute(
+            "UPDATE projects SET media_mode='local',updated_at=? WHERE id=?",
+            (time.strftime("%Y-%m-%d %H:%M:%S"), project_id),
+        )
+        db.commit()
+        db.close()
+        return {"project": get_project(project_id), "message": "已改用本地视频"}
+    if not row["source_url"]:
+        raise HTTPException(400, "项目没有可下载的视频链接")
+    task_id = task_manager.create_task(project_id, "switch_media_mode")
+    task_manager.run_background(
+        task_id, _do_download, project_id, row["source_url"],
+        set_media_mode="local", preserve_metadata=True,
+        materialization_reason="mode_switch",
+    )
+    return {
+        "project": get_project(project_id),
+        "task_id": task_id,
+        "message": "正在下载本地视频；成功后自动切换",
+    }
+
+
+@router.post("/projects/{project_id}/materialize-video")
+def materialize_project_video(
+    project_id: str,
+    reason: str = Query("manual", pattern="^(manual|player_fallback|offline)$"),
+):
+    row = _project_row(project_id)
+    if not row:
+        raise HTTPException(404, "项目不存在")
+    if row["video_path"] and os.path.isfile(row["video_path"]):
+        return {"project": get_project(project_id), "message": "本地视频已存在"}
+    if row["source_type"] != "youtube" or not row["source_url"]:
+        raise HTTPException(400, "项目没有可下载的视频链接")
+    active = _active_task_conflict(project_id)
+    if active:
+        raise HTTPException(
+            409,
+            detail={
+                "code": "MEDIA_TASK_ACTIVE",
+                "message": "项目已有媒体或处理任务正在运行",
+                "task_ids": active,
+            },
+        )
+    task_id = task_manager.create_task(project_id, "materialize_video")
+    task_manager.run_background(
+        task_id, _do_download, project_id, row["source_url"],
+        preserve_metadata=True, materialization_reason=reason,
+    )
+    return {"task_id": task_id, "message": "正在下载并保留本地视频"}
+
+
 # ============================
 # 下载 / 导入
 # ============================
@@ -773,8 +882,19 @@ def start_download(project_id: str, url: str = Form(...)):
     return {"task_id": task_id, "message": "下载任务已创建"}
 
 
-def _do_download(task_id: str, project_id: str, url: str):
-    """后台执行下载"""
+def _do_download(
+    task_id: str,
+    project_id: str,
+    url: str,
+    *,
+    set_media_mode: str | None = None,
+    preserve_metadata: bool = False,
+    progress_start: float = 10,
+    progress_end: float = 95,
+    completed_progress: float = 100,
+    materialization_reason: str = "",
+):
+    """Download a complete video and atomically attach it to the project."""
     try:
         app_settings = get_app_settings()
     except Exception:
@@ -787,23 +907,41 @@ def _do_download(task_id: str, project_id: str, url: str):
         download_dir=app_settings.get("download_directory"),
         quality=app_settings.get("download_quality") or "best",
         container=app_settings.get("download_container") or "mp4",
+        progress_start=progress_start,
+        progress_end=progress_end,
     )
     task_manager.checkpoint(task_id)
 
     db = get_db()
     try:
         details = (task_manager.get_task(task_id) or {}).get("details", {})
-        title = details.get("title") or os.path.basename(video_path)
-        thumbnail_url = details.get("thumbnail_url")
-        thumbnail_path = details.get("thumbnail_path")
+        existing = db.execute(
+            "SELECT title,thumbnail_url,thumbnail_path FROM projects WHERE id=?",
+            (project_id,),
+        ).fetchone()
+        title = (
+            existing["title"] if preserve_metadata and existing
+            else details.get("title") or os.path.basename(video_path)
+        )
+        thumbnail_url = (
+            existing["thumbnail_url"] if preserve_metadata and existing
+            else details.get("thumbnail_url")
+        )
+        thumbnail_path = (
+            existing["thumbnail_path"] if preserve_metadata and existing
+            else details.get("thumbnail_path")
+        )
+        mode_sql = ", media_mode = ?" if set_media_mode in {"local", "web"} else ""
+        values = [video_path, title, thumbnail_url, thumbnail_path]
+        if mode_sql:
+            values.append(set_media_mode)
+        values.extend([time.strftime("%Y-%m-%d %H:%M:%S"), project_id])
         db.execute(
             """UPDATE projects
-               SET video_path = ?, title = ?, thumbnail_url = ?, thumbnail_path = ?, updated_at = ?
+               SET video_path = ?, title = ?, thumbnail_url = ?, thumbnail_path = ?
+               """ + mode_sql + """, updated_at = ?
                WHERE id = ?""",
-            (
-                video_path, title, thumbnail_url, thumbnail_path,
-                time.strftime("%Y-%m-%d %H:%M:%S"), project_id,
-            )
+            values,
         )
         task_manager.checkpoint(task_id)
         db.commit()
@@ -813,7 +951,76 @@ def _do_download(task_id: str, project_id: str, url: str):
     finally:
         db.close()
 
-    task_manager.update_task(task_id, step="downloaded", progress=50, message="视频下载完成，可继续提取音频")
+    task_manager.update_task(
+        task_id, step="downloaded", progress=completed_progress,
+        message="视频下载完成",
+        details={
+            "materialization_reason": materialization_reason,
+            "local_video_ready": True,
+            **({"media_mode": set_media_mode} if set_media_mode else {}),
+        },
+    )
+
+
+def _do_prepare_audio(task_id: str, project_id: str, url: str):
+    """Download a YouTube audio stream and safely replace the recognition WAV."""
+    try:
+        app_settings = get_app_settings()
+    except Exception:
+        app_settings = {}
+    source_path = download_audio_source(
+        task_id, url, project_id,
+        download_dir=app_settings.get("download_directory"),
+    )
+    staging_dir = Path(source_path).parent
+    try:
+        audio_path = extract_audio(
+            task_id, source_path, project_id,
+            progress_start=45, progress_end=78,
+        )
+        task_manager.checkpoint(task_id)
+        details = (task_manager.get_task(task_id) or {}).get("details", {})
+        db = get_db()
+        try:
+            row = db.execute(
+                "SELECT title FROM projects WHERE id=?", (project_id,)
+            ).fetchone()
+            current_title = row["title"] if row else ""
+            downloaded_title = details.get("title") or ""
+            use_downloaded_title = (
+                not current_title
+                or current_title == "未命名项目"
+                or current_title.startswith("YouTube - ")
+            )
+            db.execute(
+                """UPDATE projects
+                   SET audio_path=?, title=?, thumbnail_url=COALESCE(?,thumbnail_url),
+                       updated_at=?
+                   WHERE id=?""",
+                (
+                    audio_path,
+                    downloaded_title if use_downloaded_title and downloaded_title else current_title,
+                    details.get("thumbnail_url"),
+                    time.strftime("%Y-%m-%d %H:%M:%S"),
+                    project_id,
+                ),
+            )
+            task_manager.checkpoint(task_id)
+            db.commit()
+        except Exception:
+            db.rollback()
+            raise
+        finally:
+            db.close()
+        task_manager.update_task(
+            task_id, step="audio_ready", progress=80,
+            message="音频已准备完成",
+            details={"audio_path": audio_path, "audio_ready": True},
+        )
+        return audio_path
+    finally:
+        if staging_dir.name == f".audio-{task_id}" and staging_dir.is_dir():
+            shutil.rmtree(staging_dir, ignore_errors=True)
 
 
 @router.post("/projects/{project_id}/import-local")
@@ -853,7 +1060,7 @@ async def import_local_video(
     # 更新项目
     db.execute(
         """UPDATE projects
-           SET video_path = ?, source_type = 'local', title = ?,
+           SET video_path = ?, source_type = 'local', media_mode = 'local', title = ?,
                thumbnail_url = NULL, thumbnail_path = ?, updated_at = ?
            WHERE id = ?""",
         (
@@ -980,7 +1187,37 @@ def start_extract_audio(project_id: str):
     return {"task_id": task_id, "message": "音频提取任务已创建"}
 
 
-def _do_extract_audio(task_id: str, project_id: str, video_path: str):
+@router.post("/projects/{project_id}/prepare-audio")
+def start_prepare_audio(project_id: str):
+    row = _project_row(project_id)
+    if not row:
+        raise HTTPException(404, "项目不存在")
+    if row["source_type"] != "youtube" or not row["source_url"]:
+        raise HTTPException(400, "只有 YouTube 项目可以准备网页模式音频")
+    active = _active_task_conflict(project_id)
+    if active:
+        raise HTTPException(
+            409,
+            detail={
+                "code": "MEDIA_TASK_ACTIVE",
+                "message": "项目已有媒体或处理任务正在运行",
+                "task_ids": active,
+            },
+        )
+    task_id = task_manager.create_task(project_id, "prepare_audio")
+    task_manager.run_background(
+        task_id, _do_prepare_audio, project_id, row["source_url"],
+    )
+    return {"task_id": task_id, "message": "音频准备任务已创建"}
+
+
+def _do_extract_audio(
+    task_id: str,
+    project_id: str,
+    video_path: str,
+    progress_start: float = 5,
+    progress_end: float = 100,
+):
     db = get_db()
     selection = db.execute(
         "SELECT audio_track_index,range_start,range_end FROM projects WHERE id=?", (project_id,)
@@ -991,6 +1228,8 @@ def _do_extract_audio(task_id: str, project_id: str, video_path: str):
         int(selection["audio_track_index"] or 0) if selection else 0,
         selection["range_start"] if selection else None,
         selection["range_end"] if selection else None,
+        progress_start=progress_start,
+        progress_end=progress_end,
     )
     task_manager.checkpoint(task_id)
 
@@ -1100,7 +1339,9 @@ def start_workflow(project_id: str, request: WorkflowRequest):
     if not row:
         raise HTTPException(404, "项目不存在")
     source_url = request.source_url or row["source_url"]
-    if not row["video_path"] and not source_url:
+    video_ready = bool(row["video_path"] and os.path.isfile(row["video_path"]))
+    audio_ready = _audio_preflight(row["audio_path"])["ok"]
+    if not video_ready and not source_url:
         raise HTTPException(400, "项目没有可处理的视频或链接")
     model = _resolve_model(request.model, request.language)
     settings=get_app_settings(); imported=get_imported(model) if model.startswith("local:") else None
@@ -1109,13 +1350,22 @@ def start_workflow(project_id: str, request: WorkflowRequest):
     mapping=dict(settings.get("transcription_runtime_by_model") or {});mapping[model]=runtime
     save_app_settings({"transcription_runtime_by_model":mapping})
     task_id = task_manager.create_task(project_id, "workflow")
+    should_download_source = (
+        source_url
+        if (
+            row["media_mode"] == "web" and not audio_ready
+        ) or (
+            row["media_mode"] != "web" and not video_ready
+        )
+        else None
+    )
     task_manager.update_task(task_id, details={"resume_payload": {
         "project_id": project_id, "model": model, "language": request.language,
-        "source_url": source_url if not row["video_path"] else None, "runtime": runtime,
+        "source_url": should_download_source, "runtime": runtime,
     }})
     task_manager.run_background(
         task_id, _do_workflow, project_id, model, request.language,
-        source_url if not row["video_path"] else None, runtime,
+        should_download_source, runtime,
     )
     return {"task_id": task_id, "message": "自动字幕工作流已创建", "model": model}
 
@@ -1126,26 +1376,59 @@ def _do_workflow(
     stages = {
         "download": "waiting", "extract_audio": "waiting", "transcribe": "waiting",
     }
-    if source_url:
-        stages["download"] = "running"
-        task_manager.update_task(task_id, step="download", details={"stages": stages})
-        _do_download(task_id, project_id, source_url)
-        stages["download"] = "success"
-    else:
-        stages["download"] = "success"
-
     db = get_db()
-    row = db.execute("SELECT video_path,audio_path FROM projects WHERE id=?", (project_id,)).fetchone()
+    row = db.execute(
+        "SELECT source_url,video_path,audio_path,media_mode FROM projects WHERE id=?",
+        (project_id,),
+    ).fetchone()
     db.close()
-    if not row or not row["video_path"]:
-        raise RuntimeError("工作流未找到可用视频")
+    if not row:
+        raise RuntimeError("工作流未找到项目")
 
-    audio_check = _audio_preflight(row["audio_path"])
-    if not audio_check["ok"]:
-        stages["extract_audio"] = "running"
-        task_manager.update_task(task_id, step="extract_audio", details={"stages": stages})
-        _do_extract_audio(task_id, project_id, row["video_path"])
-    stages["extract_audio"] = "success"
+    if row["media_mode"] == "web":
+        audio_check = _audio_preflight(row["audio_path"])
+        if not audio_check["ok"]:
+            url = source_url or row["source_url"]
+            if not url:
+                raise RuntimeError("网页模式项目缺少可用链接")
+            stages["download"] = "running"
+            stages["extract_audio"] = "running"
+            task_manager.update_task(
+                task_id, step="download_audio", details={"stages": stages},
+            )
+            _do_prepare_audio(task_id, project_id, url)
+        stages["download"] = "success"
+        stages["extract_audio"] = "success"
+    else:
+        if source_url:
+            stages["download"] = "running"
+            task_manager.update_task(
+                task_id, step="download", details={"stages": stages},
+            )
+            _do_download(
+                task_id, project_id, source_url,
+                progress_start=2, progress_end=45, completed_progress=45,
+            )
+        stages["download"] = "success"
+        db = get_db()
+        row = db.execute(
+            "SELECT video_path,audio_path FROM projects WHERE id=?",
+            (project_id,),
+        ).fetchone()
+        db.close()
+        if not row or not row["video_path"] or not os.path.isfile(row["video_path"]):
+            raise RuntimeError("工作流未找到可用视频")
+        audio_check = _audio_preflight(row["audio_path"])
+        if not audio_check["ok"]:
+            stages["extract_audio"] = "running"
+            task_manager.update_task(
+                task_id, step="extract_audio", details={"stages": stages},
+            )
+            _do_extract_audio(
+                task_id, project_id, row["video_path"],
+                progress_start=45, progress_end=78,
+            )
+        stages["extract_audio"] = "success"
 
     db = get_db()
     audio_path = db.execute("SELECT audio_path FROM projects WHERE id=?", (project_id,)).fetchone()["audio_path"]
@@ -1367,6 +1650,52 @@ def update_segment(project_id: str, segment_index: int, update: SegmentUpdate):
 # 导出
 # ============================
 
+def _do_video_export(
+    task_id: str,
+    project_id: str,
+    subtitle_path: str,
+    output_path: str,
+    fmt: str,
+):
+    row = _project_row(project_id)
+    if not row:
+        raise RuntimeError("项目不存在")
+    stages = {"download_video": "waiting", "render_video": "waiting"}
+    video_path = row["video_path"]
+    if not video_path or not os.path.isfile(video_path):
+        if row["source_type"] != "youtube" or not row["source_url"]:
+            raise RuntimeError("视频文件不存在，且项目没有可重新下载的链接")
+        stages["download_video"] = "running"
+        task_manager.update_task(
+            task_id, step="materialize_video", progress=1,
+            message="首次视频导出：正在下载并保留本地视频",
+            details={"stages": stages, "format": fmt},
+        )
+        _do_download(
+            task_id, project_id, row["source_url"],
+            preserve_metadata=True, progress_start=2, progress_end=52,
+            completed_progress=52, materialization_reason="video_export",
+        )
+        row = _project_row(project_id)
+        video_path = row["video_path"] if row else None
+    if not video_path or not os.path.isfile(video_path):
+        raise RuntimeError("本地视频准备失败，无法压制字幕")
+    stages["download_video"] = "success"
+    stages["render_video"] = "running"
+    task_manager.update_task(
+        task_id, step="rendering", progress=55,
+        message="本地视频已就绪，正在压制字幕",
+        details={"stages": stages, "format": fmt},
+    )
+    burn_subtitles(task_id, video_path, subtitle_path, output_path, project_id)
+    stages["render_video"] = "success"
+    task_manager.update_task(
+        task_id, step="render_done", progress=95,
+        message="视频压制完成",
+        details={"stages": stages, "format": fmt},
+    )
+
+
 @router.post("/projects/{project_id}/export")
 def export_subtitles(project_id: str, req: ExportRequest):
     """导出字幕或压制视频"""
@@ -1410,8 +1739,19 @@ def export_subtitles(project_id: str, req: ExportRequest):
         export_srt(segments, out, bilingual=True, primary_lang=req.primary_language)
         media_type = "text/plain"
     elif fmt in {"mp4", "mkv"}:
-        if not row["video_path"] or not os.path.exists(row["video_path"]):
-            raise HTTPException(400, "视频文件不存在，无法压制")
+        if _active_task_conflict(project_id):
+            raise HTTPException(
+                409,
+                detail={
+                    "code": "MEDIA_TASK_ACTIVE",
+                    "message": "项目已有任务正在运行，完成后再导出视频",
+                },
+            )
+        if (
+            (not row["video_path"] or not os.path.exists(row["video_path"]))
+            and (row["source_type"] != "youtube" or not row["source_url"])
+        ):
+            raise HTTPException(400, "视频文件不存在，且项目没有可重新下载的链接")
 
         # 先导出 ASS 字幕
         ass_path = get_subtitle_path(project_id, "ass")
@@ -1422,8 +1762,8 @@ def export_subtitles(project_id: str, req: ExportRequest):
         from ..utils.config import EXPORTS_DIR
         output_path = os.path.join(EXPORTS_DIR, f"{project_id}_hardsub.{fmt}")
         task_manager.run_background(
-            task_id, burn_subtitles,
-            row["video_path"], ass_path, output_path, project_id
+            task_id, _do_video_export,
+            project_id, ass_path, output_path, fmt,
         )
         return {"task_id": task_id, "message": f"{fmt.upper()} 视频导出任务已创建"}
     else:
@@ -1449,6 +1789,128 @@ def download_export(project_id: str, fmt: str = Query("srt", pattern="^(srt|vtt|
 # ============================
 # 视频/音频文件访问
 # ============================
+
+@router.get("/player/youtube/{video_id}/session")
+def youtube_player_session(video_id: str, channel: str = Query(...)):
+    if not _YOUTUBE_PLAYER_ID.fullmatch(video_id):
+        raise HTTPException(400, "无效的 YouTube 视频 ID")
+    if not _PLAYER_CHANNEL.fullmatch(channel):
+        raise HTTPException(400, "无效的播放器频道")
+    path = f"/api/player/youtube/{video_id}"
+    separator = "&" if "?" in (signed := signed_media_url(path)) else "?"
+    return {"url": f"{signed}{separator}channel={channel}"}
+
+
+@router.get("/player/youtube/{video_id}", response_class=HTMLResponse)
+def youtube_player_bridge(video_id: str, channel: str = Query(...)):
+    """Serve a localhost-origin YouTube IFrame API bridge for the Tauri UI."""
+    if not _YOUTUBE_PLAYER_ID.fullmatch(video_id):
+        raise HTTPException(400, "无效的 YouTube 视频 ID")
+    if not _PLAYER_CHANNEL.fullmatch(channel):
+        raise HTTPException(400, "无效的播放器频道")
+    html = f"""<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="referrer" content="strict-origin-when-cross-origin">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <style>
+    html,body,#player{{width:100%;height:100%;margin:0;background:#000;overflow:hidden}}
+    iframe{{display:block;width:100%;height:100%;border:0}}
+  </style>
+</head>
+<body>
+<div id="player"></div>
+<script>
+(() => {{
+  const channel = {json.dumps(channel)};
+  const videoId = {json.dumps(video_id)};
+  let player = null;
+  let timer = null;
+  const emit = (type, payload = {{}}) => parent.postMessage(
+    {{ source: 'subtitle-factory-youtube', channel, type, ...payload }}, '*'
+  );
+  const snapshot = () => {{
+    if (!player || typeof player.getCurrentTime !== 'function') return;
+    emit('time', {{
+      time: Number(player.getCurrentTime() || 0),
+      duration: Number(player.getDuration() || 0),
+      state: Number(player.getPlayerState())
+    }});
+  }};
+  const stopTimer = () => {{ if (timer) clearInterval(timer); timer = null; }};
+  const startTimer = () => {{
+    stopTimer();
+    snapshot();
+    timer = setInterval(snapshot, 200);
+  }};
+  window.onYouTubeIframeAPIReady = () => {{
+    player = new YT.Player('player', {{
+      videoId,
+      width: '100%',
+      height: '100%',
+      playerVars: {{
+        autoplay: 0, controls: 1, enablejsapi: 1, fs: 0, playsinline: 1,
+        origin: window.location.origin
+      }},
+      events: {{
+        onReady: () => {{
+          emit('ready', {{
+            duration: Number(player.getDuration() || 0),
+            rates: player.getAvailablePlaybackRates() || [1],
+            volume: Number(player.getVolume() || 100),
+            muted: Boolean(player.isMuted())
+          }});
+          snapshot();
+        }},
+        onStateChange: event => {{
+          emit('state', {{ state: Number(event.data) }});
+          if (event.data === 1) startTimer(); else {{ stopTimer(); snapshot(); }}
+        }},
+        onPlaybackRateChange: event => emit('rate', {{ rate: Number(event.data || 1) }}),
+        onError: event => {{ stopTimer(); emit('error', {{ code: Number(event.data) }}); }},
+        onAutoplayBlocked: () => emit('autoplayBlocked')
+      }}
+    }});
+  }};
+  window.addEventListener('message', event => {{
+    const data = event.data;
+    if (event.source !== parent || !data || data.source !== 'subtitle-factory-host'
+        || data.channel !== channel || !player) return;
+    const value = Number(data.value);
+    if (data.command === 'play') player.playVideo();
+    if (data.command === 'pause') player.pauseVideo();
+    if (data.command === 'seek') player.seekTo(Math.max(0, value || 0), data.allowSeekAhead !== false);
+    if (data.command === 'volume') player.setVolume(Math.max(0, Math.min(100, value || 0)));
+    if (data.command === 'mute') player.mute();
+    if (data.command === 'unmute') player.unMute();
+    if (data.command === 'rate') player.setPlaybackRate(value || 1);
+    snapshot();
+  }});
+  const script = document.createElement('script');
+  script.src = 'https://www.youtube.com/iframe_api';
+  document.head.appendChild(script);
+  window.addEventListener('beforeunload', stopTimer);
+}})();
+</script>
+</body>
+</html>"""
+    return HTMLResponse(
+        html,
+        headers={
+            "Cache-Control": "no-store",
+            "Referrer-Policy": "strict-origin-when-cross-origin",
+            "Content-Security-Policy": (
+                "default-src 'none'; "
+                "script-src 'unsafe-inline' https://www.youtube.com https://s.ytimg.com; "
+                "frame-src https://www.youtube.com https://www.youtube-nocookie.com; "
+                "img-src https: data:; style-src 'unsafe-inline'; "
+                "connect-src https://www.youtube.com https://*.googlevideo.com"
+            ),
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
+
 
 @router.get("/projects/{project_id}/video")
 def get_video_file(project_id: str):

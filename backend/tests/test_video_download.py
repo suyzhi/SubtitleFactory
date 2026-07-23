@@ -22,6 +22,51 @@ from app.services import downloader
 
 
 class DownloadQualityTests(unittest.TestCase):
+    def test_audio_only_download_uses_task_local_staging_without_video_merge(self):
+        captured = {}
+
+        class FakeYoutubeDL:
+            def __init__(self, options):
+                captured.update(options)
+                self.options = options
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def extract_info(self, _url, download):
+                source = Path(self.options["outtmpl"].replace("%(ext)s", "webm"))
+                source.parent.mkdir(parents=True, exist_ok=True)
+                source.write_bytes(b"audio")
+                return {
+                    "id": "dQw4w9WgXcQ",
+                    "title": "Audio only",
+                    "filepath": str(source),
+                    "duration": 60,
+                    "requested_downloads": [{"filepath": str(source)}],
+                }
+
+            def prepare_filename(self, info):
+                return info["filepath"]
+
+        with tempfile.TemporaryDirectory() as folder:
+            with (
+                patch.object(downloader, "DOWNLOADS_DIR", Path(folder)),
+                patch.object(downloader.yt_dlp, "YoutubeDL", FakeYoutubeDL),
+                patch.object(downloader.task_manager, "update_task"),
+            ):
+                path = downloader.download_audio_source(
+                    "task-id", "https://youtu.be/dQw4w9WgXcQ", "project-id",
+                )
+                self.assertTrue(Path(path).is_file())
+                self.assertEqual(Path(path).parent.name, ".audio-task-id")
+
+        self.assertEqual(captured["format"], "bestaudio/best")
+        self.assertNotIn("merge_output_format", captured)
+        self.assertNotIn("postprocessors", captured)
+
     def test_options_select_unrestricted_best_streams_and_mp4_remux(self):
         options = downloader._download_options(
             "task-id",
