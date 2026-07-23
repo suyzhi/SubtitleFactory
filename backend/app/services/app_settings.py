@@ -22,6 +22,7 @@ APP_SETTINGS_DEFAULTS: dict[str, Any] = {
     "translation_target_language": "zh",
     "bilingual_order": "original_first",
     "favorite_languages": ["zh", "en", "ja", "ko"],
+    "youtube_media_mode": "local",
     "download_quality": "best",
     "download_container": "mp4",
     "ffmpeg_path": None,

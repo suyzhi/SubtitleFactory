@@ -2,6 +2,7 @@
 
 import logging
 import os
+import shutil
 from pathlib import Path
 from typing import Optional
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
@@ -20,6 +21,11 @@ _YOUTUBE_HOSTS = {
     "youtu.be", "www.youtu.be", "youtube-nocookie.com", "www.youtube-nocookie.com",
 }
 _PLAYBACK_QUERY_KEYS = {"t", "start", "time_continue", "begin", "end"}
+_AUTH_CHALLENGE_MARKERS = (
+    "sign in to confirm you're not a bot",
+    "sign in to confirm you’re not a bot",
+    "use --cookies-from-browser",
+)
 
 
 class DownloadServiceError(RuntimeError):
@@ -77,10 +83,24 @@ def normalize_youtube_url(url: str) -> str:
 def _classify_download_error(exc: BaseException) -> DownloadServiceError:
     message = str(exc)
     lowered = message.lower()
+    if any(marker in lowered for marker in _AUTH_CHALLENGE_MARKERS):
+        return DownloadServiceError(
+            "YouTube 要求登录或人机验证，Google Chrome 登录状态未能通过验证",
+            "AUTH_REQUIRED",
+            actions=["retry"],
+            suggestion="请先在 Google Chrome 中登录 YouTube 并确认该视频可播放，再回到 App 重试",
+        )
+    if "private video" in lowered or "this is a private video" in lowered:
+        return DownloadServiceError(
+            "该视频已被作者设为私密",
+            "PRIVATE_VIDEO",
+            recoverable=False,
+            suggestion="请使用有权限观看的 YouTube 账号，或更换视频链接",
+        )
     unavailable_markers = (
-        "video unavailable", "this video is unavailable", "private video",
+        "video unavailable", "this video is unavailable",
         "has been removed", "copyright", "not available in your country",
-        "sign in to confirm", "members-only", "premieres in",
+        "members-only", "premieres in",
     )
     merge_markers = (
         "ffmpeg", "ffprobe", "merger", "merge", "postprocessing",
@@ -108,6 +128,31 @@ def _classify_download_error(exc: BaseException) -> DownloadServiceError:
     )
 
 
+def _needs_browser_auth(exc: BaseException) -> bool:
+    lowered = str(exc).lower()
+    return any(marker in lowered for marker in _AUTH_CHALLENGE_MARKERS)
+
+
+def _with_chrome_cookies(options: dict) -> dict:
+    authenticated = dict(options)
+    authenticated["cookiesfrombrowser"] = ("chrome",)
+    return authenticated
+
+
+def _resolve_deno_path() -> Optional[Path]:
+    candidates = [
+        os.getenv("SUBTITLE_FACTORY_BUNDLED_DENO"),
+        str(Path(os.getenv("SUBTITLE_FACTORY_RESOURCE_DIR", "")) / "bin" / "deno")
+        if os.getenv("SUBTITLE_FACTORY_RESOURCE_DIR") else None,
+        shutil.which("deno"),
+    ]
+    return next((
+        Path(candidate).expanduser().resolve(strict=False)
+        for candidate in candidates
+        if candidate and Path(candidate).is_file() and os.access(candidate, os.X_OK)
+    ), None)
+
+
 def _download_options(
     task_id: str,
     output_template: str,
@@ -116,8 +161,10 @@ def _download_options(
     ffmpeg_location: Optional[str] = None,
     quality: str = "best",
     container: str = "mp4",
+    progress_start: float = 10,
+    progress_end: float = 95,
 ) -> dict:
-    highest_progress = 10.0
+    highest_progress = progress_start
 
     def progress_hook(data: dict):
         nonlocal highest_progress
@@ -131,8 +178,14 @@ def _download_options(
             # bestaudio.  The byte counter therefore resets between streams;
             # never let that implementation detail move the product progress
             # bar backwards.
-            highest_progress = max(highest_progress, min(95, 10 + percent * .85))
-            visible_percent = max(0, (highest_progress - 10) / .85)
+            highest_progress = max(
+                highest_progress,
+                min(progress_end, progress_start + percent / 100 * (progress_end - progress_start)),
+            )
+            visible_percent = (
+                max(0, (highest_progress - progress_start) / (progress_end - progress_start) * 100)
+                if progress_end > progress_start else percent
+            )
             task_manager.update_task(
                 task_id, step="downloading", progress=highest_progress,
                 message=f"正在下载媒体 {visible_percent:.0f}%" if total else "正在下载媒体...",
@@ -197,6 +250,9 @@ def _download_options(
         # yt-dlp requires ffmpeg to combine bestvideo+bestaudio. Passing the
         # exact resolved binary makes packaged builds independent of PATH.
         options["ffmpeg_location"] = ffmpeg_location
+    deno = _resolve_deno_path()
+    if deno:
+        options["js_runtimes"] = {"deno": {"path": str(deno)}}
     return options
 
 
@@ -237,6 +293,24 @@ def _find_final_video(
     ), None)
 
 
+def _find_downloaded_audio(info: dict, ydl: yt_dlp.YoutubeDL) -> Optional[str]:
+    candidates = [info.get("filepath"), info.get("_filename")]
+    candidates.extend(
+        item.get("filepath")
+        for item in info.get("requested_downloads") or []
+        if isinstance(item, dict)
+    )
+    prepared = ydl.prepare_filename(info)
+    if prepared:
+        candidates.append(prepared)
+    return next((
+        path for path in candidates
+        if path
+        and os.path.isfile(path)
+        and Path(path).suffix.lower() not in _IMAGE_EXTENSIONS | {".part", ".ytdl"}
+    ), None)
+
+
 def download_video(
     task_id: str,
     url: str,
@@ -245,6 +319,8 @@ def download_video(
     download_dir: str | os.PathLike[str] | None = None,
     quality: str = "best",
     container: str = "mp4",
+    progress_start: float = 10,
+    progress_end: float = 95,
 ) -> str:
     task_manager.update_task(task_id, step="downloading", progress=2, message="正在解析视频信息...")
     ffmpeg = resolve_ffmpeg_path(ffmpeg_path)
@@ -267,16 +343,30 @@ def download_video(
         if old_thumbnail.suffix.lower() in _IMAGE_EXTENSIONS and old_thumbnail.is_file():
             old_thumbnail.unlink()
 
-    try:
-        with yt_dlp.YoutubeDL(_download_options(
-            task_id, output_template, thumbnail_template=thumbnail_template,
-            ffmpeg_location=str(ffmpeg.path),
-            quality=quality,
-            container=container,
-        )) as ydl:
-            info = ydl.extract_info(normalized_url, download=True)
+    options = _download_options(
+        task_id, output_template, thumbnail_template=thumbnail_template,
+        ffmpeg_location=str(ffmpeg.path), quality=quality, container=container,
+        progress_start=progress_start, progress_end=progress_end,
+    )
+
+    def extract() -> tuple[dict, Optional[str]]:
+        with yt_dlp.YoutubeDL(options) as ydl:
+            extracted = ydl.extract_info(normalized_url, download=True)
             task_manager.checkpoint(task_id)
-            video_path = _find_final_video(info, ydl, container)
+            return extracted, _find_final_video(extracted, ydl, container)
+
+    try:
+        try:
+            info, video_path = extract()
+        except yt_dlp.utils.DownloadError as exc:
+            if not _needs_browser_auth(exc):
+                raise
+            task_manager.update_task(
+                task_id, step="downloading", progress=4,
+                message="YouTube 要求验证，正在使用 Google Chrome 登录状态重试...",
+            )
+            options = _with_chrome_cookies(options)
+            info, video_path = extract()
         thumbnail_path = _find_thumbnail(info, project_dl_dir)
         if not video_path:
             raise DownloadServiceError(
@@ -290,7 +380,7 @@ def download_video(
         if not isinstance(thumbnail_url, str) or not thumbnail_url.startswith(("http://", "https://")):
             thumbnail_url = None
         task_manager.update_task(
-            task_id, step="downloaded", progress=100, message="视频下载完成",
+            task_id, step="downloaded", progress=progress_end, message="视频下载完成",
             details={
                 "video_path": video_path,
                 "title": title,
@@ -313,14 +403,98 @@ def download_video(
         raise _classify_download_error(exc) from exc
 
 
+def download_audio_source(
+    task_id: str,
+    url: str,
+    project_id: str,
+    download_dir: str | os.PathLike[str] | None = None,
+) -> str:
+    """Download only the best available audio stream into task-local staging."""
+    task_manager.update_task(
+        task_id, step="downloading_audio", progress=2,
+        message="正在解析并下载音频...",
+    )
+    normalized_url = normalize_youtube_url(url)
+    staging_dir = Path(download_dir or DOWNLOADS_DIR) / project_id / f".audio-{task_id}"
+    staging_dir.mkdir(parents=True, exist_ok=True)
+    output_template = str(staging_dir / "source_audio.%(ext)s")
+    options = _download_options(
+        task_id, output_template, progress_start=2, progress_end=42,
+    )
+    options.update({
+        "format": "bestaudio/best",
+        "outtmpl": output_template,
+        "noplaylist": True,
+    })
+    options.pop("merge_output_format", None)
+    options.pop("final_ext", None)
+    options.pop("postprocessors", None)
+
+    def extract() -> tuple[dict, Optional[str]]:
+        with yt_dlp.YoutubeDL(options) as ydl:
+            extracted = ydl.extract_info(normalized_url, download=True)
+            task_manager.checkpoint(task_id)
+            return extracted, _find_downloaded_audio(extracted, ydl)
+
+    try:
+        try:
+            info, audio_source_path = extract()
+        except yt_dlp.utils.DownloadError as exc:
+            if not _needs_browser_auth(exc):
+                raise
+            task_manager.update_task(
+                task_id, step="downloading_audio", progress=4,
+                message="YouTube 要求验证，正在使用 Google Chrome 登录状态重试...",
+            )
+            options = _with_chrome_cookies(options)
+            info, audio_source_path = extract()
+        if not audio_source_path:
+            raise DownloadServiceError(
+                "音频下载结束后未找到可转换的音轨",
+                "AUDIO_DOWNLOAD_FAILED",
+                actions=["retry"],
+                suggestion="请检查网络、视频权限和剩余磁盘空间后重试",
+            )
+        thumbnail_url = info.get("thumbnail")
+        if not isinstance(thumbnail_url, str) or not thumbnail_url.startswith(("http://", "https://")):
+            thumbnail_url = None
+        task_manager.update_task(
+            task_id, step="audio_downloaded", progress=45,
+            message="音频下载完成，正在准备识别格式",
+            details={
+                "audio_source_path": audio_source_path,
+                "title": info.get("title") or "",
+                "thumbnail_url": thumbnail_url,
+                "normalized_url": normalized_url,
+                "youtube_video_id": info.get("id") or "",
+                "source_duration": float(info.get("duration") or 0),
+            },
+        )
+        return audio_source_path
+    except yt_dlp.utils.DownloadError as exc:
+        task_manager.checkpoint(task_id)
+        raise _classify_download_error(exc) from exc
+    except DownloadServiceError:
+        raise
+    except (OSError, ValueError) as exc:
+        raise _classify_download_error(exc) from exc
+
+
 def get_video_info(url: str) -> dict:
     try:
         ffmpeg = resolve_ffmpeg_path()
-        with yt_dlp.YoutubeDL(_download_options(
+        options = _download_options(
             "info", "%(title)s.%(ext)s", quiet=True,
             ffmpeg_location=str(ffmpeg.path) if ffmpeg else None,
-        )) as ydl:
-            info = ydl.extract_info(normalize_youtube_url(url), download=False)
+        )
+        try:
+            with yt_dlp.YoutubeDL(options) as ydl:
+                info = ydl.extract_info(normalize_youtube_url(url), download=False)
+        except yt_dlp.utils.DownloadError as exc:
+            if not _needs_browser_auth(exc):
+                raise
+            with yt_dlp.YoutubeDL(_with_chrome_cookies(options)) as ydl:
+                info = ydl.extract_info(normalize_youtube_url(url), download=False)
         return {
             "title": info.get("title", ""),
             "duration": float(info.get("duration") or 0),

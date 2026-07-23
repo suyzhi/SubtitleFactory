@@ -9,9 +9,12 @@ import fullscreenIcon from '../assets/player-icons/fullscreen.png';
 import theaterIcon from '../assets/player-icons/theater.png';
 import { SUBTITLE_FONT_OPTIONS } from '../subtitleStyle';
 import AppSelect from './AppSelect';
+import { createYoutubePlayerSession } from '../api/backend';
 
 interface Props {
-  videoUrl: string;
+  videoUrl?: string;
+  youtubeVideoId?: string;
+  onWebPlayerError?: (code: number) => void;
   segments: SubtitleSegment[];
   style: SubtitleStyleSettings;
   activeIdx: number;
@@ -51,35 +54,73 @@ function ControlIcon({ src }: { src: string }) {
 }
 
 const SubtitlePlayer = forwardRef<SubtitlePlayerHandle, Props>(function SubtitlePlayer({
-  videoUrl, segments, style, activeIdx, presentationMode, onTimeUpdate, onDurationChange,
-  onStyleChange, onPresentationModeChange,
+  videoUrl, youtubeVideoId, onWebPlayerError, segments, style, activeIdx,
+  presentationMode, onTimeUpdate, onDurationChange, onStyleChange,
+  onPresentationModeChange,
 }, ref) {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const iframeRef = useRef<HTMLIFrameElement>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
   const hideTimer = useRef<number | null>(null);
+  const webReadyTimer = useRef<number | null>(null);
+  const bridgeOriginRef = useRef('');
+  const channelRef = useRef(globalThis.crypto?.randomUUID?.() || Math.random().toString(36).slice(2));
   const [playing, setPlaying] = useState(false);
   const [duration, setDuration] = useState(0);
   const [time, setTime] = useState(0);
   const [volume, setVolume] = useState(1);
   const [muted, setMuted] = useState(false);
   const [rate, setRate] = useState(1);
+  const [availableRates, setAvailableRates] = useState([0.5, 0.75, 1, 1.25, 1.5, 2]);
+  const [bridgeUrl, setBridgeUrl] = useState('');
   const [loopCurrent, setLoopCurrent] = useState(false);
   const [showSubtitleMenu, setShowSubtitleMenu] = useState(false);
   const [controlsVisible, setControlsVisible] = useState(true);
   const fullscreen = presentationMode === 'fullscreen';
   const theaterMode = presentationMode === 'theater';
+  const isWeb = Boolean(youtubeVideoId);
+  const active = activeIdx >= 0 && activeIdx < segments.length ? segments[activeIdx] : null;
+
+  const sendWebCommand = useCallback((
+    command: 'play' | 'pause' | 'seek' | 'volume' | 'mute' | 'unmute' | 'rate',
+    value?: number,
+    allowSeekAhead = true,
+  ) => {
+    const origin = bridgeOriginRef.current;
+    if (!origin) return;
+    iframeRef.current?.contentWindow?.postMessage({
+      source: 'subtitle-factory-host',
+      channel: channelRef.current,
+      command,
+      value,
+      allowSeekAhead,
+    }, origin);
+  }, []);
 
   const seekTo = useCallback((next: number) => {
+    if (isWeb) {
+      const target = Math.max(0, Math.min(next, duration || next));
+      sendWebCommand('seek', target);
+      setTime(target);
+      onTimeUpdate(target);
+      return;
+    }
     const video = videoRef.current;
     if (!video) return;
     video.currentTime = Math.max(0, Math.min(next, video.duration || next));
     setTime(video.currentTime);
     onTimeUpdate(video.currentTime);
-  }, [onTimeUpdate]);
+  }, [duration, isWeb, onTimeUpdate, sendWebCommand]);
 
   useImperativeHandle(ref, () => ({ seekTo }), [seekTo]);
 
   useEffect(() => {
+    if (isWeb) {
+      setPlaying(false);
+      setTime(0);
+      setDuration(0);
+      return;
+    }
     const video = videoRef.current;
     if (!video) return;
     video.pause();
@@ -87,7 +128,81 @@ const SubtitlePlayer = forwardRef<SubtitlePlayerHandle, Props>(function Subtitle
     setPlaying(false);
     setTime(0);
     setDuration(0);
-  }, [videoUrl]);
+  }, [isWeb, videoUrl, youtubeVideoId]);
+
+  useEffect(() => {
+    if (!youtubeVideoId) {
+      setBridgeUrl('');
+      bridgeOriginRef.current = '';
+      return;
+    }
+    let cancelled = false;
+    createYoutubePlayerSession(youtubeVideoId, channelRef.current)
+      .then(url => {
+        if (cancelled) return;
+        bridgeOriginRef.current = new URL(url).origin;
+        setBridgeUrl(url);
+      })
+      .catch(() => {
+        if (!cancelled) onWebPlayerError?.(401);
+      });
+    return () => { cancelled = true; };
+  }, [onWebPlayerError, youtubeVideoId]);
+
+  useEffect(() => {
+    if (!isWeb || !bridgeUrl) return;
+    let ready = false;
+    const handleMessage = (event: MessageEvent) => {
+      if (event.origin !== bridgeOriginRef.current
+          || event.source !== iframeRef.current?.contentWindow) return;
+      const data = event.data;
+      if (!data || data.source !== 'subtitle-factory-youtube'
+          || data.channel !== channelRef.current) return;
+      if (data.type === 'ready') {
+        ready = true;
+        if (webReadyTimer.current) window.clearTimeout(webReadyTimer.current);
+        const nextDuration = Number(data.duration || 0);
+        setDuration(nextDuration);
+        onDurationChange?.(nextDuration);
+        setVolume(Math.max(0, Math.min(1, Number(data.volume ?? 100) / 100)));
+        setMuted(Boolean(data.muted));
+        const rates = Array.isArray(data.rates)
+          ? data.rates.map(Number).filter((item: number) => Number.isFinite(item) && item > 0)
+          : [];
+        if (rates.length) setAvailableRates(rates);
+      }
+      if (data.type === 'time') {
+        const nextTime = Number(data.time || 0);
+        const nextDuration = Number(data.duration || 0);
+        if (loopCurrent && active && nextTime >= active.end) {
+          seekTo(active.start);
+          return;
+        }
+        setTime(nextTime);
+        onTimeUpdate(nextTime);
+        if (nextDuration > 0) {
+          setDuration(nextDuration);
+          onDurationChange?.(nextDuration);
+        }
+        if (Number.isFinite(Number(data.state))) setPlaying(Number(data.state) === 1);
+      }
+      if (data.type === 'state') setPlaying(Number(data.state) === 1);
+      if (data.type === 'rate') setRate(Number(data.rate || 1));
+      if (data.type === 'autoplayBlocked') {
+        setPlaying(false);
+        setControlsVisible(true);
+      }
+      if (data.type === 'error') onWebPlayerError?.(Number(data.code || 5));
+    };
+    window.addEventListener('message', handleMessage);
+    webReadyTimer.current = window.setTimeout(() => {
+      if (!ready) onWebPlayerError?.(153);
+    }, 12000);
+    return () => {
+      window.removeEventListener('message', handleMessage);
+      if (webReadyTimer.current) window.clearTimeout(webReadyTimer.current);
+    };
+  }, [active, bridgeUrl, isWeb, loopCurrent, onDurationChange, onTimeUpdate, onWebPlayerError, seekTo]);
 
   useEffect(() => {
     if ('__TAURI_INTERNALS__' in window) return;
@@ -126,6 +241,10 @@ const SubtitlePlayer = forwardRef<SubtitlePlayerHandle, Props>(function Subtitle
   }, [playing, showSubtitleMenu, revealControls]);
 
   const togglePlay = useCallback(() => {
+    if (isWeb) {
+      sendWebCommand(playing ? 'pause' : 'play');
+      return;
+    }
     const video = videoRef.current;
     if (!video) return;
     if (video.paused) {
@@ -134,13 +253,12 @@ const SubtitlePlayer = forwardRef<SubtitlePlayerHandle, Props>(function Subtitle
         setControlsVisible(true);
       });
     } else video.pause();
-  }, []);
+  }, [isWeb, playing, sendWebCommand]);
 
   const toggleFullscreen = useCallback(() => {
     onPresentationModeChange(fullscreen ? 'normal' : 'fullscreen');
   }, [fullscreen, onPresentationModeChange]);
 
-  const active = activeIdx >= 0 && activeIdx < segments.length ? segments[activeIdx] : null;
   const original = active?.clean_text || active?.raw_text || '';
   const translated = active?.translated_text || '';
   const lines: Array<{ kind: 'original' | 'translated'; text: string }> = !active || style.mode === 'off' ? []
@@ -177,7 +295,7 @@ const SubtitlePlayer = forwardRef<SubtitlePlayerHandle, Props>(function Subtitle
           onPresentationModeChange('normal');
         }
       }}>
-      <video ref={videoRef} className="pro-player-video" preload="metadata" playsInline
+      {!isWeb && videoUrl && <video ref={videoRef} className="pro-player-video" preload="metadata" playsInline
         onClick={togglePlay}
         onDoubleClick={toggleFullscreen}
         onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)}
@@ -192,9 +310,19 @@ const SubtitlePlayer = forwardRef<SubtitlePlayerHandle, Props>(function Subtitle
         }}
         onEnded={() => setPlaying(false)}>
         <source src={videoUrl} />
-      </video>
+      </video>}
 
-      {!videoUrl && <div className="player-empty">选择或导入视频开始工作</div>}
+      {isWeb && bridgeUrl && <iframe
+        ref={iframeRef}
+        className="pro-player-video pro-player-web"
+        src={bridgeUrl}
+        title="YouTube 网页播放器"
+        allow="autoplay; encrypted-media; picture-in-picture"
+        referrerPolicy="strict-origin-when-cross-origin"
+      />}
+
+      {!videoUrl && !isWeb && <div className="player-empty">选择或导入视频开始工作</div>}
+      {isWeb && !bridgeUrl && <div className="player-empty">正在连接网页播放器…</div>}
 
       {lines.length > 0 && <div className="pro-subtitle-overlay"
         style={{ top: `${style.verticalPosition}%`, maxWidth: `${style.maxWidth}%` }}>
@@ -225,13 +353,26 @@ const SubtitlePlayer = forwardRef<SubtitlePlayerHandle, Props>(function Subtitle
             <button className="player-icon-btn player-step-btn" aria-label="前进一帧" title="前进一帧 (. )" onClick={() => seekTo(time + 1 / 25)}>›</button>
             <button className={`player-icon-btn player-step-btn ${loopCurrent ? 'active' : ''}`} aria-label="循环当前字幕" aria-pressed={loopCurrent} onClick={() => setLoopCurrent(value => !value)}>↻</button>
             <button className="player-icon-btn" aria-label={muted ? '取消静音' : '静音'} onClick={() => {
-              const next = !muted; setMuted(next); if (videoRef.current) videoRef.current.muted = next;
+              const next = !muted;
+              setMuted(next);
+              if (isWeb) sendWebCommand(next ? 'mute' : 'unmute');
+              else if (videoRef.current) videoRef.current.muted = next;
             }}><ControlIcon src={muted || volume === 0 ? mutedIcon : volumeIcon} /></button>
             <input className="volume-slider" aria-label="音量" type="range" min={0} max={1} step={0.05} value={volume}
-              onChange={event => { const next = Number(event.target.value); setVolume(next); if (videoRef.current) videoRef.current.volume = next; }} />
+              onChange={event => {
+                const next = Number(event.target.value);
+                setVolume(next);
+                if (isWeb) sendWebCommand('volume', next * 100);
+                else if (videoRef.current) videoRef.current.volume = next;
+              }} />
             <span className="player-time">{timecode(time)} / {timecode(duration)}</span>
             <span className="control-spacer" />
-            <AppSelect className="rate-select" label="播放速度" popoverMinWidth={112} value={String(rate)} onChange={value=>{const next=Number(value);setRate(next);if(videoRef.current)videoRef.current.playbackRate=next;}} options={[0.5,0.75,1,1.25,1.5,2].map(value=>({value:String(value),label:`${value}×`}))}/>
+            <AppSelect className="rate-select" label="播放速度" popoverMinWidth={112} value={String(rate)} onChange={value=>{
+              const next=Number(value);
+              setRate(next);
+              if (isWeb) sendWebCommand('rate', next);
+              else if(videoRef.current) videoRef.current.playbackRate=next;
+            }} options={availableRates.map(value=>({value:String(value),label:`${value}×`}))}/>
             <button className={`player-icon-btn ${style.mode !== 'off' ? 'active' : ''}`} aria-label="字幕设置"
               aria-haspopup="dialog" aria-expanded={showSubtitleMenu}
               onClick={() => setShowSubtitleMenu(value => !value)}><ControlIcon src={captionsIcon} /></button>

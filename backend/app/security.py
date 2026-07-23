@@ -40,7 +40,10 @@ def signed_media_url(path: str, ttl_seconds: int = 21_600) -> str:
 
 
 def _valid_media_signature(request: Request) -> bool:
-    if request.method != "GET" or not request.url.path.endswith(QUERY_TOKEN_SUFFIXES):
+    signed_player = request.url.path.startswith("/api/player/youtube/")
+    if request.method != "GET" or (
+        not request.url.path.endswith(QUERY_TOKEN_SUFFIXES) and not signed_player
+    ):
         return False
     try:
         expires = int(request.query_params.get("expires", "0"))

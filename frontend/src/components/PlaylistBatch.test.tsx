@@ -19,7 +19,7 @@ const preview: PlaylistPreview = {
   warnings: [],
 };
 
-const project: Project = { id: 'project-1', title: 'Lesson 1', source_type: 'youtube', source_url: 'https://youtube.test/1', video_path: null, thumbnail_url: null, group_name: null, audio_path: null, language: 'en', target_language: 'zh', created_at: 'now', updated_at: 'now', segments_count: 0 };
+const project: Project = { id: 'project-1', title: 'Lesson 1', source_type: 'youtube', source_url: 'https://youtube.test/1', video_path: null, thumbnail_url: null, group_name: null, audio_path: null, language: 'en', target_language: 'zh', created_at: 'now', updated_at: 'now', segments_count: 0, media_mode: 'web', youtube_video_id: null, video_available: false, audio_available: false };
 const detail: PlaylistBatchDetail = {
   batch: { id: 'batch-1', name: 'Piano course', title: 'Piano course', status: 'running', source_url: preview.playlist.url, source_external_id: 'PL-test', channel: 'Teacher', thumbnail_url: null, paused: false, configuration: {}, item_count: 2, completed_count: 1, failed_count: 0, progress: 50, updated_at: 'now' },
   items: [{ id: 'item-1', project_id: project.id, source_id: 'video-1', source_url: project.source_url, position: 1, title: project.title, duration: 3600, thumbnail_url: null, source_state: 'active', status: 'running', error: null, project, stages: { download: { status: 'success', task_id: null, attempt: 1, error_code: null, error: null, progress: 100 }, transcribe: { status: 'running', task_id: 'task-1', attempt: 1, error_code: null, error: null, progress: 50 } } }],

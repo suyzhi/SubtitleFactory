@@ -164,12 +164,14 @@ def import_project_package(path: str) -> dict:
     project.update({
         "id": project_id, "video_path": media_paths.get("video"), "audio_path": media_paths.get("audio"),
         "thumbnail_path": media_paths.get("thumbnail"), "thumbnail_url": None,
-        "media_status": "ready" if media_paths.get("video") else "relink_required", "updated_at": now,
+        "media_status": "ready" if media_paths.get("video") or project.get("media_mode") == "web" else "relink_required",
+        "media_mode": project.get("media_mode") if project.get("media_mode") in {"local", "web"} else "local",
+        "updated_at": now,
     })
     project_columns = [
         "id", "title", "source_type", "source_url", "video_path", "audio_path", "thumbnail_url", "thumbnail_path",
         "group_name", "language", "target_language", "created_at", "updated_at", "deleted_at", "edit_revision", "media_status",
-        "audio_track_index", "range_start", "range_end",
+        "audio_track_index", "range_start", "range_end", "media_mode",
     ]
     glossary_map = {item["id"]: str(uuid.uuid4()) for item in glossaries}
     speaker_map = {item["id"]: str(uuid.uuid4()) for item in speakers}

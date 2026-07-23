@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import threading
 import time
 import uuid
@@ -20,7 +21,7 @@ from .app_settings import get_app_settings
 from .ai_settings import get_ai_settings
 from .ai_providers import assigned_provider
 from .audio_extractor import extract_audio
-from .downloader import download_video
+from .downloader import download_audio_source, download_video
 from .subtitle_cleaner import clean_subtitles
 from .subtitle_translator import translate_subtitles
 from .transcriber import transcribe_audio
@@ -178,6 +179,8 @@ def _insert_stage_rows(db, item_id: str, configuration: dict[str, Any], availabl
 def create_or_sync_playlist(preview: dict[str, Any], configuration: dict[str, Any]) -> dict[str, Any]:
     _validate_configuration(configuration)
     playlist = preview["playlist"]
+    configured_media_mode = configuration.get("media_mode") or get_app_settings().get("youtube_media_mode")
+    media_mode = configured_media_mode if configured_media_mode in {"local", "web"} else "local"
     now = _now()
     created = False
     new_items: list[str] = []
@@ -232,10 +235,11 @@ def create_or_sync_playlist(preview: dict[str, Any], configuration: dict[str, An
             if project_id:
                 db.execute(
                     """INSERT INTO projects
-                       (id,title,source_type,source_url,thumbnail_url,language,target_language,created_at,updated_at)
-                       VALUES (?,?,'youtube',?,?,?,?,?,?)""",
+                       (id,title,source_type,source_url,thumbnail_url,media_mode,language,target_language,created_at,updated_at)
+                       VALUES (?,?,'youtube',?,?,?,?,?,?,?)""",
                     (project_id, entry["title"], entry["url"], entry["thumbnail_url"],
-                     configuration.get("language", "auto"), configuration.get("target_language", "zh"), now, now),
+                     media_mode, configuration.get("language", "auto"),
+                     configuration.get("target_language", "zh"), now, now),
                 )
                 project_dirs.append(project_id)
             db.execute(
@@ -541,8 +545,39 @@ def _execute_stage(task_id: str, context, stage: str, configuration: dict[str, A
     project_id = context["project_id"]
     if not project_id:
         raise PlaylistBatchError("不可用视频没有项目", "PLAYLIST_ITEM_UNAVAILABLE", recoverable=False)
+    db = get_db()
+    try:
+        project = db.execute("SELECT * FROM projects WHERE id=?", (project_id,)).fetchone()
+    finally:
+        db.close()
+    if not project:
+        raise PlaylistBatchError("关联项目不存在", "BATCH_PROJECT_MISSING", recoverable=False)
     if stage == "download":
         settings = get_app_settings()
+        if project["media_mode"] == "web":
+            audio_source = download_audio_source(
+                task_id, context["source_url"], project_id,
+                download_dir=settings.get("download_directory"),
+            )
+            staging_dir = Path(audio_source).parent
+            try:
+                audio_path = extract_audio(task_id, audio_source, project_id)
+                details = (task_manager.get_task(task_id) or {}).get("details", {})
+                db = get_db()
+                try:
+                    db.execute(
+                        """UPDATE projects SET audio_path=?,title=?,thumbnail_url=COALESCE(?,thumbnail_url),
+                           updated_at=? WHERE id=?""",
+                        (audio_path, details.get("title") or context["item_title"],
+                         details.get("thumbnail_url"), _now(), project_id),
+                    )
+                    db.commit()
+                finally:
+                    db.close()
+            finally:
+                if staging_dir.name == f".audio-{task_id}" and staging_dir.is_dir():
+                    shutil.rmtree(staging_dir, ignore_errors=True)
+            return
         video_path = download_video(
             task_id, context["source_url"], project_id,
             ffmpeg_path=settings.get("ffmpeg_path"), download_dir=settings.get("download_directory"),
@@ -561,14 +596,9 @@ def _execute_stage(task_id: str, context, stage: str, configuration: dict[str, A
         finally:
             db.close()
         return
-    db = get_db()
-    try:
-        project = db.execute("SELECT * FROM projects WHERE id=?", (project_id,)).fetchone()
-    finally:
-        db.close()
-    if not project:
-        raise PlaylistBatchError("关联项目不存在", "BATCH_PROJECT_MISSING", recoverable=False)
     if stage == "extract_audio":
+        if project["media_mode"] == "web" and project["audio_path"] and os.path.isfile(project["audio_path"]):
+            return
         if not project["video_path"] or not os.path.isfile(project["video_path"]):
             raise PlaylistBatchError("视频文件不存在", "VIDEO_MISSING")
         audio_path = extract_audio(

@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Added per-project and global YouTube media modes: web playback or full local download.
+- Web mode downloads only the recognition audio while retaining the existing subtitle timeline, styling, playback-rate, looping, frame-step, theater and fullscreen controls.
+- Video export and player fallback can materialize a local video on demand without replacing existing audio, subtitles or project metadata.
+- Playlist-created projects, project packages, signed loopback media sessions and the packaged Deno runtime now support the same dual-mode workflow.
+
 ## 0.3.1 — 2026-07-13
 
 - Fixed the transcription runtime contract so CPU, Apple GPU, Core ML and external Memo devices render correctly.

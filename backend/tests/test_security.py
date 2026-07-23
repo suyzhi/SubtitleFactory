@@ -65,6 +65,21 @@ class LoopbackSecurityTests(unittest.TestCase):
         expired = security.signed_media_url(path, ttl_seconds=-1)
         self.assertEqual(self.client.get(expired).status_code, 401)
 
+    def test_youtube_bridge_requires_session_then_uses_scoped_signature(self):
+        session = self.client.get(
+            "/api/player/youtube/dQw4w9WgXcQ/session?channel=test-channel",
+            headers={"Authorization": "Bearer test-session-token"},
+        )
+        self.assertEqual(session.status_code, 200)
+        signed_url = session.json()["url"]
+        bridge = self.client.get(signed_url)
+        self.assertEqual(bridge.status_code, 200)
+        self.assertIn("https://www.youtube.com/iframe_api", bridge.text)
+        self.assertEqual(
+            self.client.get(signed_url.replace("dQw4w9WgXcQ", "aaaaaaaaaaa")).status_code,
+            401,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

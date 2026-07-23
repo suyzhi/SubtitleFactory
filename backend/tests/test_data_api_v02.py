@@ -51,8 +51,13 @@ class V02DatabaseMigrationTests(unittest.TestCase):
                 row = conn.execute("SELECT deleted_at FROM projects").fetchone()
                 conn.close()
             self.assertIn("deleted_at", columns)
+            self.assertIn("media_mode", columns)
             self.assertIsNotNone(app_settings_table)
             self.assertIsNone(row["deleted_at"])
+            with patch.object(database, "DB_PATH", db_path):
+                conn = database.get_db()
+                self.assertEqual(conn.execute("SELECT media_mode FROM projects").fetchone()["media_mode"], "local")
+                conn.close()
 
 
 class ProjectTrashAPITests(unittest.TestCase):
@@ -114,6 +119,27 @@ class ProjectTrashAPITests(unittest.TestCase):
         restored = self.client.post("/api/projects/active/restore")
         self.assertEqual(restored.status_code, 200)
         self.assertIsNone(restored.json()["project"]["deleted_at"])
+
+    def test_new_youtube_project_uses_global_or_explicit_media_mode(self):
+        with patch.object(projects, "get_app_settings", return_value={"youtube_media_mode": "web"}):
+            created = self.client.post("/api/projects", json={
+                "source_type": "youtube",
+                "source_url": "https://youtu.be/dQw4w9WgXcQ?t=110",
+                "title": "Web project",
+            })
+        self.assertEqual(created.status_code, 201, created.text)
+        project = self.client.get(f"/api/projects/{created.json()['project_id']}").json()
+        self.assertEqual(project["media_mode"], "web")
+        self.assertEqual(project["youtube_video_id"], "dQw4w9WgXcQ")
+        self.assertEqual(project["source_url"], "https://www.youtube.com/watch?v=dQw4w9WgXcQ")
+
+        explicit = self.client.post("/api/projects", json={
+            "source_type": "youtube",
+            "source_url": "https://www.youtube.com/watch?v=aaaaaaaaaaa",
+            "media_mode": "local",
+        })
+        project = self.client.get(f"/api/projects/{explicit.json()['project_id']}").json()
+        self.assertEqual(project["media_mode"], "local")
 
     def test_active_task_requires_termination_confirmation(self):
         self.insert_project("busy")
@@ -199,15 +225,21 @@ class AppSettingsAPITests(unittest.TestCase):
     def test_defaults_are_safe_and_partial_updates_persist(self):
         initial = self.client.get("/api/settings/app").json()
         self.assertEqual(initial["settings"]["default_model"], "small")
+        self.assertEqual(initial["settings"]["youtube_media_mode"], "local")
         self.assertIsNone(initial["settings"]["coreml_model_path"])
         updated = self.client.put(
             "/api/settings/app",
-            json={"source_language": "vi", "translation_target_language": "uk"},
+            json={
+                "source_language": "vi",
+                "translation_target_language": "uk",
+                "youtube_media_mode": "web",
+            },
         )
         self.assertEqual(updated.status_code, 200)
         reloaded = self.client.get("/api/settings/app").json()["settings"]
         self.assertEqual(reloaded["source_language"], "vi")
         self.assertEqual(reloaded["translation_target_language"], "uk")
+        self.assertEqual(reloaded["youtube_media_mode"], "web")
 
     def test_invalid_model_path_falls_back_and_secret_fields_are_rejected(self):
         response = self.client.put(

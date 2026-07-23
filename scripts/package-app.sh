@@ -2,6 +2,19 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cleanup_build_outputs() {
+  rm -rf \
+    "$ROOT/frontend/dist" \
+    "$ROOT/frontend/src-tauri/backend-runtime" \
+    "$ROOT/frontend/src-tauri/target" \
+    "$ROOT/backend/build" \
+    "$ROOT/backend/dist" \
+    "$ROOT/.字幕工厂.app.staging" \
+    "$ROOT/.字幕工厂_1.0.0_aarch64.dmg.staging"
+  find "$ROOT/frontend" -maxdepth 2 -name '*.tsbuildinfo' -delete
+}
+trap cleanup_build_outputs EXIT
+
 if [ "$(uname -s)" != "Darwin" ] || [ "$(uname -m)" != "arm64" ]; then
   echo "v1.0.0 Release 只能在 Apple Silicon macOS 上构建。" >&2
   exit 1
@@ -17,7 +30,7 @@ npm run lint
 npm test
 npm run build
 cargo check --locked --manifest-path src-tauri/Cargo.toml
-npx tauri build --target aarch64-apple-darwin --bundles app,dmg
+npx tauri build --target aarch64-apple-darwin --bundles app
 
 BUNDLE_DIR="$ROOT/frontend/src-tauri/target/aarch64-apple-darwin/release/bundle"
 APP_PATH="$BUNDLE_DIR/macos/字幕工厂.app"
@@ -30,6 +43,11 @@ fi
 
 PACKAGED_RUNTIME="$APP_PATH/Contents/Resources/backend-runtime/bin"
 "$ROOT/scripts/verify-release-runtime.sh" "$PACKAGED_RUNTIME"
+if [ ! -x "$PACKAGED_RUNTIME/deno" ]; then
+  echo "发布包缺少 Deno，YouTube 播放器挑战无法解析。" >&2
+  exit 1
+fi
+"$PACKAGED_RUNTIME/deno" --version
 if [ -n "${APPLE_SIGNING_IDENTITY:-}" ]; then
   codesign --force --deep --options runtime --timestamp --sign "$APPLE_SIGNING_IDENTITY" "$APP_PATH"
 else
@@ -72,6 +90,20 @@ fi
   shasum -a 256 "$(basename "$DMG_PATH")" > "$(basename "$DMG_PATH").sha256"
 )
 
-echo "Release App: $APP_PATH"
-echo "Release DMG: $DMG_PATH"
-echo "SHA-256: $DMG_PATH.sha256"
+ROOT_APP="$ROOT/字幕工厂.app"
+ROOT_DMG="$ROOT/字幕工厂_1.0.0_aarch64.dmg"
+ROOT_APP_STAGE="$ROOT/.字幕工厂.app.staging"
+ROOT_DMG_STAGE="$ROOT/.字幕工厂_1.0.0_aarch64.dmg.staging"
+rm -rf "$ROOT_APP_STAGE"
+rm -f "$ROOT_DMG_STAGE"
+ditto "$APP_PATH" "$ROOT_APP_STAGE"
+cp "$DMG_PATH" "$ROOT_DMG_STAGE"
+codesign --verify --deep --strict --verbose=2 "$ROOT_APP_STAGE"
+rm -rf "$ROOT_APP"
+mv "$ROOT_APP_STAGE" "$ROOT_APP"
+mv "$ROOT_DMG_STAGE" "$ROOT_DMG"
+cp "$DMG_PATH.sha256" "$ROOT_DMG.sha256"
+
+echo "Release App: $ROOT_APP"
+echo "Release DMG: $ROOT_DMG"
+echo "SHA-256: $ROOT_DMG.sha256"

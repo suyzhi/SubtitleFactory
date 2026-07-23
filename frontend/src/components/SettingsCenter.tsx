@@ -397,7 +397,17 @@ export default function SettingsCenter(props: Props) {
             </>}
 
             {category === 'storage' && <>
-              <SettingsSection title="下载偏好" description="YouTube 播放定位参数会自动移除，并下载完整视频。">
+              <SettingsSection title="YouTube 媒体模式" description="决定新建 YouTube 项目的默认处理方式；已有项目可在“处理 → 下载”中单独切换。">
+                <Segmented value={String(draft.youtube_media_mode || 'local')} onChange={youtube_media_mode => updateDraft({ youtube_media_mode: youtube_media_mode as 'local' | 'web' })} options={[['web', '网页播放'], ['local', '下载至本地']]}/>
+                <div className="settings-mode-explainer">
+                  <strong>{draft.youtube_media_mode === 'web' ? '网页播放：更快开始' : '下载至本地：完整离线素材'}</strong>
+                  <p>{draft.youtube_media_mode === 'web'
+                    ? '只提取转写音频，视频由 YouTube 网页播放器呈现。字幕时间轴、倍速、循环、样式预览与本地模式一致；网页受限、离线使用或导出成片时再按需下载视频。'
+                    : '创建项目后下载完整视频，适合离线播放、多音轨选择和频繁导出成片，但首次等待时间和磁盘占用更高。'}</p>
+                </div>
+                <p className="settings-help">网页播放依赖网络、视频可嵌入状态和平台可用性。请只处理你有权使用的内容；本功能不会绕过地区、年龄、登录或版权限制。</p>
+              </SettingsSection>
+              <SettingsSection title="下载偏好" description="下载时会移除播放定位参数，并获取完整视频。">
                 <label className="settings-field horizontal"><span><strong>画质</strong><small>高清画面与音频需要 FFmpeg 合并</small></span><AppSelect value={String(draft.download_quality||'best')} onChange={download_quality=>updateDraft({download_quality})} label="下载画质" options={[{value:'best',label:'最佳可用'},{value:'1080p',label:'最高 1080p'},{value:'720p',label:'最高 720p'}]}/></label>
                 <label className="settings-field horizontal"><span><strong>容器</strong></span><AppSelect value={draft.download_container||'mp4'} onChange={download_container=>updateDraft({download_container:download_container as AppSettings['download_container']})} label="下载容器" options={[{value:'mp4',label:'MP4'},{value:'mkv',label:'MKV'},{value:'webm',label:'WebM'}]}/></label>
               </SettingsSection>

@@ -179,12 +179,14 @@ fn start_backend(app: &tauri::App, session: &BackendSession) -> Result<BackendPr
     if let Some(runtime_dir) = packaged_runtime.as_ref() {
         let ffmpeg = runtime_dir.join("bin/ffmpeg");
         let ffprobe = runtime_dir.join("bin/ffprobe");
-        if !ffmpeg.is_file() || !ffprobe.is_file() {
-            return Err("App 内置 FFmpeg/FFprobe 缺失，发布包不完整".into());
+        let deno = runtime_dir.join("bin/deno");
+        if !ffmpeg.is_file() || !ffprobe.is_file() || !deno.is_file() {
+            return Err("App 内置 FFmpeg/FFprobe/Deno 缺失，发布包不完整".into());
         }
         command
             .env("SUBTITLE_FACTORY_BUNDLED_FFMPEG", &ffmpeg)
             .env("SUBTITLE_FACTORY_BUNDLED_FFPROBE", &ffprobe)
+            .env("SUBTITLE_FACTORY_BUNDLED_DENO", &deno)
             .env("SUBTITLE_FACTORY_RESOURCE_DIR", runtime_dir);
     }
 
