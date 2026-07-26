@@ -11,27 +11,34 @@ import logging
 import wave
 import threading
 import importlib.util
+import re
 from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Query
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse
 
 from ..models.database import get_db, init_db, project_to_dict, segment_to_dict
 from ..models.schemas import (
     ProjectCreate, ProjectResponse, ProjectUpdate, SegmentResponse,
-    ProjectGroupUpdate, SegmentUpdate, ExportRequest, ProcessingConfig,
-    WorkflowRequest, TranscriptionRetryRequest, ModelPrepareRequest,
+    ProjectGroupUpdate, ProjectMediaModeUpdate, SegmentUpdate, SegmentOperationItem, SegmentOperationRequest, ExportRequest, ProcessingConfig,
+    WorkflowRequest, TranscriptionRetryRequest, ModelPrepareRequest, MediaSelectionUpdate,
     ModelScanRequest, ModelImportRequest,
 )
+from ..services.editor import EditorServiceError, execute_operation, import_segment_snapshot
+from ..services.subtitle_importer import parse_subtitle
 from ..utils.config import (
     DATA_DIR, PROJECTS_DIR, DOWNLOADS_DIR, AUDIO_DIR, SUBTITLES_DIR,
     EXPORTS_DIR,
 )
 from ..utils.task_manager import task_manager
+from ..security import signed_media_url
 from ..services.app_settings import get_app_settings
-from ..services.downloader import download_video, get_video_info, normalize_youtube_url
+from ..services.downloader import (
+    download_audio_source, download_video, get_video_info, normalize_youtube_url,
+)
 from ..services.audio_extractor import extract_audio
+from ..services.audio_preview import generate_track_preview
 from ..services.transcriber import (
     PARAKEET_MODEL_IDS,
     SUPPORTED_TRANSCRIPTION_MODELS,
@@ -41,7 +48,15 @@ from ..services.transcriber import (
 )
 from ..services.parakeet_transcriber import (
     PARAKEET_SUPPORTED_LANGUAGES, PARAKEET_MODEL_ID, PARAKEET_ONNX_MODEL_ID,
+    PARAKEET_ARCHIVE_BYTES, SILERO_VAD_BYTES,
     prepare_parakeet_model,
+)
+from ..services.model_catalog import (
+    MODEL_CATEGORY_ORDER,
+    WHISPER_MODEL_CATALOG,
+    WHISPER_CATALOG_BY_ID,
+    prepare_whisper_model,
+    runtime_model_status,
 )
 from ..services.subtitle_cleaner import clean_subtitles, undo_last_clean
 from ..services.subtitle_translator import translate_subtitles
@@ -51,13 +66,17 @@ from ..services.subtitle_exporter import (
 )
 from ..services.video_renderer import burn_subtitles
 from ..services.video_thumbnail import generate_video_thumbnail
+from ..services.playback_info import get_playback_info
 from ..services.local_models import scan_models, register_model, get_imported, validate_imported, remove_imported
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api")
+_YOUTUBE_PLAYER_ID = re.compile(r"^[A-Za-z0-9_-]{11}$")
+_PLAYER_CHANNEL = re.compile(r"^[A-Za-z0-9_-]{8,80}$")
 
 VIDEO_EXTENSIONS = {".mp4", ".mkv", ".mov", ".webm", ".avi"}
+IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
 TRANSCRIPTION_LOCK = threading.Lock()
 
 RUNTIME_LABELS = {
@@ -69,7 +88,7 @@ RUNTIME_LABELS = {
 
 def _runtime_ids(model_id: str, imported: dict | None = None) -> list[str]:
     if imported: return list(imported.get("runtimes") or [])
-    if model_id in {"small", "medium", "large-v3"}: return ["cpu", "mlx"]
+    if model_id in WHISPER_CATALOG_BY_ID: return ["cpu", "mlx"]
     if model_id == PARAKEET_MODEL_ID: return ["external_coreml"]
     if model_id == PARAKEET_ONNX_MODEL_ID: return ["cpu", "coreml"]
     return ["cpu"]
@@ -94,7 +113,41 @@ def _runtime_options(model_id: str, imported: dict | None = None, model_ready: b
         if (runtime_id == "external_coreml" or imported) and not model_ready:
             available, reason = False, "外部模型路径或配套 CLI 需要重新校验"
         label, engine = RUNTIME_LABELS.get(runtime_id, (runtime_id, runtime_id))
-        result.append({"id":runtime_id,"name":label,"engine":engine,"available":available,"reason":reason})
+        item={"id":runtime_id,"name":label,"engine":engine,"available":available,"reason":reason}
+        if model_id in WHISPER_CATALOG_BY_ID:
+            item.update(runtime_model_status(model_id, runtime_id))
+        elif model_id == PARAKEET_ONNX_MODEL_ID:
+            status = get_transcription_model_status(model_id)
+            item.update({
+                "model_ready": bool(status.get("ready")),
+                "download_required": not bool(status.get("ready")),
+                "download_bytes": PARAKEET_ARCHIVE_BYTES + SILERO_VAD_BYTES,
+                "repository": "k2-fsa/sherpa-onnx",
+                "revision": "asr-models",
+                "source_url": "https://github.com/k2-fsa/sherpa-onnx/releases/tag/asr-models",
+                "source": "app_download" if status.get("ready") else "github",
+                "status": status.get("state"),
+            })
+        elif model_id == PARAKEET_MODEL_ID:
+            item.update({
+                "model_ready": bool(model_ready),
+                "download_required": False,
+                "download_bytes": 0,
+                "repository": "本地 Memo 模型",
+                "revision": None,
+                "source_url": None,
+                "source": "custom_path" if model_ready else "local_selection",
+                "status": "ready" if model_ready else "unavailable",
+            })
+        else:
+            item.update({
+                "model_ready": bool(model_ready),
+                "download_required": False,
+                "download_bytes": 0,
+                "source": "imported_reference" if imported else "custom_path",
+                "status": "ready" if model_ready else "invalid",
+            })
+        result.append(item)
     return result
 
 def _select_runtime(model_id: str, requested: str | None, settings: dict, imported: dict | None = None) -> str:
@@ -283,29 +336,68 @@ def transcription_models(project_id: Optional[str] = None, language: str = "auto
         audio = _audio_preflight(row["audio_path"] if row else None)
     recommended = _resolve_model("auto", language)
     model_definitions = [
-        ("small", "Whisper Small", ["*"]),
-        ("medium", "Whisper Medium", ["*"]),
-        ("large-v3", "Whisper Large V3", ["*"]),
-        (PARAKEET_MODEL_ID, "Parakeet V3 Core ML", sorted(PARAKEET_SUPPORTED_LANGUAGES)),
-        (PARAKEET_ONNX_MODEL_ID, "Parakeet V3 ONNX", sorted(PARAKEET_SUPPORTED_LANGUAGES)),
+        {
+            "id": item.id,
+            "name": item.name,
+            "languages": list(item.languages),
+            "category_id": item.category_id,
+            "category_name": item.category_name,
+            "purpose": item.purpose,
+            "language_description": item.language_description,
+            "size_label": item.size_label,
+            "publisher": item.publisher,
+            "tags": list(item.tags),
+            "source_site": "Hugging Face",
+        }
+        for item in WHISPER_MODEL_CATALOG
+    ] + [
+        {
+            "id": PARAKEET_ONNX_MODEL_ID,
+            "name": "Parakeet V3 ONNX",
+            "languages": sorted(PARAKEET_SUPPORTED_LANGUAGES),
+            "category_id": "parakeet",
+            "category_name": "Parakeet",
+            "purpose": "欧洲语种的快速本地转写",
+            "language_description": "英语及 25 种欧洲语言",
+            "size_label": "下载约 488 MB，安装约 672 MB",
+            "publisher": "NVIDIA / k2-fsa",
+            "tags": ["欧洲语种", "CPU", "Core ML", "ONNX"],
+            "source_site": "GitHub 官方发布页",
+        },
+        {
+            "id": PARAKEET_MODEL_ID,
+            "name": "Parakeet V3 外部 Core ML",
+            "languages": sorted(PARAKEET_SUPPORTED_LANGUAGES),
+            "category_id": "parakeet",
+            "category_name": "Parakeet",
+            "purpose": "校验并使用本机已有的 Memo Core ML 模型",
+            "language_description": "英语及 25 种欧洲语言",
+            "size_label": "本地模型，不提供网络下载",
+            "publisher": "本地 Memo 模型",
+            "tags": ["欧洲语种", "外部模型", "Core ML"],
+            "source_site": "本地目录",
+        },
     ]
     model_items = []
-    for model_id, name, languages in model_definitions:
+    for definition in model_definitions:
+        model_id = definition["id"]
         status = get_transcription_model_status(
             model_id,
             custom_model_path=settings.get("custom_model_path"),
             coreml_model_path=settings.get("coreml_model_path"),
             coreml_cli_path=settings.get("coreml_cli_path"),
         )
+        runtimes = _runtime_options(
+            model_id,
+            model_ready=bool(status.get("ready") or model_id != PARAKEET_MODEL_ID),
+        )
         model_items.append({
-            "id": model_id,
-            "name": name,
-            "languages": languages,
+            **definition,
             **status,
             "status": status.get("state"),
             # Old clients read ``runtime_error`` while v0.2 uses ``error``.
             "runtime_error": status.get("error") or None,
-            "runtimes": _runtime_options(model_id, model_ready=bool(status.get("ready") or model_id != PARAKEET_MODEL_ID)),
+            "runtimes": runtimes,
             "selected_runtime": (settings.get("transcription_runtime_by_model") or {}).get(model_id),
         })
     if settings.get("custom_model_path"):
@@ -314,6 +406,11 @@ def transcription_models(project_id: Optional[str] = None, language: str = "auto
         )
         model_items.append({
             "id": "custom", "name": "自定义 Whisper", "languages": ["*"],
+            "category_id": "local", "category_name": "本地与自定义",
+            "purpose": "使用用户选择的 CTranslate2 模型目录",
+            "language_description": "由本地模型决定",
+            "size_label": "本地模型", "publisher": "用户自定义",
+            "tags": ["本地目录", "CPU"], "source_site": "本地目录",
             **status, "status": status.get("state"),
             "runtime_error": status.get("error") or None,
             "runtimes": _runtime_options("custom", model_ready=bool(status.get("ready"))),
@@ -322,6 +419,10 @@ def transcription_models(project_id: Optional[str] = None, language: str = "auto
     for imported in get_imported():
         checked = validate_imported(imported["id"])
         model_items.append({"id": imported["id"], "name": imported["display_name"], "languages": ["*"],
+                            "category_id": "local", "category_name": "本地与自定义",
+                            "purpose": "原地引用已导入模型", "language_description": "由本地模型决定",
+                            "size_label": "本地模型", "publisher": "本地导入",
+                            "tags": ["本地模型", imported["format"]], "source_site": "本地目录",
                             "ready": checked["ready"], "source": "imported_reference", "state": checked["status"],
                             "status": checked["status"], "download_required": False, "runtime_error": checked.get("last_error") or None,
                             "runtimes": _runtime_options(imported["id"], imported, checked["ready"]),
@@ -330,6 +431,7 @@ def transcription_models(project_id: Optional[str] = None, language: str = "auto
     return {
         "recommended_model": recommended,
         "audio": audio,
+        "category_order": list(MODEL_CATEGORY_ORDER),
         "models": model_items,
     }
 
@@ -376,9 +478,7 @@ def validate_transcription_model(model_id: str):
         coreml_cli_path=settings.get("coreml_cli_path"),
     )
     names = {
-        "small": "Whisper Small",
-        "medium": "Whisper Medium",
-        "large-v3": "Whisper Large V3",
+        **{item.id: item.name for item in WHISPER_MODEL_CATALOG},
         "custom": "自定义 Whisper",
         PARAKEET_MODEL_ID: "Parakeet V3 Core ML",
         PARAKEET_ONNX_MODEL_ID: "Parakeet V3 ONNX",
@@ -398,38 +498,67 @@ def validate_transcription_model(model_id: str):
 
 
 def _do_prepare_transcription_model(
-    task_id: str, model_id: str, repair: bool, settings: dict,
+    task_id: str, model_id: str, runtime: str, repair: bool, settings: dict,
 ):
-    prepare_parakeet_model(
-        task_id,
-        model_id,
-        repair=repair,
-        coreml_model_dir=settings.get("coreml_model_path"),
-        coreml_cli_path=settings.get("coreml_cli_path"),
-    )
+    if model_id in WHISPER_CATALOG_BY_ID:
+        prepare_whisper_model(task_id, model_id, runtime, repair=repair)
+    else:
+        prepare_parakeet_model(
+            task_id,
+            model_id,
+            repair=repair,
+            coreml_model_dir=settings.get("coreml_model_path"),
+            coreml_cli_path=settings.get("coreml_cli_path"),
+        )
 
 
 @router.post("/transcription/models/{model_id}/prepare")
 def prepare_transcription_model(model_id: str, request: ModelPrepareRequest):
-    if model_id not in PARAKEET_MODEL_IDS:
+    if model_id not in PARAKEET_MODEL_IDS and model_id not in WHISPER_CATALOG_BY_ID:
         raise HTTPException(
             400,
             detail={
                 "code": "MODEL_PREPARE_UNSUPPORTED",
-                "message": "Whisper 模型会在首次转写时自动下载",
+                "message": "此模型不支持由 App 下载或修复",
             },
         )
     try:
         settings = get_app_settings()
     except Exception:
         settings = {}
+    remembered = (settings.get("transcription_runtime_by_model") or {}).get(model_id)
+    runtime = request.runtime or remembered
+    if model_id in WHISPER_CATALOG_BY_ID:
+        runtime = runtime or "cpu"
+        if runtime not in {"cpu", "mlx"}:
+            raise HTTPException(
+                400,
+                detail={
+                    "code": "RUNTIME_NOT_SUPPORTED",
+                    "message": "Whisper 下载格式只能选择 CPU 或 Apple GPU",
+                },
+            )
+    elif model_id == PARAKEET_ONNX_MODEL_ID:
+        runtime = runtime or "cpu"
+        if runtime not in {"cpu", "coreml"}:
+            raise HTTPException(
+                400,
+                detail={
+                    "code": "RUNTIME_NOT_SUPPORTED",
+                    "message": "Parakeet ONNX 只能选择 CPU 或 Core ML",
+                },
+            )
+    else:
+        runtime = "external_coreml"
     task_id = task_manager.create_task(None, "prepare_model")
     task_manager.run_background(
-        task_id, _do_prepare_transcription_model, model_id, request.repair, settings,
+        task_id, _do_prepare_transcription_model,
+        model_id, runtime, request.repair, settings,
     )
     return {
         "task_id": task_id,
         "model_id": model_id,
+        "runtime": runtime,
         "message": "正在修复模型" if request.repair else "正在准备模型",
     }
 
@@ -439,21 +568,57 @@ def prepare_transcription_model(model_id: str, request: ModelPrepareRequest):
 # ============================
 
 @router.get("/projects")
-def list_projects(deleted: bool = False):
-    """获取项目列表；默认隐藏回收站项目。"""
+def list_projects(
+    deleted: bool = False, page: int = 1, page_size: int = 100,
+    search: str = "", source_type: str = "", group: str = "", status: str = "",
+    sort: str = "updated_desc", include_playlist_items: bool = False,
+):
+    """Paginated/searchable project library; defaults preserve the legacy response."""
     init_db()
+    page = max(1, int(page)); page_size = max(1, min(200, int(page_size)))
+    conditions = [f"p.deleted_at IS {'NOT ' if deleted else ''}NULL"]
+    values: list = []
+    if not deleted and not include_playlist_items:
+        conditions.append(
+            "NOT EXISTS (SELECT 1 FROM batch_items bi JOIN batches b ON b.id=bi.batch_id "
+            "WHERE bi.project_id=p.id AND b.kind='youtube_playlist')"
+        )
+    if search:
+        conditions.append("p.title LIKE ? ESCAPE '\\'")
+        escaped = search.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        values.append(f"%{escaped}%")
+    if source_type in {"local", "youtube"}:
+        conditions.append("p.source_type=?"); values.append(source_type)
+    if group:
+        conditions.append("COALESCE(p.group_name,'')=?"); values.append(group)
+    if status:
+        conditions.append("EXISTS (SELECT 1 FROM tasks tf WHERE tf.project_id=p.id AND tf.status=?)")
+        values.append(status)
+    order = {
+        "updated_desc": "COALESCE(p.deleted_at,p.updated_at) DESC",
+        "updated_asc": "COALESCE(p.deleted_at,p.updated_at) ASC",
+        "created_desc": "p.created_at DESC", "created_asc": "p.created_at ASC",
+        "name_asc": "p.title COLLATE NOCASE ASC", "name_desc": "p.title COLLATE NOCASE DESC",
+    }.get(sort, "COALESCE(p.deleted_at,p.updated_at) DESC")
+    where = " AND ".join(conditions)
     db = get_db()
+    total = db.execute(f"SELECT COUNT(*) FROM projects p WHERE {where}", values).fetchone()[0]
     rows = db.execute(
-        "SELECT p.*, (SELECT COUNT(*) FROM segments s WHERE s.project_id = p.id) as segments_count "
-        f"FROM projects p WHERE p.deleted_at IS {'NOT ' if deleted else ''}NULL "
-        "ORDER BY COALESCE(p.deleted_at, p.updated_at) DESC"
+        """SELECT p.*, (SELECT COUNT(*) FROM segments s WHERE s.project_id=p.id) segments_count,
+           (SELECT status FROM tasks t WHERE t.project_id=p.id ORDER BY updated_at DESC LIMIT 1) latest_task_status,
+           (SELECT message FROM tasks t WHERE t.project_id=p.id ORDER BY updated_at DESC LIMIT 1) latest_task_message
+           FROM projects p WHERE """ + where + f" ORDER BY {order} LIMIT ? OFFSET ?",
+        [*values, page_size, (page - 1) * page_size],
     ).fetchall()
     db.close()
     return {
         "projects": [
-            {**project_to_dict(r), "segments_count": r["segments_count"]}
+            {**project_to_dict(r), "segments_count": r["segments_count"],
+             "latest_task_status": r["latest_task_status"], "latest_task_message": r["latest_task_message"]}
             for r in rows
-        ]
+        ],
+        "page": page, "page_size": page_size, "total": total,
+        "pages": max(1, (total + page_size - 1) // page_size),
     }
 
 
@@ -531,13 +696,31 @@ def create_project(req: ProjectCreate):
     init_db()
     project_id = str(uuid.uuid4())
     now = time.strftime("%Y-%m-%d %H:%M:%S")
+    source_url = (
+        normalize_youtube_url(req.source_url or "")
+        if req.source_type == "youtube" and req.source_url else req.source_url
+    )
+    if req.source_type == "local":
+        media_mode = "local"
+    else:
+        try:
+            default_mode = get_app_settings().get("youtube_media_mode")
+        except Exception:
+            default_mode = "local"
+        media_mode = req.media_mode or default_mode
+        if media_mode not in {"local", "web"}:
+            media_mode = "local"
 
     db = get_db()
     db.execute(
-        """INSERT INTO projects (id, title, source_type, source_url, language, target_language, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-        (project_id, req.title or "未命名项目", req.source_type, req.source_url,
-         req.language, req.target_language, now, now)
+        """INSERT INTO projects
+           (id, title, source_type, source_url, media_mode, language,
+            target_language, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (
+            project_id, req.title or "未命名项目", req.source_type, source_url,
+            media_mode, req.language, req.target_language, now, now,
+        )
     )
     db.commit()
     db.close()
@@ -708,6 +891,91 @@ def update_project_group(project_id: str, update: ProjectGroupUpdate):
     return {**project_to_dict(row), "segments_count": row["segments_count"]}
 
 
+@router.patch("/projects/{project_id}/media-mode")
+def update_project_media_mode(project_id: str, update: ProjectMediaModeUpdate):
+    row = _project_row(project_id)
+    if not row:
+        raise HTTPException(404, "项目不存在")
+    if row["source_type"] != "youtube":
+        raise HTTPException(400, "本地导入项目只能使用本地模式")
+    if update.media_mode == row["media_mode"]:
+        return {"project": get_project(project_id), "message": "项目已使用该媒体模式"}
+    active = _active_task_conflict(project_id)
+    if active:
+        raise HTTPException(
+            409,
+            detail={
+                "code": "MEDIA_TASK_ACTIVE",
+                "message": "项目已有任务正在运行，完成后再切换媒体模式",
+                "task_ids": active,
+            },
+        )
+    if update.media_mode == "web":
+        db = get_db()
+        db.execute(
+            "UPDATE projects SET media_mode='web',updated_at=? WHERE id=?",
+            (time.strftime("%Y-%m-%d %H:%M:%S"), project_id),
+        )
+        db.commit()
+        db.close()
+        return {
+            "project": get_project(project_id),
+            "message": "已改用网页播放，本地视频副本继续保留",
+        }
+    if row["video_path"] and os.path.isfile(row["video_path"]):
+        db = get_db()
+        db.execute(
+            "UPDATE projects SET media_mode='local',updated_at=? WHERE id=?",
+            (time.strftime("%Y-%m-%d %H:%M:%S"), project_id),
+        )
+        db.commit()
+        db.close()
+        return {"project": get_project(project_id), "message": "已改用本地视频"}
+    if not row["source_url"]:
+        raise HTTPException(400, "项目没有可下载的视频链接")
+    task_id = task_manager.create_task(project_id, "switch_media_mode")
+    task_manager.run_background(
+        task_id, _do_download, project_id, row["source_url"],
+        set_media_mode="local", preserve_metadata=True,
+        materialization_reason="mode_switch",
+    )
+    return {
+        "project": get_project(project_id),
+        "task_id": task_id,
+        "message": "正在下载本地视频；成功后自动切换",
+    }
+
+
+@router.post("/projects/{project_id}/materialize-video")
+def materialize_project_video(
+    project_id: str,
+    reason: str = Query("manual", pattern="^(manual|player_fallback|offline)$"),
+):
+    row = _project_row(project_id)
+    if not row:
+        raise HTTPException(404, "项目不存在")
+    if row["video_path"] and os.path.isfile(row["video_path"]):
+        return {"project": get_project(project_id), "message": "本地视频已存在"}
+    if row["source_type"] != "youtube" or not row["source_url"]:
+        raise HTTPException(400, "项目没有可下载的视频链接")
+    active = _active_task_conflict(project_id)
+    if active:
+        raise HTTPException(
+            409,
+            detail={
+                "code": "MEDIA_TASK_ACTIVE",
+                "message": "项目已有媒体或处理任务正在运行",
+                "task_ids": active,
+            },
+        )
+    task_id = task_manager.create_task(project_id, "materialize_video")
+    task_manager.run_background(
+        task_id, _do_download, project_id, row["source_url"],
+        preserve_metadata=True, materialization_reason=reason,
+    )
+    return {"task_id": task_id, "message": "正在下载并保留本地视频"}
+
+
 # ============================
 # 下载 / 导入
 # ============================
@@ -733,8 +1001,19 @@ def start_download(project_id: str, url: str = Form(...)):
     return {"task_id": task_id, "message": "下载任务已创建"}
 
 
-def _do_download(task_id: str, project_id: str, url: str):
-    """后台执行下载"""
+def _do_download(
+    task_id: str,
+    project_id: str,
+    url: str,
+    *,
+    set_media_mode: str | None = None,
+    preserve_metadata: bool = False,
+    progress_start: float = 10,
+    progress_end: float = 95,
+    completed_progress: float = 100,
+    materialization_reason: str = "",
+):
+    """Download a complete video and atomically attach it to the project."""
     try:
         app_settings = get_app_settings()
     except Exception:
@@ -747,23 +1026,41 @@ def _do_download(task_id: str, project_id: str, url: str):
         download_dir=app_settings.get("download_directory"),
         quality=app_settings.get("download_quality") or "best",
         container=app_settings.get("download_container") or "mp4",
+        progress_start=progress_start,
+        progress_end=progress_end,
     )
     task_manager.checkpoint(task_id)
 
     db = get_db()
     try:
         details = (task_manager.get_task(task_id) or {}).get("details", {})
-        title = details.get("title") or os.path.basename(video_path)
-        thumbnail_url = details.get("thumbnail_url")
-        thumbnail_path = details.get("thumbnail_path")
+        existing = db.execute(
+            "SELECT title,thumbnail_url,thumbnail_path FROM projects WHERE id=?",
+            (project_id,),
+        ).fetchone()
+        title = (
+            existing["title"] if preserve_metadata and existing
+            else details.get("title") or os.path.basename(video_path)
+        )
+        thumbnail_url = (
+            existing["thumbnail_url"] if preserve_metadata and existing
+            else details.get("thumbnail_url")
+        )
+        thumbnail_path = (
+            existing["thumbnail_path"] if preserve_metadata and existing
+            else details.get("thumbnail_path")
+        )
+        mode_sql = ", media_mode = ?" if set_media_mode in {"local", "web"} else ""
+        values = [video_path, title, thumbnail_url, thumbnail_path]
+        if mode_sql:
+            values.append(set_media_mode)
+        values.extend([time.strftime("%Y-%m-%d %H:%M:%S"), project_id])
         db.execute(
             """UPDATE projects
-               SET video_path = ?, title = ?, thumbnail_url = ?, thumbnail_path = ?, updated_at = ?
+               SET video_path = ?, title = ?, thumbnail_url = ?, thumbnail_path = ?
+               """ + mode_sql + """, updated_at = ?
                WHERE id = ?""",
-            (
-                video_path, title, thumbnail_url, thumbnail_path,
-                time.strftime("%Y-%m-%d %H:%M:%S"), project_id,
-            )
+            values,
         )
         task_manager.checkpoint(task_id)
         db.commit()
@@ -773,7 +1070,76 @@ def _do_download(task_id: str, project_id: str, url: str):
     finally:
         db.close()
 
-    task_manager.update_task(task_id, step="downloaded", progress=50, message="视频下载完成，可继续提取音频")
+    task_manager.update_task(
+        task_id, step="downloaded", progress=completed_progress,
+        message="视频下载完成",
+        details={
+            "materialization_reason": materialization_reason,
+            "local_video_ready": True,
+            **({"media_mode": set_media_mode} if set_media_mode else {}),
+        },
+    )
+
+
+def _do_prepare_audio(task_id: str, project_id: str, url: str):
+    """Download a YouTube audio stream and safely replace the recognition WAV."""
+    try:
+        app_settings = get_app_settings()
+    except Exception:
+        app_settings = {}
+    source_path = download_audio_source(
+        task_id, url, project_id,
+        download_dir=app_settings.get("download_directory"),
+    )
+    staging_dir = Path(source_path).parent
+    try:
+        audio_path = extract_audio(
+            task_id, source_path, project_id,
+            progress_start=45, progress_end=78,
+        )
+        task_manager.checkpoint(task_id)
+        details = (task_manager.get_task(task_id) or {}).get("details", {})
+        db = get_db()
+        try:
+            row = db.execute(
+                "SELECT title FROM projects WHERE id=?", (project_id,)
+            ).fetchone()
+            current_title = row["title"] if row else ""
+            downloaded_title = details.get("title") or ""
+            use_downloaded_title = (
+                not current_title
+                or current_title == "未命名项目"
+                or current_title.startswith("YouTube - ")
+            )
+            db.execute(
+                """UPDATE projects
+                   SET audio_path=?, title=?, thumbnail_url=COALESCE(?,thumbnail_url),
+                       updated_at=?
+                   WHERE id=?""",
+                (
+                    audio_path,
+                    downloaded_title if use_downloaded_title and downloaded_title else current_title,
+                    details.get("thumbnail_url"),
+                    time.strftime("%Y-%m-%d %H:%M:%S"),
+                    project_id,
+                ),
+            )
+            task_manager.checkpoint(task_id)
+            db.commit()
+        except Exception:
+            db.rollback()
+            raise
+        finally:
+            db.close()
+        task_manager.update_task(
+            task_id, step="audio_ready", progress=80,
+            message="音频已准备完成",
+            details={"audio_path": audio_path, "audio_ready": True},
+        )
+        return audio_path
+    finally:
+        if staging_dir.name == f".audio-{task_id}" and staging_dir.is_dir():
+            shutil.rmtree(staging_dir, ignore_errors=True)
 
 
 @router.post("/projects/{project_id}/import-local")
@@ -813,7 +1179,7 @@ async def import_local_video(
     # 更新项目
     db.execute(
         """UPDATE projects
-           SET video_path = ?, source_type = 'local', title = ?,
+           SET video_path = ?, source_type = 'local', media_mode = 'local', title = ?,
                thumbnail_url = NULL, thumbnail_path = ?, updated_at = ?
            WHERE id = ?""",
         (
@@ -847,6 +1213,82 @@ async def import_local_video(
 # 音频提取
 # ============================
 
+@router.get("/projects/{project_id}/media-info")
+def get_media_info(project_id: str):
+    """Enumerate playable audio tracks without invoking an external process."""
+    import av
+
+    db = get_db()
+    row = db.execute(
+        "SELECT video_path,audio_track_index,range_start,range_end FROM projects WHERE id=?",
+        (project_id,),
+    ).fetchone()
+    db.close()
+    if not row:
+        raise HTTPException(404, "项目不存在")
+    if not row["video_path"] or not os.path.isfile(row["video_path"]):
+        raise HTTPException(404, "视频文件不存在")
+    with av.open(row["video_path"]) as container:
+        tracks = []
+        for index, stream in enumerate(container.streams.audio):
+            metadata = dict(stream.metadata or {})
+            tracks.append({
+                "index": index,
+                "codec": stream.codec_context.name,
+                "channels": stream.codec_context.channels,
+                "sample_rate": stream.codec_context.sample_rate,
+                "language": metadata.get("language", "und"),
+                "title": metadata.get("title") or f"音轨 {index + 1}",
+                "duration": float(stream.duration * stream.time_base) if stream.duration else None,
+            })
+        duration = float(container.duration / 1_000_000) if container.duration else None
+    return {
+        "audio_tracks": tracks,
+        "duration": duration,
+        "selection": {
+            "audio_track_index": row["audio_track_index"] or 0,
+            "range_start": row["range_start"],
+            "range_end": row["range_end"],
+        },
+    }
+
+
+@router.get("/projects/{project_id}/media-track-preview")
+def preview_media_track(project_id: str, track: int = Query(0, ge=0), start: float = Query(0, ge=0)):
+    db = get_db()
+    row = db.execute("SELECT video_path FROM projects WHERE id=?", (project_id,)).fetchone()
+    db.close()
+    if not row or not row["video_path"] or not os.path.isfile(row["video_path"]):
+        raise HTTPException(404, "项目视频不存在")
+    try:
+        path = generate_track_preview(project_id, row["video_path"], track, start)
+    except ValueError as error:
+        raise HTTPException(422, str(error)) from error
+    return FileResponse(path, media_type="audio/wav", filename=f"track-{track + 1}-preview.wav")
+
+
+@router.put("/projects/{project_id}/media-selection")
+def update_media_selection(project_id: str, request: MediaSelectionUpdate):
+    db = get_db()
+    try:
+        row = db.execute("SELECT video_path FROM projects WHERE id=?", (project_id,)).fetchone()
+        if not row:
+            raise HTTPException(404, "项目不存在")
+        if row["video_path"] and os.path.isfile(row["video_path"]):
+            import av
+            with av.open(row["video_path"]) as container:
+                if request.audio_track_index >= len(container.streams.audio):
+                    raise HTTPException(422, "所选音轨不存在")
+        db.execute(
+            """UPDATE projects SET audio_track_index=?,range_start=?,range_end=?,audio_path=NULL,
+               updated_at=datetime('now','localtime') WHERE id=?""",
+            (request.audio_track_index, request.range_start, request.range_end, project_id),
+        )
+        db.commit()
+        return {"selection": request.model_dump(), "audio_reextract_required": True}
+    finally:
+        db.close()
+
 @router.post("/projects/{project_id}/extract-audio")
 def start_extract_audio(project_id: str):
     """开始提取音频（后台任务）"""
@@ -864,8 +1306,50 @@ def start_extract_audio(project_id: str):
     return {"task_id": task_id, "message": "音频提取任务已创建"}
 
 
-def _do_extract_audio(task_id: str, project_id: str, video_path: str):
-    audio_path = extract_audio(task_id, video_path, project_id)
+@router.post("/projects/{project_id}/prepare-audio")
+def start_prepare_audio(project_id: str):
+    row = _project_row(project_id)
+    if not row:
+        raise HTTPException(404, "项目不存在")
+    if row["source_type"] != "youtube" or not row["source_url"]:
+        raise HTTPException(400, "只有 YouTube 项目可以准备网页模式音频")
+    active = _active_task_conflict(project_id)
+    if active:
+        raise HTTPException(
+            409,
+            detail={
+                "code": "MEDIA_TASK_ACTIVE",
+                "message": "项目已有媒体或处理任务正在运行",
+                "task_ids": active,
+            },
+        )
+    task_id = task_manager.create_task(project_id, "prepare_audio")
+    task_manager.run_background(
+        task_id, _do_prepare_audio, project_id, row["source_url"],
+    )
+    return {"task_id": task_id, "message": "音频准备任务已创建"}
+
+
+def _do_extract_audio(
+    task_id: str,
+    project_id: str,
+    video_path: str,
+    progress_start: float = 5,
+    progress_end: float = 100,
+):
+    db = get_db()
+    selection = db.execute(
+        "SELECT audio_track_index,range_start,range_end FROM projects WHERE id=?", (project_id,)
+    ).fetchone()
+    db.close()
+    audio_path = extract_audio(
+        task_id, video_path, project_id,
+        int(selection["audio_track_index"] or 0) if selection else 0,
+        selection["range_start"] if selection else None,
+        selection["range_end"] if selection else None,
+        progress_start=progress_start,
+        progress_end=progress_end,
+    )
     task_manager.checkpoint(task_id)
 
     db = get_db()
@@ -974,7 +1458,9 @@ def start_workflow(project_id: str, request: WorkflowRequest):
     if not row:
         raise HTTPException(404, "项目不存在")
     source_url = request.source_url or row["source_url"]
-    if not row["video_path"] and not source_url:
+    video_ready = bool(row["video_path"] and os.path.isfile(row["video_path"]))
+    audio_ready = _audio_preflight(row["audio_path"])["ok"]
+    if not video_ready and not source_url:
         raise HTTPException(400, "项目没有可处理的视频或链接")
     model = _resolve_model(request.model, request.language)
     settings=get_app_settings(); imported=get_imported(model) if model.startswith("local:") else None
@@ -983,9 +1469,22 @@ def start_workflow(project_id: str, request: WorkflowRequest):
     mapping=dict(settings.get("transcription_runtime_by_model") or {});mapping[model]=runtime
     save_app_settings({"transcription_runtime_by_model":mapping})
     task_id = task_manager.create_task(project_id, "workflow")
+    should_download_source = (
+        source_url
+        if (
+            row["media_mode"] == "web" and not audio_ready
+        ) or (
+            row["media_mode"] != "web" and not video_ready
+        )
+        else None
+    )
+    task_manager.update_task(task_id, details={"resume_payload": {
+        "project_id": project_id, "model": model, "language": request.language,
+        "source_url": should_download_source, "runtime": runtime,
+    }})
     task_manager.run_background(
         task_id, _do_workflow, project_id, model, request.language,
-        source_url if not row["video_path"] else None, runtime,
+        should_download_source, runtime,
     )
     return {"task_id": task_id, "message": "自动字幕工作流已创建", "model": model}
 
@@ -996,26 +1495,59 @@ def _do_workflow(
     stages = {
         "download": "waiting", "extract_audio": "waiting", "transcribe": "waiting",
     }
-    if source_url:
-        stages["download"] = "running"
-        task_manager.update_task(task_id, step="download", details={"stages": stages})
-        _do_download(task_id, project_id, source_url)
-        stages["download"] = "success"
-    else:
-        stages["download"] = "success"
-
     db = get_db()
-    row = db.execute("SELECT video_path,audio_path FROM projects WHERE id=?", (project_id,)).fetchone()
+    row = db.execute(
+        "SELECT source_url,video_path,audio_path,media_mode FROM projects WHERE id=?",
+        (project_id,),
+    ).fetchone()
     db.close()
-    if not row or not row["video_path"]:
-        raise RuntimeError("工作流未找到可用视频")
+    if not row:
+        raise RuntimeError("工作流未找到项目")
 
-    audio_check = _audio_preflight(row["audio_path"])
-    if not audio_check["ok"]:
-        stages["extract_audio"] = "running"
-        task_manager.update_task(task_id, step="extract_audio", details={"stages": stages})
-        _do_extract_audio(task_id, project_id, row["video_path"])
-    stages["extract_audio"] = "success"
+    if row["media_mode"] == "web":
+        audio_check = _audio_preflight(row["audio_path"])
+        if not audio_check["ok"]:
+            url = source_url or row["source_url"]
+            if not url:
+                raise RuntimeError("网页模式项目缺少可用链接")
+            stages["download"] = "running"
+            stages["extract_audio"] = "running"
+            task_manager.update_task(
+                task_id, step="download_audio", details={"stages": stages},
+            )
+            _do_prepare_audio(task_id, project_id, url)
+        stages["download"] = "success"
+        stages["extract_audio"] = "success"
+    else:
+        if source_url:
+            stages["download"] = "running"
+            task_manager.update_task(
+                task_id, step="download", details={"stages": stages},
+            )
+            _do_download(
+                task_id, project_id, source_url,
+                progress_start=2, progress_end=45, completed_progress=45,
+            )
+        stages["download"] = "success"
+        db = get_db()
+        row = db.execute(
+            "SELECT video_path,audio_path FROM projects WHERE id=?",
+            (project_id,),
+        ).fetchone()
+        db.close()
+        if not row or not row["video_path"] or not os.path.isfile(row["video_path"]):
+            raise RuntimeError("工作流未找到可用视频")
+        audio_check = _audio_preflight(row["audio_path"])
+        if not audio_check["ok"]:
+            stages["extract_audio"] = "running"
+            task_manager.update_task(
+                task_id, step="extract_audio", details={"stages": stages},
+            )
+            _do_extract_audio(
+                task_id, project_id, row["video_path"],
+                progress_start=45, progress_end=78,
+            )
+        stages["extract_audio"] = "success"
 
     db = get_db()
     audio_path = db.execute("SELECT audio_path FROM projects WHERE id=?", (project_id,)).fetchone()["audio_path"]
@@ -1126,6 +1658,46 @@ def _do_translate(task_id: str, project_id: str, target_language: str, provider_
 # 字幕段管理
 # ============================
 
+@router.post("/projects/{project_id}/subtitles/import")
+async def import_subtitles_file(
+    project_id: str,
+    file: UploadFile = File(...),
+    expected_revision: int = Form(...),
+):
+    extension = Path(file.filename or "").suffix.lower()
+    if extension not in {".srt", ".vtt", ".ass"}:
+        raise HTTPException(422, "仅支持 SRT、VTT 和 ASS 字幕")
+    payload = await file.read(10 * 1024 * 1024 + 1)
+    if len(payload) > 10 * 1024 * 1024:
+        raise HTTPException(413, "字幕文件不能超过 10 MB")
+    try:
+        cues = parse_subtitle(payload, file.filename or f"subtitle{extension}")
+        result = import_segment_snapshot(project_id, expected_revision, cues)
+    except ValueError as error:
+        raise HTTPException(422, detail={
+            "code": "SUBTITLE_IMPORT_INVALID", "message": str(error),
+            "suggestion": "请修正字幕格式后重试", "recoverable": True,
+        }) from error
+    except EditorServiceError as error:
+        raise HTTPException(error.status_code, detail=error.as_detail()) from error
+
+    import_dir = Path(PROJECTS_DIR) / project_id / "imports"
+    import_dir.mkdir(parents=True, exist_ok=True)
+    original_path = import_dir / f"{result['operation_id']}{extension}"
+    original_path.write_bytes(payload)
+    db = get_db()
+    try:
+        db.execute(
+            """INSERT INTO project_assets(id,project_id,kind,path,metadata_json,created_at)
+               VALUES (?,?,?,?,?,datetime('now','localtime'))""",
+            (str(uuid.uuid4()), project_id, "subtitle_original", str(original_path),
+             json.dumps({"filename": Path(file.filename or "subtitle").name, "format": extension[1:]})),
+        )
+        db.commit()
+    finally:
+        db.close()
+    return result
+
 @router.get("/projects/{project_id}/segments")
 def get_segments(project_id: str, after_idx: int = 0):
     """获取项目的所有字幕段。after_idx>0 时只返回比该索引新的字幕（增量模式）。"""
@@ -1173,46 +1745,75 @@ def get_segments(project_id: str, after_idx: int = 0):
 
 @router.patch("/projects/{project_id}/segments/{segment_index}")
 def update_segment(project_id: str, segment_index: int, update: SegmentUpdate):
-    """修改某一条字幕"""
+    """兼容旧客户端的单条编辑接口；内部进入统一原子编辑引擎。"""
     db = get_db()
-    row = db.execute(
-        "SELECT * FROM segments WHERE project_id = ? AND idx = ?",
-        (project_id, segment_index)
-    ).fetchone()
-
-    if not row:
-        db.close()
-        raise HTTPException(404, "字幕段不存在")
-
-    updates = {}
-    if update.clean_text is not None:
-        updates["clean_text"] = update.clean_text
-    if update.translated_text is not None:
-        updates["translated_text"] = update.translated_text
-    if update.locked is not None:
-        updates["locked"] = 1 if update.locked else 0
-
-    if updates:
-        set_clause = ", ".join(f"{k} = ?" for k in updates)
-        values = list(updates.values()) + [project_id, segment_index]
-        db.execute(
-            f"UPDATE segments SET {set_clause} WHERE project_id = ? AND idx = ?",
-            values
-        )
-        db.commit()
-
-    updated_row = db.execute(
-        "SELECT * FROM segments WHERE project_id = ? AND idx = ?",
-        (project_id, segment_index)
-    ).fetchone()
+    project = db.execute("SELECT edit_revision FROM projects WHERE id=?", (project_id,)).fetchone()
     db.close()
-
-    return segment_to_dict(updated_row)
+    if not project:
+        raise HTTPException(404, "项目不存在")
+    values = update.model_dump(exclude_unset=True)
+    item = SegmentOperationItem(index=segment_index, **values)
+    try:
+        result = execute_operation(project_id, SegmentOperationRequest(
+            expected_revision=int(project["edit_revision"] or 0),
+            operation="update_many",
+            items=[item],
+            include_locked=set(values) == {"locked"},
+        ))
+    except EditorServiceError as error:
+        raise HTTPException(error.status_code, detail=error.as_detail()) from error
+    return next(segment for segment in result["segments"] if segment["index"] == segment_index)
 
 
 # ============================
 # 导出
 # ============================
+
+def _do_video_export(
+    task_id: str,
+    project_id: str,
+    subtitle_path: str,
+    output_path: str,
+    fmt: str,
+):
+    row = _project_row(project_id)
+    if not row:
+        raise RuntimeError("项目不存在")
+    stages = {"download_video": "waiting", "render_video": "waiting"}
+    video_path = row["video_path"]
+    if not video_path or not os.path.isfile(video_path):
+        if row["source_type"] != "youtube" or not row["source_url"]:
+            raise RuntimeError("视频文件不存在，且项目没有可重新下载的链接")
+        stages["download_video"] = "running"
+        task_manager.update_task(
+            task_id, step="materialize_video", progress=1,
+            message="首次视频导出：正在下载并保留本地视频",
+            details={"stages": stages, "format": fmt},
+        )
+        _do_download(
+            task_id, project_id, row["source_url"],
+            preserve_metadata=True, progress_start=2, progress_end=52,
+            completed_progress=52, materialization_reason="video_export",
+        )
+        row = _project_row(project_id)
+        video_path = row["video_path"] if row else None
+    if not video_path or not os.path.isfile(video_path):
+        raise RuntimeError("本地视频准备失败，无法压制字幕")
+    stages["download_video"] = "success"
+    stages["render_video"] = "running"
+    task_manager.update_task(
+        task_id, step="rendering", progress=55,
+        message="本地视频已就绪，正在压制字幕",
+        details={"stages": stages, "format": fmt},
+    )
+    burn_subtitles(task_id, video_path, subtitle_path, output_path, project_id)
+    stages["render_video"] = "success"
+    task_manager.update_task(
+        task_id, step="render_done", progress=95,
+        message="视频压制完成",
+        details={"stages": stages, "format": fmt},
+    )
+
 
 @router.post("/projects/{project_id}/export")
 def export_subtitles(project_id: str, req: ExportRequest):
@@ -1223,6 +1824,7 @@ def export_subtitles(project_id: str, req: ExportRequest):
         "SELECT * FROM segments WHERE project_id = ? ORDER BY idx",
         (project_id,)
     ).fetchall()
+    style_row = db.execute("SELECT settings_json FROM project_styles WHERE project_id=?", (project_id,)).fetchone()
     db.close()
 
     if not row:
@@ -1234,6 +1836,10 @@ def export_subtitles(project_id: str, req: ExportRequest):
 
     fmt = req.format
     bilingual = req.bilingual
+    style_settings = req.style
+    if style_settings is None and style_row:
+        try: style_settings = json.loads(style_row["settings_json"])
+        except json.JSONDecodeError: style_settings = None
 
     if fmt == "srt":
         out = get_subtitle_path(project_id, "srt")
@@ -1245,27 +1851,38 @@ def export_subtitles(project_id: str, req: ExportRequest):
         media_type = "text/vtt"
     elif fmt == "ass":
         out = get_subtitle_path(project_id, "ass")
-        export_ass(segments, out, bilingual=bilingual, primary_lang=req.primary_language)
+        export_ass(segments, out, bilingual=bilingual, primary_lang=req.primary_language, settings=style_settings)
         media_type = "text/plain"
     elif fmt == "srt-bilingual":
         out = get_subtitle_path(project_id, "bilingual.srt")
         export_srt(segments, out, bilingual=True, primary_lang=req.primary_language)
         media_type = "text/plain"
     elif fmt in {"mp4", "mkv"}:
-        if not row["video_path"] or not os.path.exists(row["video_path"]):
-            raise HTTPException(400, "视频文件不存在，无法压制")
+        if _active_task_conflict(project_id):
+            raise HTTPException(
+                409,
+                detail={
+                    "code": "MEDIA_TASK_ACTIVE",
+                    "message": "项目已有任务正在运行，完成后再导出视频",
+                },
+            )
+        if (
+            (not row["video_path"] or not os.path.exists(row["video_path"]))
+            and (row["source_type"] != "youtube" or not row["source_url"])
+        ):
+            raise HTTPException(400, "视频文件不存在，且项目没有可重新下载的链接")
 
         # 先导出 ASS 字幕
         ass_path = get_subtitle_path(project_id, "ass")
-        export_ass(segments, ass_path, bilingual=bilingual, primary_lang=req.primary_language)
+        export_ass(segments, ass_path, bilingual=bilingual, primary_lang=req.primary_language, settings=style_settings)
 
         # 后台压制
         task_id = task_manager.create_task(project_id, "render")
         from ..utils.config import EXPORTS_DIR
         output_path = os.path.join(EXPORTS_DIR, f"{project_id}_hardsub.{fmt}")
         task_manager.run_background(
-            task_id, burn_subtitles,
-            row["video_path"], ass_path, output_path, project_id
+            task_id, _do_video_export,
+            project_id, ass_path, output_path, fmt,
         )
         return {"task_id": task_id, "message": f"{fmt.upper()} 视频导出任务已创建"}
     else:
@@ -1275,7 +1892,7 @@ def export_subtitles(project_id: str, req: ExportRequest):
 
 
 @router.get("/projects/{project_id}/export/download")
-def download_export(project_id: str, fmt: str = "srt"):
+def download_export(project_id: str, fmt: str = Query("srt", pattern="^(srt|vtt|ass|srt-bilingual|mp4|mkv)$")):
     """下载已导出的字幕文件"""
     if fmt in {"mp4", "mkv"}:
         from ..utils.config import EXPORTS_DIR
@@ -1292,15 +1909,157 @@ def download_export(project_id: str, fmt: str = "srt"):
 # 视频/音频文件访问
 # ============================
 
+@router.get("/player/youtube/{video_id}/session")
+def youtube_player_session(video_id: str, channel: str = Query(...)):
+    if not _YOUTUBE_PLAYER_ID.fullmatch(video_id):
+        raise HTTPException(400, "无效的 YouTube 视频 ID")
+    if not _PLAYER_CHANNEL.fullmatch(channel):
+        raise HTTPException(400, "无效的播放器频道")
+    path = f"/api/player/youtube/{video_id}"
+    separator = "&" if "?" in (signed := signed_media_url(path)) else "?"
+    return {"url": f"{signed}{separator}channel={channel}"}
+
+
+@router.get("/player/youtube/{video_id}", response_class=HTMLResponse)
+def youtube_player_bridge(video_id: str, channel: str = Query(...)):
+    """Serve a localhost-origin YouTube IFrame API bridge for the Tauri UI."""
+    if not _YOUTUBE_PLAYER_ID.fullmatch(video_id):
+        raise HTTPException(400, "无效的 YouTube 视频 ID")
+    if not _PLAYER_CHANNEL.fullmatch(channel):
+        raise HTTPException(400, "无效的播放器频道")
+    html = f"""<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="referrer" content="strict-origin-when-cross-origin">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <style>
+    html,body,#player{{width:100%;height:100%;margin:0;background:#000;overflow:hidden}}
+    iframe{{display:block;width:100%;height:100%;border:0}}
+  </style>
+</head>
+<body>
+<div id="player"></div>
+<script>
+(() => {{
+  const channel = {json.dumps(channel)};
+  const videoId = {json.dumps(video_id)};
+  let player = null;
+  let timer = null;
+  const emit = (type, payload = {{}}) => parent.postMessage(
+    {{ source: 'subtitle-factory-youtube', channel, type, ...payload }}, '*'
+  );
+  const snapshot = () => {{
+    if (!player || typeof player.getCurrentTime !== 'function') return;
+    emit('time', {{
+      time: Number(player.getCurrentTime() || 0),
+      duration: Number(player.getDuration() || 0),
+      state: Number(player.getPlayerState())
+    }});
+  }};
+  const stopTimer = () => {{ if (timer) clearInterval(timer); timer = null; }};
+  const startTimer = () => {{
+    stopTimer();
+    snapshot();
+    timer = setInterval(snapshot, 200);
+  }};
+  window.onYouTubeIframeAPIReady = () => {{
+    player = new YT.Player('player', {{
+      videoId,
+      width: '100%',
+      height: '100%',
+      playerVars: {{
+        autoplay: 0, controls: 1, enablejsapi: 1, fs: 0, playsinline: 1,
+        origin: window.location.origin
+      }},
+      events: {{
+        onReady: () => {{
+          emit('ready', {{
+            duration: Number(player.getDuration() || 0),
+            rates: player.getAvailablePlaybackRates() || [1],
+            volume: Number(player.getVolume() || 100),
+            muted: Boolean(player.isMuted())
+          }});
+          snapshot();
+        }},
+        onStateChange: event => {{
+          emit('state', {{ state: Number(event.data) }});
+          if (event.data === 1) startTimer(); else {{ stopTimer(); snapshot(); }}
+        }},
+        onPlaybackRateChange: event => emit('rate', {{ rate: Number(event.data || 1) }}),
+        onError: event => {{ stopTimer(); emit('error', {{ code: Number(event.data) }}); }},
+        onAutoplayBlocked: () => emit('autoplayBlocked')
+      }}
+    }});
+  }};
+  window.addEventListener('message', event => {{
+    const data = event.data;
+    if (event.source !== parent || !data || data.source !== 'subtitle-factory-host'
+        || data.channel !== channel || !player) return;
+    const value = Number(data.value);
+    if (data.command === 'play') player.playVideo();
+    if (data.command === 'pause') player.pauseVideo();
+    if (data.command === 'seek') player.seekTo(Math.max(0, value || 0), data.allowSeekAhead !== false);
+    if (data.command === 'volume') player.setVolume(Math.max(0, Math.min(100, value || 0)));
+    if (data.command === 'mute') player.mute();
+    if (data.command === 'unmute') player.unMute();
+    if (data.command === 'rate') player.setPlaybackRate(value || 1);
+    snapshot();
+  }});
+  const script = document.createElement('script');
+  script.src = 'https://www.youtube.com/iframe_api';
+  document.head.appendChild(script);
+  window.addEventListener('beforeunload', stopTimer);
+}})();
+</script>
+</body>
+</html>"""
+    return HTMLResponse(
+        html,
+        headers={
+            "Cache-Control": "no-store",
+            "Referrer-Policy": "strict-origin-when-cross-origin",
+            "Content-Security-Policy": (
+                "default-src 'none'; "
+                "script-src 'unsafe-inline' https://www.youtube.com https://s.ytimg.com; "
+                "frame-src https://www.youtube.com https://www.youtube-nocookie.com; "
+                "img-src https: data:; style-src 'unsafe-inline'; "
+                "connect-src https://www.youtube.com https://*.googlevideo.com"
+            ),
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
+
+
 @router.get("/projects/{project_id}/video")
 def get_video_file(project_id: str):
     """获取视频文件（供前端视频播放器使用）"""
     db = get_db()
     row = db.execute("SELECT video_path FROM projects WHERE id = ?", (project_id,)).fetchone()
     db.close()
-    if not row or not row["video_path"] or not os.path.exists(row["video_path"]):
+    path = Path(row["video_path"]).expanduser().resolve(strict=False) if row and row["video_path"] else None
+    if not path or not path.is_file() or path.suffix.lower() not in VIDEO_EXTENSIONS:
         raise HTTPException(404, "视频文件不存在")
-    return FileResponse(row["video_path"])
+    return FileResponse(path)
+
+
+@router.get("/projects/{project_id}/playback-info")
+def playback_info(project_id: str):
+    """Return read-only frame timing metadata; never mutates project state."""
+    db = get_db()
+    row = db.execute(
+        "SELECT video_path FROM projects WHERE id = ?", (project_id,),
+    ).fetchone()
+    db.close()
+    if not row or not row["video_path"] or not os.path.isfile(row["video_path"]):
+        raise HTTPException(404, "视频文件不存在")
+    try:
+        return get_playback_info(row["video_path"])
+    except ValueError as exc:
+        raise HTTPException(
+            422,
+            detail={"code": "VIDEO_METADATA_INVALID", "message": str(exc)},
+        ) from exc
 
 
 @router.get("/projects/{project_id}/thumbnail")
@@ -1311,9 +2070,10 @@ def get_thumbnail_file(project_id: str):
         "SELECT thumbnail_path FROM projects WHERE id = ?", (project_id,)
     ).fetchone()
     db.close()
-    if not row or not row["thumbnail_path"] or not os.path.isfile(row["thumbnail_path"]):
+    path = Path(row["thumbnail_path"]).expanduser().resolve(strict=False) if row and row["thumbnail_path"] else None
+    if not path or not path.is_file() or path.suffix.lower() not in IMAGE_EXTENSIONS:
         raise HTTPException(404, "视频封面不存在")
     return FileResponse(
-        row["thumbnail_path"],
+        path,
         headers={"Cache-Control": "no-cache"},
     )

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.3.2 — 2026-07-26
+
+- Added a verified nine-model catalog with use-case groups, immutable CPU/MLX sources, per-runtime readiness and resumable in-App downloads.
+- Added SHA-256 validation, disk preflight, staging installs, safe repair and source-drift release checks.
+- Added replay and frame-step player controls with real video frame-rate metadata and 30 FPS fallback.
+- Fixed subtitle-control hover contrast and expanded safe subtitle positioning to the full 0–100% range.
+- Locked release builds to the Apple professional workspace and added source, bundle and final-App UI marker checks.
+
 ## 0.3.1 — 2026-07-13
 
 - Fixed the transcription runtime contract so CPU, Apple GPU, Core ML and external Memo devices render correctly.

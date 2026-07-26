@@ -8,6 +8,7 @@ a release dependency or silently substituted for an explicitly selected model.
 from __future__ import annotations
 
 import json
+import hashlib
 import logging
 import math
 import os
@@ -21,6 +22,7 @@ import tempfile
 import threading
 import urllib.error
 import urllib.request
+import uuid
 import wave
 from dataclasses import dataclass
 from pathlib import Path
@@ -53,6 +55,8 @@ SILERO_VAD_URL = (
 PARAKEET_ARCHIVE_BYTES = 487_170_055
 SILERO_VAD_BYTES = 643_854
 PARAKEET_EXTRACTED_ESTIMATE_BYTES = 671_000_000
+PARAKEET_ARCHIVE_SHA256 = "5793d0fd397c5778d2cf2126994d58e9d56b1be7c04d13c7a15bb1b4eafb16bf"
+SILERO_VAD_SHA256 = "9e2449e1087496d8d4caba907f23e0bd3f78d91fa552479bb9c23ac09cbb1fd6"
 
 # Sizes are deliberately lower bounds: they catch incomplete extraction while
 # allowing an upstream-compatible re-export to remain usable.
@@ -84,6 +88,15 @@ _COREML_REQUIRED_MODEL_ENTRIES = (
 )
 
 
+class ParakeetModelError(RuntimeError):
+    def __init__(self, message: str, error_code: str, suggestion: str):
+        super().__init__(message)
+        self.error_code = error_code
+        self.recoverable = True
+        self.available_actions = ["retry", "repair"]
+        self.suggestion = suggestion
+
+
 @dataclass(frozen=True)
 class CoreMLRuntime:
     model_dir: Path
@@ -106,6 +119,7 @@ class ParakeetSegment:
     start: float
     end: float
     text: str
+    timings: tuple[dict, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -348,7 +362,11 @@ def _segments_from_coreml_json(payload: dict) -> tuple[list[ParakeetSegment], fl
         if duration:
             end = min(duration, end)
         if end > start:
-            segments.append(ParakeetSegment(start=start, end=end, text=text))
+            segment_timings = tuple(
+                {"text": item["token"], "start": item["start"], "end": item["end"]}
+                for item in group
+            )
+            segments.append(ParakeetSegment(start=start, end=end, text=text, timings=segment_timings))
     return segments, duration
 
 
@@ -585,7 +603,27 @@ def _download_file(
     destination.parent.mkdir(parents=True, exist_ok=True)
     partial = destination.with_name(f"{destination.name}.part")
 
-    if destination.is_file() and destination.stat().st_size == expected_size:
+    expected_sha256 = {
+        PARAKEET_ARCHIVE_URL: PARAKEET_ARCHIVE_SHA256,
+        SILERO_VAD_URL: SILERO_VAD_SHA256,
+    }.get(url)
+
+    def verified(path: Path) -> bool:
+        if not path.is_file() or path.stat().st_size != expected_size:
+            return False
+        if not expected_sha256:
+            return True
+        digest = hashlib.sha256()
+        with path.open("rb") as source:
+            while True:
+                checkpoint()
+                chunk = source.read(4 * 1024 * 1024)
+                if not chunk:
+                    break
+                digest.update(chunk)
+        return digest.hexdigest() == expected_sha256
+
+    if verified(destination):
         progress_callback(expected_size, expected_size, False)
         return
     if destination.exists():
@@ -597,8 +635,11 @@ def _download_file(
         existing = 0
     if existing == expected_size:
         os.replace(partial, destination)
-        progress_callback(expected_size, expected_size, True)
-        return
+        if verified(destination):
+            progress_callback(expected_size, expected_size, True)
+            return
+        destination.unlink(missing_ok=True)
+        existing = 0
 
     checkpoint()
     headers = {
@@ -611,8 +652,24 @@ def _download_file(
     request = urllib.request.Request(url, headers=headers)
     try:
         response = urllib.request.urlopen(request, timeout=60)
-    except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError) as exc:
-        raise RuntimeError(f"无法连接官方模型下载地址：{exc}") from exc
+    except urllib.error.HTTPError as exc:
+        if exc.code in {404, 410}:
+            raise ParakeetModelError(
+                f"官方模型来源已变化：HTTP {exc.code}",
+                "MODEL_SOURCE_CHANGED",
+                "请更新字幕工厂或重新运行模型来源验证",
+            ) from exc
+        raise ParakeetModelError(
+            f"无法连接官方模型下载地址：HTTP {exc.code}",
+            "MODEL_NETWORK_UNREACHABLE",
+            "请检查网络或代理后重试；已下载部分可断点续传",
+        ) from exc
+    except (urllib.error.URLError, TimeoutError) as exc:
+        raise ParakeetModelError(
+            f"无法连接官方模型下载地址：{exc}",
+            "MODEL_NETWORK_UNREACHABLE",
+            "请检查网络或代理后重试；已下载部分可断点续传",
+        ) from exc
 
     try:
         status = getattr(response, "status", 200)
@@ -636,18 +693,31 @@ def _download_file(
         # Keep the .part file so the next task can resume this large download.
         raise
     except OSError as exc:
-        raise RuntimeError(f"写入模型缓存失败（请检查磁盘空间）：{exc}") from exc
+        raise ParakeetModelError(
+            f"写入模型缓存失败：{exc}",
+            "MODEL_DISK_SPACE_INSUFFICIENT",
+            "请释放磁盘空间后重试；现有可用模型不会被删除",
+        ) from exc
     finally:
         response.close()
 
     actual_size = partial.stat().st_size if partial.is_file() else 0
     if actual_size != expected_size:
-        raise RuntimeError(
+        raise ParakeetModelError(
             "模型下载不完整："
             f"收到 {_format_mib(actual_size)}，预期 {_format_mib(expected_size)}；"
-            "可再次开始任务以断点续传"
+            "可再次开始任务以断点续传",
+            "MODEL_NETWORK_UNREACHABLE",
+            "请重试，下载器会从现有进度继续",
         )
     os.replace(partial, destination)
+    if not verified(destination):
+        destination.unlink(missing_ok=True)
+        raise ParakeetModelError(
+            "模型完整性校验失败：官方文件 SHA-256 与发布清单不一致",
+            "MODEL_INTEGRITY_FAILED",
+            "请执行修复；现有可用模型仍然保留",
+        )
 
 
 def _safe_extract_tar(
@@ -728,9 +798,10 @@ def ensure_parakeet_assets(
     repair: bool = False,
 ) -> ParakeetAssets:
     """Return complete cached assets, downloading official files on first use."""
-    root = Path(cache_root or MODELS_DIR).expanduser().resolve()
-    root.mkdir(parents=True, exist_ok=True)
-    assets = _asset_paths(root)
+    live_root = Path(cache_root or MODELS_DIR).expanduser().resolve()
+    live_root.mkdir(parents=True, exist_ok=True)
+    live_assets = _asset_paths(live_root)
+    assets = live_assets
     if _model_cache_is_valid(assets) and not repair:
         task_manager.update_task(
             task_id,
@@ -745,9 +816,15 @@ def ensure_parakeet_assets(
         return assets
 
     with _DOWNLOAD_LOCK:
+        preserve_existing = repair and _model_cache_is_valid(live_assets)
+        root = (
+            live_root / f".{PARAKEET_MODEL_DIR_NAME}.repair"
+            if preserve_existing else live_root
+        )
+        root.mkdir(parents=True, exist_ok=True)
         assets = _asset_paths(root)
-        if _model_cache_is_valid(assets) and not repair:
-            return assets
+        if _model_cache_is_valid(live_assets) and not repair:
+            return live_assets
 
         archive = root / f"{PARAKEET_MODEL_DIR_NAME}.tar.bz2"
         if repair:
@@ -755,7 +832,7 @@ def ensure_parakeet_assets(
                 task_id,
                 step="repairing_model",
                 progress=1,
-                message="正在清理 Parakeet 模型缓存并重新校验...",
+                message="正在暂存目录重新下载并校验 Parakeet 模型...",
                 details={
                     "model_download": {
                         "status": "repairing",
@@ -763,13 +840,24 @@ def ensure_parakeet_assets(
                     }
                 },
             )
-            shutil.rmtree(assets.model_dir, ignore_errors=True)
-            shutil.rmtree(root / f".{PARAKEET_MODEL_DIR_NAME}.extracting", ignore_errors=True)
-            assets.vad.unlink(missing_ok=True)
-            archive.unlink(missing_ok=True)
-            archive.with_name(f"{archive.name}.part").unlink(missing_ok=True)
-            assets.vad.with_name(f"{assets.vad.name}.part").unlink(missing_ok=True)
-            assets = _asset_paths(root)
+        estimated_needed = (
+            PARAKEET_ARCHIVE_BYTES + PARAKEET_EXTRACTED_ESTIMATE_BYTES
+            + SILERO_VAD_BYTES + 128 * 1024 * 1024
+        )
+        partial_bytes = sum(
+            path.stat().st_size
+            for path in (
+                archive, archive.with_name(f"{archive.name}.part"),
+                assets.vad, assets.vad.with_name(f"{assets.vad.name}.part"),
+            )
+            if path.is_file()
+        )
+        if shutil.disk_usage(root).free < max(0, estimated_needed - partial_bytes):
+            raise ParakeetModelError(
+                "模型下载空间不足；请至少保留约 1.3 GB 可用空间",
+                "MODEL_DISK_SPACE_INSUFFICIENT",
+                "释放磁盘空间后重试；现有可用模型不会被删除",
+            )
         last_reported_percent = -1
         model_files_ready = _model_files_are_valid(assets)
         if not model_files_ready:
@@ -927,7 +1015,44 @@ def ensure_parakeet_assets(
                 detail=str(exc),
                 suggestion="请检查网络和磁盘空间后重试；未完成文件会用于断点续传",
             )
-            raise RuntimeError(f"Parakeet 模型准备失败：{exc}") from exc
+            if isinstance(exc, ParakeetModelError):
+                raise
+            code = (
+                "MODEL_INTEGRITY_FAILED"
+                if any(word in str(exc) for word in ("校验", "损坏", "解压"))
+                else "MODEL_INSTALL_FAILED"
+            )
+            raise ParakeetModelError(
+                f"Parakeet 模型准备失败：{exc}",
+                code,
+                "请重试修复；原有可用模型仍然保留",
+            ) from exc
+
+        if preserve_existing:
+            backup_model = live_assets.model_dir.with_name(
+                f".{live_assets.model_dir.name}.backup-{uuid.uuid4().hex}"
+            )
+            backup_vad = live_assets.vad.with_name(
+                f".{live_assets.vad.name}.backup-{uuid.uuid4().hex}"
+            )
+            try:
+                os.replace(live_assets.model_dir, backup_model)
+                os.replace(live_assets.vad, backup_vad)
+                os.replace(assets.model_dir, live_assets.model_dir)
+                os.replace(assets.vad, live_assets.vad)
+            except OSError as exc:
+                if not live_assets.model_dir.exists() and backup_model.exists():
+                    os.replace(backup_model, live_assets.model_dir)
+                if not live_assets.vad.exists() and backup_vad.exists():
+                    os.replace(backup_vad, live_assets.vad)
+                raise RuntimeError(f"Parakeet 模型原子替换失败：{exc}") from exc
+            finally:
+                if live_assets.model_dir.exists():
+                    shutil.rmtree(backup_model, ignore_errors=True)
+                if live_assets.vad.exists():
+                    backup_vad.unlink(missing_ok=True)
+                shutil.rmtree(root, ignore_errors=True)
+            assets = live_assets
 
         task_manager.update_task(
             task_id,

@@ -5,6 +5,7 @@ from urllib.parse import urlparse
 
 from ..models.database import get_db
 from .ai_settings import PROVIDER_PRESETS
+from .secret_store import get_secret, keychain_enabled, save_secret
 
 
 PRESETS = {item["id"]: item for item in PROVIDER_PRESETS}
@@ -37,6 +38,7 @@ def list_provider_cards(include_secret: bool = False) -> list[dict]:
     for row in rows:
         item = dict(row); preset = PRESETS.get(item["provider_id"], {})
         item.update({"name": preset.get("name", item["provider_id"]), "models": preset.get("models", [])})
+        item["api_key"] = get_secret(f"provider:{item['provider_id']}", item.get("api_key", ""))
         item["enabled"] = bool(item["enabled"]); item["has_api_key"] = bool(item["api_key"])
         if not include_secret: item["api_key"] = ""
         result.append(item)
@@ -48,6 +50,7 @@ def get_provider(provider_id: str, include_secret: bool = True) -> dict:
     row = db.execute("SELECT * FROM ai_provider_configs WHERE provider_id=?", (provider_id,)).fetchone(); db.close()
     if not row: raise ValueError("AI 供应商不存在")
     result = dict(row)
+    result["api_key"] = get_secret(f"provider:{provider_id}", result.get("api_key", ""))
     if not include_secret:
         result["has_api_key"] = bool(result["api_key"]); result["api_key"] = ""
     return result
@@ -58,10 +61,12 @@ def save_provider(provider_id: str, base_url: str, model: str, api_key: str | No
     secret = current["api_key"] if not api_key else api_key.strip()
     model = (model or "").strip()
     if not model: raise ValueError("模型名称不能为空")
+    save_secret(f"provider:{provider_id}", secret)
+    stored_secret = "" if keychain_enabled() else secret
     db = get_db(); db.execute(
-        """UPDATE ai_provider_configs SET base_url=?,api_key=?,model=?,enabled=?,updated_at=?,
+        """UPDATE ai_provider_configs SET base_url=?,api_key=?,model=?,enabled=?,updated_at=?,has_api_key=?,keychain_ref=?,
            last_test_status='',last_test_at='',last_latency_ms=0 WHERE provider_id=?""",
-        (_validate_url(base_url), secret, model, int(enabled), time.strftime("%Y-%m-%d %H:%M:%S"), provider_id),
+        (_validate_url(base_url), stored_secret, model, int(enabled), time.strftime("%Y-%m-%d %H:%M:%S"), int(bool(secret)), f"provider:{provider_id}" if keychain_enabled() else None, provider_id),
     ); db.commit(); db.close()
     return get_provider(provider_id, False)
 

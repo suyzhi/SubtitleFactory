@@ -8,6 +8,7 @@
 import json
 import logging
 import time
+import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import List
 
@@ -15,6 +16,8 @@ from ..utils.task_manager import TaskCancelled, task_manager
 from ..models.database import get_db
 from .ai_providers import assigned_provider
 from .subtitle_cleaner import _validate_batch_results
+from .terminology import exact_memory, relevant_terms, remember_translation
+from .editor import SEGMENT_COLUMNS
 
 logger = logging.getLogger(__name__)
 
@@ -25,20 +28,49 @@ def translate_subtitles(task_id: str, project_id: str, target_language: str = "z
     使用 clean_text（如果有）否则用 raw_text。
     结果写入 translated_text。
     """
-    ai = assigned_provider("translate", provider_id, model)
-
     db = get_db()
     rows = db.execute(
         """SELECT id, idx, raw_text, clean_text FROM segments
            WHERE project_id = ? AND locked = 0 ORDER BY idx""",
         (project_id,)
     ).fetchall()
+    project = db.execute("SELECT language,edit_revision FROM projects WHERE id=?", (project_id,)).fetchone()
     db.close()
 
     if not rows:
         logger.info("[Translator] 没有需要翻译的字幕")
         task_manager.add_log(task_id, "info", "translating", "没有需要翻译的字幕")
         return []
+
+    source_language = (project["language"] if project else "auto") or "auto"
+    base_revision = int(project["edit_revision"] or 0) if project else 0
+    prefilled_results = []
+    pending_rows = []
+    for row in rows:
+        source_text = row["clean_text"] if row["clean_text"] else row["raw_text"]
+        remembered = exact_memory(source_text, source_language, target_language)
+        if remembered:
+            prefilled_results.append({"id": str(row["idx"]), "translated_text": remembered})
+        else:
+            pending_rows.append(row)
+
+    terms = relevant_terms(
+        project_id,
+        [(row["clean_text"] or row["raw_text"] or "") for row in pending_rows],
+    )
+    term_instruction = ""
+    if terms:
+        mappings = [
+            f"- {item['source_text']} => {item['source_text'] if item['do_not_translate'] else item['target_text']}"
+            for item in terms
+        ]
+        term_instruction = "\n\n必须遵循以下项目术语（禁止翻译项保持源词）：\n" + "\n".join(mappings)
+
+    ai = (
+        assigned_provider("translate", provider_id, model)
+        if pending_rows
+        else {"provider": "translation-memory", "model": "exact", "base_url": "", "api_key": ""}
+    )
 
     system_prompt = f"""你是专业视频字幕翻译助手。请把字幕翻译成目标语言。
 
@@ -61,10 +93,10 @@ def translate_subtitles(task_id: str, project_id: str, target_language: str = "z
 {{"context_before": [...], "items": [{{"id": "1", "text": "..."}}], "context_after": [...]}}
 
 输出格式：
-[{{"id": "1", "translated_text": "..."}}]"""
+[{{"id": "1", "translated_text": "..."}}]{term_instruction}"""
 
     all_segments = []
-    for r in rows:
+    for r in pending_rows:
         source_text = r["clean_text"] if r["clean_text"] else r["raw_text"]
         all_segments.append({"id": str(r["idx"]), "text": source_text})
 
@@ -78,7 +110,7 @@ def translate_subtitles(task_id: str, project_id: str, target_language: str = "z
     # 40 条一批，并额外附带前后各 3 条上下文。相比逐句翻译能显著改善
     # 指代和术语一致性，又不会明显增加 API 调用次数或响应长度。
     batch_size = 40
-    all_results = []
+    all_results = list(prefilled_results)
     failed_batches = 0
     retry_count = 0
     total_batches = (total + batch_size - 1) // batch_size
@@ -115,8 +147,17 @@ def translate_subtitles(task_id: str, project_id: str, target_language: str = "z
     task_manager.checkpoint(task_id)
     db = get_db()
     updated = 0
+    memory_records = []
     try:
         db.execute("BEGIN IMMEDIATE")
+        current_revision = int(db.execute("SELECT edit_revision FROM projects WHERE id=?", (project_id,)).fetchone()[0] or 0)
+        if current_revision != base_revision:
+            error = RuntimeError("翻译期间字幕已被编辑；AI 结果未覆盖当前内容")
+            error.error_code = "EDIT_REVISION_CONFLICT"; error.recoverable = True
+            error.available_actions = ["retry"]
+            raise error
+        before_rows = [dict(row) for row in db.execute("SELECT * FROM segments WHERE project_id=? ORDER BY idx", (project_id,))]
+        before = [{column: row.get(column) for column in SEGMENT_COLUMNS} for row in before_rows]
         for item_index, item in enumerate(all_results):
             if item_index % 20 == 0:
                 task_manager.checkpoint(task_id)
@@ -128,15 +169,40 @@ def translate_subtitles(task_id: str, project_id: str, target_language: str = "z
                     (translated, project_id, idx)
                 )
                 updated += 1
+                source_row = next((row for row in rows if int(row["idx"]) == idx), None)
+                if source_row:
+                    memory_records.append((
+                        source_row["clean_text"] or source_row["raw_text"] or "",
+                        translated,
+                        "memory" if item in prefilled_results else "machine",
+                    ))
             except (ValueError, KeyError):
                 logger.warning(f"[Translator] 跳过无效结果: {item}")
         task_manager.checkpoint(task_id)
+        after_rows = [dict(row) for row in db.execute("SELECT * FROM segments WHERE project_id=? ORDER BY idx", (project_id,))]
+        after = [{column: row.get(column) for column in SEGMENT_COLUMNS} for row in after_rows]
+        operation_id = str(uuid.uuid4()); next_revision = base_revision + 1
+        db.execute("DELETE FROM edit_operations WHERE project_id=? AND undone=1", (project_id,))
+        db.execute(
+            """INSERT INTO edit_operations(id,project_id,operation,before_json,after_json,base_revision,result_revision,undone,created_at)
+               VALUES (?,?,?,?,?,?,?,0,datetime('now','localtime'))""",
+            (operation_id, project_id, "ai_translate", json.dumps(before, ensure_ascii=False), json.dumps(after, ensure_ascii=False), base_revision, next_revision),
+        )
+        db.execute("UPDATE projects SET edit_revision=?,updated_at=datetime('now','localtime') WHERE id=?", (next_revision, project_id))
+        db.execute("""DELETE FROM edit_operations WHERE id IN (
+            SELECT id FROM edit_operations WHERE project_id=? AND undone=0
+            ORDER BY result_revision DESC LIMIT -1 OFFSET 500)""", (project_id,))
         db.commit()
     except Exception:
         db.rollback()
         raise
     finally:
         db.close()
+
+    for source_text, translated, origin in memory_records:
+        remember_translation(
+            source_text, translated, source_language, target_language, origin=origin,
+        )
 
     logger.info(f"[Translator] 翻译完成: 更新 {updated} 条")
     task_manager.update_task(

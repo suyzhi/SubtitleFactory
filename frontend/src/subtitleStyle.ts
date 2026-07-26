@@ -1,6 +1,16 @@
 import type { SubtitleStyleSettings } from './types';
 
 const STORAGE_KEY = 'subtitle_factory_subtitle_style';
+export const SUBTITLE_POSITION_MIN = 0;
+export const SUBTITLE_POSITION_MAX = 100;
+export const SUBTITLE_POSITION_DEFAULT = 82;
+
+export function clampSubtitlePosition(value: unknown): number {
+  if (value === null || value === undefined || value === '') return SUBTITLE_POSITION_DEFAULT;
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return SUBTITLE_POSITION_DEFAULT;
+  return Math.max(SUBTITLE_POSITION_MIN, Math.min(SUBTITLE_POSITION_MAX, numeric));
+}
 
 export const SUBTITLE_FONT_OPTIONS = [
   { label: '系统黑体', value: 'Inter, "PingFang SC", "Helvetica Neue", sans-serif' },
@@ -14,7 +24,7 @@ export const SUBTITLE_FONT_OPTIONS = [
 
 export const DEFAULT_SUBTITLE_STYLE: SubtitleStyleSettings = {
   mode: 'bilingual_original_first',
-  verticalPosition: 82,
+  verticalPosition: SUBTITLE_POSITION_DEFAULT,
   fontSize: 22,
   originalFontSize: 22,
   translatedFontSize: 22,
@@ -43,6 +53,7 @@ export function loadSubtitleStyle(): SubtitleStyleSettings {
       fontFamily: typeof parsed.fontFamily === 'string' ? parsed.fontFamily : DEFAULT_SUBTITLE_STYLE.fontFamily,
       originalTextColor: typeof parsed.originalTextColor === 'string' ? parsed.originalTextColor : legacyColor,
       translatedTextColor: typeof parsed.translatedTextColor === 'string' ? parsed.translatedTextColor : legacyColor,
+      verticalPosition: clampSubtitlePosition(parsed.verticalPosition),
     };
   } catch {
     return { ...DEFAULT_SUBTITLE_STYLE };
@@ -51,7 +62,10 @@ export function loadSubtitleStyle(): SubtitleStyleSettings {
 
 export function saveSubtitleStyle(style: SubtitleStyleSettings) {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(style));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({
+      ...style,
+      verticalPosition: clampSubtitlePosition(style.verticalPosition),
+    }));
   } catch {
     // localStorage 不可用时仍允许本次会话内继续调整。
   }

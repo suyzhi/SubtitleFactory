@@ -33,6 +33,9 @@ vendor/ffmpeg/source/
 *.dmg
 *.zip
 *.sha256
+release-archive/
+artifacts/app-backups/
+artifacts/youtube-download-validation/
 
 # Private user data and caches
 backend/data/
