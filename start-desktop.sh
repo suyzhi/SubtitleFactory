@@ -10,6 +10,15 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m'
 
+cleanup_build_products() {
+    rm -rf "$DIR/frontend/dist"
+    rm -rf "$DIR/frontend/src-tauri/target"
+    rm -rf "$DIR/frontend/src-tauri/backend-runtime"
+    rm -rf "$DIR/backend/build" "$DIR/backend/dist"
+    find "$DIR/backend" "$DIR/frontend" -type d \( -name .pytest_cache -o -name __pycache__ \) -prune -exec rm -rf {} +
+}
+trap cleanup_build_products EXIT
+
 echo -e "${GREEN}🎬 字幕工厂 - 一键启动${NC}"
 echo "========================"
 
@@ -72,46 +81,8 @@ if [ ! -d "$DIR/frontend/node_modules" ]; then
     cd "$DIR"
 fi
 
-# ── 启动后端 ──
-echo -e "${GREEN}🚀 启动后端服务...${NC}"
-cd "$DIR/backend"
-python3 -m uvicorn app.main:app --host 127.0.0.1 --port 8000 &
-BACKEND_PID=$!
-cd "$DIR"
-
-# ── 等待后端就绪 ──
-echo -e "${YELLOW}⏳ 等待后端启动...${NC}"
-MAX_WAIT=30
-WAITED=0
-while [ $WAITED -lt $MAX_WAIT ]; do
-    if curl -s http://127.0.0.1:8000/api/health 2>/dev/null | grep -q '"status":"ok"'; then
-        echo -e "${GREEN}✅ 后端已就绪 (http://127.0.0.1:8000)${NC}"
-        break
-    fi
-    sleep 1
-    WAITED=$((WAITED + 1))
-done
-
-if [ $WAITED -ge $MAX_WAIT ]; then
-    echo -e "${RED}❌ 后端启动超时，请检查 backend/logs/app.log${NC}"
-    kill $BACKEND_PID 2>/dev/null
-    exit 1
-fi
-
-# ── 终止时清理 ──
-cleanup() {
-    echo ""
-    echo -e "${YELLOW}🛑 正在关闭服务...${NC}"
-    kill $BACKEND_PID 2>/dev/null
-    wait $BACKEND_PID 2>/dev/null
-    echo -e "${GREEN}✅ 已关闭${NC}"
-}
-trap cleanup EXIT INT TERM
-
 # ── 启动 Tauri 桌面端 ──
 echo -e "${GREEN}🚀 启动桌面应用...${NC}"
 echo -e "${YELLOW}💡 首次启动需要编译 Rust，可能需要 1-3 分钟${NC}"
 cd "$DIR/frontend"
 npx tauri dev
-
-# Tauri 退出后，cleanup 会自动执行

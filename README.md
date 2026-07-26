@@ -1,10 +1,16 @@
-# 字幕工厂 0.2
+# 字幕工厂 0.3.2
 
-字幕工厂是一款面向 Apple Silicon Mac 的本地字幕工作台：导入本地视频或粘贴 YouTube 链接后，自动完成下载、音频提取和转写，再按需进行 AI 整理、翻译与导出。
+字幕工厂是一款面向 Apple Silicon Mac 的字幕工作台：导入本地视频或粘贴 YouTube 链接后，可选择网页播放或完整下载，自动准备音频并转写，再按需进行 AI 整理、翻译与导出。
 
-## v0.2 重点
+## v0.3.2 当前能力
 
+- 安全的本地工作台：动态后端端口、会话令牌、项目级签名媒体 URL 与 macOS Keychain 密钥存储。
+- 专业编辑器：波形时间轴、时间码编辑、拆分/合并、批量替换、持久化撤销/重做与可恢复草稿。
+- 离线质检、项目/全局术语表、翻译记忆、说话人识别与 macOS Vision 硬字幕 OCR。
+- 多音轨和范围转写、SRT/VTT/ASS 导入、批量项目、监听文件夹、样式模板及 `.sfproject` 项目包。
+- 数据库顺序迁移、迁移前备份、每日/每周自动备份与脱敏诊断包。
 - 发布版内置 arm64 FFmpeg/FFprobe，YouTube 高清画面与音频合并不依赖 Homebrew。
+- YouTube 项目支持网页播放与下载至本地两种模式；网页模式只准备转写音频，网页受限或导出成片时按需下载视频。
 - “自动选择”安全默认 Whisper Small；Memo Core ML 仅作为检测到后才显示的可选外部加速器。
 - Parakeet ONNX 下载到 App 自己的数据目录，不写入源码或 App 包。
 - 新增项目回收站、恢复、永久删除与运行中删除确认。
@@ -20,33 +26,37 @@
 ./start-desktop.sh
 ```
 
-已构建的 v0.2 App 位于：
+已构建的 v0.3.2 App 位于：
 
 ```text
-frontend/src-tauri/target/aarch64-apple-darwin/release/bundle/macos/字幕工厂.app
+字幕工厂.app
 ```
 
 可在 Finder 中双击，或从仓库根目录运行：
 
 ```bash
-open "frontend/src-tauri/target/aarch64-apple-darwin/release/bundle/macos/字幕工厂.app"
+open "字幕工厂.app"
 ```
 
-DMG 位于：
+DMG 与校验文件位于仓库根目录：
 
 ```text
-frontend/src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/
+字幕工厂_0.3.2_aarch64.dmg
+字幕工厂_0.3.2_aarch64.dmg.sha256
 ```
 
 ## 使用流程
 
 1. 点击顶栏“导入”选择本地视频，或点击“链接”粘贴 YouTube URL。
-2. App 默认自动完成下载、音频提取和转写。
+   粘贴播放列表链接时会先显示条目预览，可选择批量转写、AI 整理和 AI 翻译；创建后在首页“播放列表批量任务”中折叠归组。
+2. App 按“设置 → 下载与存储”中的默认媒体模式自动准备素材并转写。网页模式无需等待完整视频下载。
 3. 点击紧凑流程栏中的步骤，只会打开对应检查器；AI 整理与翻译仍需明确确认。
 4. 在“字幕 / 样式 / 导出 / 日志”标签页继续编辑并导出。
 5. 项目右键菜单提供打开、重命名、移动分组和移入回收站。
 
-YouTube 链接中的 `t=110s`、`start`、`time_continue` 等播放定位参数会被移除，始终下载完整视频。下载失败会保留原项目，可直接重新下载。
+YouTube 链接中的 `t=110s`、`start`、`time_continue` 等播放定位参数会被移除。网页模式通过 YouTube IFrame Player 播放并只在本机准备转写音频；下载至本地模式会获取完整视频。两种模式共用字幕覆盖层、时间轴、倍速、逐帧、当前字幕循环、剧院和全屏功能。网页播放器不可用时可自动准备本地副本，MP4/MKV 导出也会先按需下载视频。失败不会删除项目或已有媒体。
+
+网页播放依赖网络、视频的可嵌入状态和 YouTube 服务可用性，不会绕过地区、年龄、登录或版权限制。请只处理你有权使用的内容。
 
 ## 设置中心
 
@@ -54,20 +64,21 @@ YouTube 链接中的 `t=110s`、`start`、`time_continue` 等播放定位参数�
 - 转写：默认模型、源语言、模型状态、准备/修复与本地路径。
 - AI 服务：服务商、Base URL、模型、API Key 与连接测试。
 - 翻译：默认目标语言、双语顺序和常用语言。
-- 下载与存储：画质、容器、FFmpeg、yt-dlp、输出目录与磁盘空间。
+- 下载与存储：新项目默认媒体模式、画质、容器、FFmpeg、yt-dlp、输出目录与磁盘空间。
 - 外观与动画：主题、界面密度与动画开关。
 - 快捷键与关于：版本、数据目录和诊断信息。
 
-API Key、自定义模型路径和 CLI 路径只保存在本机 App 数据库中，不进入 Git、默认配置、日志或 Release。环境变量路径仅用于开发和高级排错，冻结发布版默认不继承。
+API Key 在发布版中保存到 macOS Keychain；数据库只保留配置状态。密钥、完整本机路径、媒体和字幕正文不会进入脱敏诊断包。环境变量路径仅用于开发和高级排错，冻结发布版默认不继承。
 
 ## 转写模型
 
 | 选择 | 行为 |
 |---|---|
 | 自动选择 | 默认使用 Whisper Small，不依赖 Memo |
-| Whisper | 按需下载到 App 数据目录中的 `models/whisper/` |
+| Whisper | Tiny、Base、Small、Medium、Large V3、Large V3 Turbo，按 CPU/Apple GPU 下载固定提交 |
+| Distil-Whisper Large V3 | 仅英语；其他语言会提示改用 Whisper Small |
 | Parakeet ONNX | 由模型管理器下载并原子校验到 App 数据目录 |
-| Parakeet Core ML | 仅在检测到完整外部模型和兼容 CLI 时显示为可用 |
+| Parakeet Core ML | 仅校验用户本机已有的 Memo 模型，不伪装成网络下载 |
 | 自定义模型 | 通过原生文件选择器设置；失效时自动回退 Whisper Small |
 
 选择 Parakeet 不支持的源语言时，开始任务前会提示切换到 Whisper。
@@ -80,7 +91,9 @@ macOS 发布版数据目录：
 ~/Library/Application Support/com.subtitlefactory.desktop/data/
 ```
 
-其中包含项目媒体、字幕、导出、模型、日志、本机设置和 SQLite 数据库。移入回收站不会删除这些文件；只有永久删除或清空回收站才会清理对应项目数据。
+其中包含项目媒体、字幕、导出、模型、日志、本机设置和 SQLite 数据库。网页模式播放视频时，播放器会直接连接 YouTube；音频、字幕和项目数据仍保存在本机。移入回收站不会删除这些文件；只有永久删除或清空回收站才会清理对应项目数据。
+
+详细文档：[隐私说明](docs/PRIVACY.md) · [云端增强授权](docs/CLOUD_AUTHORIZATION.md) · [编辑器快捷键](docs/SHORTCUTS.md) · [备份与故障恢复](docs/RECOVERY.md)
 
 ## 开发环境
 
@@ -95,15 +108,7 @@ macOS 发布版数据目录：
 浏览器开发模式：
 
 ```bash
-# 终端 1
-cd backend
-source .venv/bin/activate
-python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
-
-# 终端 2
-cd frontend
-npm install
-npm run dev
+./start.sh
 ```
 
 桌面开发模式也可分开运行：
@@ -131,11 +136,12 @@ npx tauri dev
 
 发布脚本会：
 
-1. 检查 FFmpeg/FFprobe 存在、可执行、纯 arm64、未启用 `--enable-nonfree`，且没有 Homebrew 动态依赖。
-2. 用 PyInstaller 构建 FastAPI、yt-dlp、faster-whisper 与 sherpa-onnx 后端。
-3. 运行前端 lint、类型检查和生产构建。
-4. 生成 arm64 `.app` 与 `.dmg`。
-5. 验证 App 签名和包内运行时，并生成 DMG SHA-256 文件。
+1. 验证 Hugging Face/GitHub 模型来源、固定提交、文件大小和哈希元数据。
+2. 运行后端测试、前端测试和 lint。
+3. 检查 FFmpeg/FFprobe 与 arm64 运行时并构建后端 sidecar。
+4. 只执行一次正式前端构建，再生成 arm64 `.app` 与 `.dmg`。
+5. 检查正确新版 UI 标记、签名、包内运行时和 DMG SHA-256。
+6. 退出时清理可重建的前端、Rust、sidecar 和测试缓存。
 
 任一运行时检查失败都会阻止生成 Release。内置 FFmpeg 8.1.2 从 [FFmpeg 官方源码](https://ffmpeg.org/releases/ffmpeg-8.1.2.tar.xz) 构建；许可证和构建信息会放入 App 的 `THIRD_PARTY_LICENSES/ffmpeg/`。
 
@@ -146,6 +152,9 @@ npx tauri dev
 | GET | `/api/health` | 后端、FFmpeg、yt-dlp、磁盘、输出目录和模型状态 |
 | GET | `/api/projects` | 正常项目列表 |
 | GET | `/api/projects?deleted=true` | 回收站列表 |
+| PATCH | `/api/projects/{id}/media-mode` | 切换单个 YouTube 项目的网页/本地模式 |
+| POST | `/api/projects/{id}/prepare-audio` | 只下载并准备转写音频 |
+| POST | `/api/projects/{id}/materialize-video` | 按需下载并保留本地视频副本 |
 | POST | `/api/projects/{id}/trash` | 移入回收站；活动任务需 `terminate=true` 确认 |
 | POST | `/api/projects/{id}/restore` | 恢复项目 |
 | DELETE | `/api/projects/{id}?permanent=true` | 永久删除项目及其数据 |
@@ -154,6 +163,9 @@ npx tauri dev
 | POST | `/api/settings/app/validate-path` | 校验模型、CLI、FFmpeg 和目录路径 |
 | GET | `/api/transcription/models` | 模型来源、就绪与下载状态 |
 | POST | `/api/transcription/models/{id}/prepare` | 下载、校验或修复 App 管理模型 |
+| POST | `/api/batches/playlist/preview` | 只读取 YouTube 播放列表元数据和条目顺序 |
+| POST | `/api/batches/playlist` | 创建或增量同步播放列表批次并启动所选流水线 |
+| GET | `/api/batches?kind=youtube_playlist` | 获取首页播放列表批次、子项目和逐阶段状态 |
 
 现有转写、整理、翻译、字幕编辑和导出接口保持兼容，完整交互文档可在后端启动后打开 [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)。
 
@@ -162,10 +174,12 @@ npx tauri dev
 | 快捷键 | 操作 |
 |---|---|
 | `Space` | 播放 / 暂停 |
+| `R` | 从头重播 |
+| `,` / `.` | 前一帧 / 后一帧 |
 | `T` | 剧院模式 |
 | `Esc` | 关闭弹窗、抽屉或退出剧院模式 |
 | `Return` | 保存当前字幕编辑 |
 
 ## 发布说明
 
-当前构建为未公证的 ad-hoc 签名版本。首次启动若被 macOS 阻止，可在“系统设置 → 隐私与安全性”中确认打开。正式外部分发仍建议配置 Apple Developer ID 签名和 notarization。
+当前 v0.3.2 使用本机 ad-hoc 签名，适合本机安装与测试，不代表已经完成 Apple 公证。若要公开分发，仍需配置 Developer ID、notarization、stapling 和 Gatekeeper 验证。
