@@ -313,6 +313,7 @@ class ParakeetInferenceAdapterTests(unittest.TestCase):
 
             fake_manager = SimpleNamespace(
                 create_task=lambda _project_id, _kind: "parakeet-task",
+                update_task=lambda *_args, **_kwargs: None,
                 run_background=lambda *_args, **_kwargs: None,
             )
             with patch("app.api.projects.task_manager", fake_manager), patch(

@@ -27,10 +27,17 @@ from app.services.subtitle_cleaner import (
 )
 from app.services.subtitle_exporter import export_ass, export_srt
 from app.services.subtitle_translator import _call_llm_translate
+from app.services.ai_providers import (
+    AIProviderRequestError,
+    prepare_chat_payload,
+)
+from app.services.ai_quality import generate_quality_preview
 from app.services.video_renderer import burn_subtitles
+from app.services.ffmpeg_encoding import select_h264_encoder_args
 from app.services.transcriber import _post_process_segments
 from app.services.ai_settings import get_ai_settings, save_ai_settings
 from app.utils.task_manager import TaskManager, task_manager
+from app.api.tasks import _task_dict
 
 
 class TimestampSegmentationTests(unittest.TestCase):
@@ -120,13 +127,30 @@ class AIResultValidationTests(unittest.TestCase):
                 "content": '{"groups":[{"ids":["1"],"clean_text":"Hello."}]}'
             }}]},
         )
-        ai = {"provider": "deepseek", "model": "deepseek-chat", "base_url": "http://example.test/v1", "api_key": "secret"}
+        ai = {"provider": "deepseek", "model": "deepseek-v4-flash", "base_url": "http://example.test/v1", "api_key": "secret"}
         with patch("httpx.post", return_value=response) as post:
             result = _call_llm_group(batch, ai)
         payload = post.call_args.kwargs["json"]
         self.assertEqual(payload["response_format"], {"type": "json_object"})
+        self.assertEqual(payload["thinking"], {"type": "disabled"})
         self.assertIn("required_output_schema", payload["messages"][1]["content"])
         self.assertEqual(result[0]["ids"], ["1"])
+
+    def test_deepseek_v4_compatibility_does_not_affect_other_providers(self):
+        base = {"model": "deepseek-v4-flash", "messages": []}
+        deepseek = prepare_chat_payload(
+            {"provider": "deepseek", "model": "deepseek-v4-flash"}, base,
+        )
+        provider_card = prepare_chat_payload(
+            {"provider_id": "deepseek", "model": "deepseek-v4-pro"}, base,
+        )
+        openrouter = prepare_chat_payload(
+            {"provider": "openrouter", "model": "deepseek/deepseek-v4-flash"}, base,
+        )
+        self.assertEqual(deepseek["thinking"], {"type": "disabled"})
+        self.assertEqual(provider_card["thinking"], {"type": "disabled"})
+        self.assertNotIn("thinking", openrouter)
+        self.assertNotIn("thinking", base)
 
     def test_cleaner_length_finish_adaptively_splits_and_recovers(self):
         batch = [
@@ -136,7 +160,14 @@ class AIResultValidationTests(unittest.TestCase):
         responses = [
             SimpleNamespace(
                 raise_for_status=lambda: None,
-                json=lambda: {"choices": [{"finish_reason": "length", "message": {"content": "{"}}]},
+                json=lambda: {
+                    "choices": [{"finish_reason": "length", "message": {"content": "{"}}],
+                    "usage": {
+                        "prompt_tokens": 120,
+                        "completion_tokens": 2048,
+                        "completion_tokens_details": {"reasoning_tokens": 1900},
+                    },
+                },
             ),
             SimpleNamespace(
                 raise_for_status=lambda: None,
@@ -159,6 +190,30 @@ class AIResultValidationTests(unittest.TestCase):
         self.assertEqual(diagnostics["request_attempts"], 3)
         self.assertEqual(diagnostics["length_recoveries"], 1)
         self.assertEqual(diagnostics["adaptive_splits"], 1)
+        self.assertEqual(diagnostics["prompt_tokens"], 120)
+        self.assertEqual(diagnostics["completion_tokens"], 2048)
+        self.assertEqual(diagnostics["reasoning_tokens"], 1900)
+
+    def test_cleaner_http_400_surfaces_provider_error_without_splitting(self):
+        import httpx
+
+        batch = [
+            {"idx": idx, "start": float(idx - 1), "end": float(idx), "raw_text": text}
+            for idx, text in enumerate(["One.", "Two.", "Three.", "Four."], 1)
+        ]
+        request = httpx.Request("POST", "http://example.test/v1/chat/completions")
+        response = httpx.Response(
+            400,
+            request=request,
+            json={"error": {"message": "Model deepseek-chat has been deprecated"}},
+        )
+        ai = {"provider": "deepseek", "model": "deepseek-chat", "base_url": "http://example.test/v1", "api_key": "secret"}
+        diagnostics = {}
+        with patch("httpx.post", return_value=response), self.assertRaises(AIProviderRequestError) as raised:
+            _call_llm_group(batch, ai, diagnostics=diagnostics)
+        self.assertIn("deprecated", str(raised.exception))
+        self.assertEqual(diagnostics["request_attempts"], 1)
+        self.assertNotIn("adaptive_splits", diagnostics)
 
     def test_cleaner_invalid_json_retries_once_then_splits(self):
         batch = [
@@ -205,16 +260,40 @@ class AIResultValidationTests(unittest.TestCase):
         client = patch("httpx.Client").start()
         self.addCleanup(patch.stopall)
         client.return_value.__enter__.return_value.post.return_value = response
-        ai = {"model": "test", "base_url": "http://example.test/v1", "api_key": "secret"}
+        ai = {"provider": "deepseek", "model": "deepseek-v4-flash", "base_url": "http://example.test/v1", "api_key": "secret"}
         result = _call_llm_translate(
             [{"id": "2", "text": "it works"}], "translate", ai,
             [{"id": "1", "text": "the pipeline"}], [{"id": "3", "text": "next topic"}],
         )
         payload = client.return_value.__enter__.return_value.post.call_args.kwargs["json"]
         supplied = __import__("json").loads(payload["messages"][1]["content"])
+        self.assertEqual(payload["thinking"], {"type": "disabled"})
         self.assertEqual(supplied["context_before"][0]["id"], "1")
         self.assertEqual(supplied["context_after"][0]["id"], "3")
         self.assertEqual(result, [{"id": "2", "translated_text": "当前句"}])
+
+    def test_quality_preview_uses_deepseek_v4_structured_non_thinking_request(self):
+        response = SimpleNamespace(
+            raise_for_status=lambda: None,
+            json=lambda: {"choices": [{"message": {
+                "content": '{"clean_text":"Fixed.","translated_text":"已修复。"}'
+            }}]},
+        )
+        provider = {
+            "provider": "deepseek", "model": "deepseek-v4-flash",
+            "base_url": "http://example.test/v1", "api_key": "secret",
+        }
+        with patch("app.services.ai_quality.assigned_provider", return_value=provider), patch(
+            "app.services.ai_quality.httpx.post", return_value=response,
+        ) as post:
+            result = generate_quality_preview({
+                "rule_id": "punctuation", "message": "missing punctuation",
+                "clean_text": "Fixed", "translated_text": "已修复",
+            })
+        payload = post.call_args.kwargs["json"]
+        self.assertEqual(payload["thinking"], {"type": "disabled"})
+        self.assertEqual(payload["response_format"], {"type": "json_object"})
+        self.assertEqual(result["after"]["clean_text"], "Fixed.")
 
     def test_reorders_valid_ai_results_to_input_order(self):
         batch = [{"id": "1"}, {"id": "2"}]
@@ -372,14 +451,29 @@ class AIResultValidationTests(unittest.TestCase):
 
 
 class TaskPauseTests(unittest.TestCase):
+    def test_task_api_promotes_failure_suggestion_and_actions(self):
+        public = _task_dict({
+            "id": "task", "project_id": "project", "type": "download",
+            "status": "failed", "details": {
+                "failure_suggestion": "请在 Chrome 中确认权限",
+                "download": {"authenticated_attempted": True},
+            },
+            "logs": [], "available_actions": ["retry", "open_settings"],
+            "recoverable": 1,
+        })
+        self.assertEqual(public["suggestion"], "请在 Chrome 中确认权限")
+        self.assertEqual(public["available_actions"], ["retry", "open_settings"])
+        self.assertTrue(public["details"]["download"]["authenticated_attempted"])
+
     def test_successful_automatic_retry_clears_transient_error_fields(self):
         manager = TaskManager(max_workers=1)
         task_id = manager.create_task("project", "download", max_attempts=2)
         calls = 0
 
         class RecoverableFailure(RuntimeError):
-            error_code = "DOWNLOAD_FAILED"
+            error_code = "NETWORK_TEMPORARY"
             recoverable = True
+            automatic_retry = True
 
         def worker(_runtime_task_id):
             nonlocal calls
@@ -396,6 +490,32 @@ class TaskPauseTests(unittest.TestCase):
         self.assertIsNone(task["error_code"])
         self.assertFalse(task["recoverable"])
         self.assertEqual(task["available_actions"], [])
+        manager.shutdown()
+
+    def test_user_recoverable_permission_failure_does_not_auto_retry(self):
+        manager = TaskManager(max_workers=1)
+        task_id = manager.create_task("project", "download", max_attempts=3)
+        calls = 0
+
+        class PermissionFailure(RuntimeError):
+            error_code = "MEMBERSHIP_REQUIRED"
+            recoverable = True
+            automatic_retry = False
+            available_actions = ["retry"]
+            suggestion = "请切换到有权限的账号"
+
+        def worker(_runtime_task_id):
+            nonlocal calls
+            calls += 1
+            raise PermissionFailure("没有会员权限")
+
+        future = manager.run_background(task_id, worker)
+        future.result(timeout=4)
+        task = manager.get_task(task_id)
+        self.assertEqual(calls, 1)
+        self.assertEqual(task["status"], "failed")
+        self.assertEqual(task["attempt"], 1)
+        self.assertEqual(task["error_code"], "MEMBERSHIP_REQUIRED")
         manager.shutdown()
 
     def test_worker_pauses_and_resumes_at_checkpoint(self):
@@ -614,6 +734,9 @@ class PersistenceAndExportTests(unittest.TestCase):
             with patch(
                 "app.services.video_renderer.resolve_ffmpeg_path",
                 return_value=SimpleNamespace(path=Path("/app/bin/ffmpeg"), source="bundled"),
+            ), patch(
+                "app.services.video_renderer.select_h264_encoder_args",
+                return_value=(["-c:v", "libx264", "-preset", "fast", "-crf", "22"], "libx264"),
             ), patch("app.services.video_renderer.subprocess.run", side_effect=fake_run):
                 burn_subtitles("test-mp4", str(video), str(subtitle), str(Path(folder) / "out.mp4"))
                 burn_subtitles("test-mkv", str(video), str(subtitle), str(Path(folder) / "out.mkv"))
@@ -621,6 +744,81 @@ class PersistenceAndExportTests(unittest.TestCase):
             self.assertNotIn("+faststart", commands[1])
             self.assertEqual(commands[0][-1], str(Path(folder) / "out.mp4"))
             self.assertEqual(commands[1][-1], str(Path(folder) / "out.mkv"))
+
+    def test_encoder_probe_uses_videotoolbox_without_x264_options(self):
+        probe = SimpleNamespace(
+            stdout=" V....D h264_videotoolbox VideoToolbox H.264 Encoder\n",
+            stderr="",
+        )
+        with patch("app.services.ffmpeg_encoding.subprocess.run", return_value=probe):
+            arguments, name = select_h264_encoder_args("/app/bin/ffmpeg")
+        self.assertEqual(name, "h264_videotoolbox")
+        self.assertIn("6M", arguments)
+        self.assertNotIn("-preset", arguments)
+        self.assertNotIn("-crf", arguments)
+
+    def test_video_renderer_falls_back_to_embedded_subtitles_without_libass(self):
+        with tempfile.TemporaryDirectory() as folder:
+            video = Path(folder) / "input.mp4"; video.write_bytes(b"video")
+            subtitle = Path(folder) / "sub.ass"; subtitle.write_text("subtitle", encoding="utf-8")
+            output = Path(folder) / "out.mp4"
+            commands = []
+
+            def fake_run(command, **_kwargs):
+                commands.append(command)
+                if len(commands) == 1:
+                    return SimpleNamespace(returncode=1, stderr="No such filter: 'subtitles'")
+                Path(command[-1]).write_bytes(b"embedded")
+                return SimpleNamespace(returncode=0, stderr="")
+
+            with patch(
+                "app.services.video_renderer.resolve_ffmpeg_path",
+                return_value=SimpleNamespace(path=Path("/app/bin/ffmpeg"), source="bundled"),
+            ), patch(
+                "app.services.video_renderer.select_h264_encoder_args",
+                return_value=(["-c:v", "h264_videotoolbox", "-b:v", "6M"], "h264_videotoolbox"),
+            ), patch("app.services.video_renderer.subprocess.run", side_effect=fake_run):
+                rendered = burn_subtitles("test-fallback", str(video), str(subtitle), str(output))
+
+            self.assertEqual(rendered, str(output))
+            self.assertNotIn("-preset", commands[0])
+            self.assertIn("mov_text", commands[1])
+            self.assertIn("copy", commands[1])
+
+    def test_video_renderer_uses_image_overlays_for_real_hardsubs_without_libass(self):
+        with tempfile.TemporaryDirectory() as folder:
+            video = Path(folder) / "input.mp4"; video.write_bytes(b"video")
+            subtitle = Path(folder) / "sub.ass"; subtitle.write_text("subtitle", encoding="utf-8")
+            output = Path(folder) / "out.mp4"
+            commands = []
+
+            def fake_run(command, **_kwargs):
+                commands.append(command)
+                if len(commands) == 1:
+                    return SimpleNamespace(returncode=1, stderr="No such filter: 'subtitles'")
+                Path(command[-1]).write_bytes(b"burned")
+                return SimpleNamespace(returncode=0, stderr="")
+
+            with patch(
+                "app.services.video_renderer.resolve_ffmpeg_path",
+                return_value=SimpleNamespace(path=Path("/app/bin/ffmpeg"), source="bundled"),
+            ), patch(
+                "app.services.video_renderer.select_h264_encoder_args",
+                return_value=(["-c:v", "h264_videotoolbox", "-b:v", "6M"], "h264_videotoolbox"),
+            ), patch(
+                "app.services.video_renderer._burn_with_image_overlays",
+                side_effect=lambda **kwargs: fake_run([
+                    "/app/bin/ffmpeg", "-filter_complex", "image-overlays", "-y", kwargs["output_path"]
+                ]),
+            ), patch("app.services.video_renderer.subprocess.run", side_effect=fake_run):
+                rendered = burn_subtitles(
+                    "test-image-fallback", str(video), str(subtitle), str(output),
+                    project_id="project-one", bilingual=True,
+                )
+
+            self.assertEqual(rendered, str(output))
+            self.assertEqual(len(commands), 2)
+            self.assertIn("image-overlays", commands[1])
 
 
 if __name__ == "__main__":

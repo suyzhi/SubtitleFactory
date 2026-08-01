@@ -15,7 +15,8 @@ from ..models.database import get_db
 from ..utils.config import EXPORTS_DIR, PROJECTS_DIR
 
 
-PACKAGE_VERSION = 1
+PACKAGE_VERSION = 2
+SUPPORTED_PACKAGE_VERSIONS = {1, 2}
 MAX_ENTRY_SIZE = 50 * 1024**3
 MAX_TOTAL_SIZE = 100 * 1024**3
 REQUIRED_DATA = {
@@ -50,6 +51,32 @@ def export_project_package(project_id: str, include_media: bool = False) -> Path
             terms.extend(dict(row) for row in db.execute("SELECT * FROM glossary_terms WHERE glossary_id=?", (glossary_id,)))
         style_row = db.execute("SELECT settings_json FROM project_styles WHERE project_id=?", (project_id,)).fetchone()
         style = json.loads(style_row["settings_json"]) if style_row else None
+        content_packs = [dict(row) for row in db.execute(
+            "SELECT * FROM content_packs WHERE project_id=? ORDER BY created_at", (project_id,)
+        )]
+        content_sections = []
+        for pack in content_packs:
+            content_sections.extend(
+                dict(row) for row in db.execute(
+                    "SELECT * FROM content_pack_sections WHERE pack_id=? ORDER BY sort_order", (pack["id"],)
+                )
+            )
+        clip_sets = [dict(row) for row in db.execute(
+            "SELECT * FROM clip_sets WHERE project_id=? ORDER BY created_at", (project_id,)
+        )]
+        clip_candidates = []
+        clip_layouts = []
+        for clip_set in clip_sets:
+            candidates = [dict(row) for row in db.execute(
+                "SELECT * FROM clip_candidates WHERE clip_set_id=? ORDER BY sort_order", (clip_set["id"],)
+            )]
+            clip_candidates.extend(candidates)
+            for candidate in candidates:
+                clip_layouts.extend(
+                    dict(row) for row in db.execute(
+                        "SELECT * FROM clip_layouts WHERE candidate_id=? ORDER BY aspect_ratio", (candidate["id"],)
+                    )
+                )
     finally:
         db.close()
 
@@ -60,6 +87,11 @@ def export_project_package(project_id: str, include_media: bool = False) -> Path
         "data/speakers.json": _json_bytes(speakers), "data/history.json": _json_bytes(history),
         "data/glossaries.json": _json_bytes(glossaries), "data/glossary_terms.json": _json_bytes(terms),
         "data/style.json": _json_bytes(style),
+        "data/content_packs.json": _json_bytes(content_packs),
+        "data/content_pack_sections.json": _json_bytes(content_sections),
+        "data/clip_sets.json": _json_bytes(clip_sets),
+        "data/clip_candidates.json": _json_bytes(clip_candidates),
+        "data/clip_layouts.json": _json_bytes(clip_layouts),
     }
     media_entries: list[tuple[str, Path]] = []
     if include_media:
@@ -106,7 +138,10 @@ def _validate_archive(archive: zipfile.ZipFile) -> dict:
         manifest = json.loads(archive.read("manifest.json"))
     except (KeyError, json.JSONDecodeError) as error:
         raise ValueError("项目包 manifest 无效") from error
-    if manifest.get("format") != "subtitle-factory-project" or manifest.get("version") != PACKAGE_VERSION:
+    if (
+        manifest.get("format") != "subtitle-factory-project"
+        or manifest.get("version") not in SUPPORTED_PACKAGE_VERSIONS
+    ):
         raise ValueError("项目包版本不受支持")
     if not REQUIRED_DATA.issubset(names):
         raise ValueError("项目包缺少必要数据")
@@ -134,6 +169,11 @@ def import_project_package(path: str) -> dict:
         glossaries = json.loads(archive.read("data/glossaries.json"))
         terms = json.loads(archive.read("data/glossary_terms.json"))
         style = json.loads(archive.read("data/style.json")) if "data/style.json" in archive.namelist() else None
+        content_packs = json.loads(archive.read("data/content_packs.json")) if "data/content_packs.json" in archive.namelist() else []
+        content_sections = json.loads(archive.read("data/content_pack_sections.json")) if "data/content_pack_sections.json" in archive.namelist() else []
+        clip_sets = json.loads(archive.read("data/clip_sets.json")) if "data/clip_sets.json" in archive.namelist() else []
+        clip_candidates = json.loads(archive.read("data/clip_candidates.json")) if "data/clip_candidates.json" in archive.namelist() else []
+        clip_layouts = json.loads(archive.read("data/clip_layouts.json")) if "data/clip_layouts.json" in archive.namelist() else []
         old_id = project["id"]
         if len(segments) > 1_000_000:
             raise ValueError("项目包字幕数量异常")
@@ -175,6 +215,9 @@ def import_project_package(path: str) -> dict:
     ]
     glossary_map = {item["id"]: str(uuid.uuid4()) for item in glossaries}
     speaker_map = {item["id"]: str(uuid.uuid4()) for item in speakers}
+    content_pack_map = {item["id"]: str(uuid.uuid4()) for item in content_packs}
+    clip_set_map = {item["id"]: str(uuid.uuid4()) for item in clip_sets}
+    candidate_map = {item["id"]: str(uuid.uuid4()) for item in clip_candidates}
     db = get_db()
     try:
         db.execute("BEGIN IMMEDIATE")
@@ -208,6 +251,67 @@ def import_project_package(path: str) -> dict:
             db.execute(
                 "INSERT INTO project_styles(project_id,settings_json,updated_at) VALUES (?,?,?)",
                 (project_id, json.dumps(style, ensure_ascii=False), now),
+            )
+        for item in content_packs:
+            old_pack_id = item["id"]
+            item.update({"id": content_pack_map[old_pack_id], "project_id": project_id})
+            columns = (
+                "id","project_id","name","input_mode","output_language","allow_translation_fallback","source_revision",
+                "source_fingerprint","provider_id","model","status","revision","created_at","updated_at",
+            )
+            item.setdefault("allow_translation_fallback", 0)
+            db.execute(
+                f"INSERT INTO content_packs({','.join(columns)}) VALUES ({','.join('?' for _ in columns)})",
+                [item.get(key) for key in columns],
+            )
+        for item in content_sections:
+            item.update({
+                "id": str(uuid.uuid4()),
+                "pack_id": content_pack_map.get(item["pack_id"], item["pack_id"]),
+            })
+            columns = (
+                "id","pack_id","kind","title","content_json","status","error","sort_order",
+                "revision","generated_at","updated_at",
+            )
+            db.execute(
+                f"INSERT INTO content_pack_sections({','.join(columns)}) VALUES ({','.join('?' for _ in columns)})",
+                [item.get(key) for key in columns],
+            )
+        for item in clip_sets:
+            old_set_id = item["id"]
+            item.update({"id": clip_set_map[old_set_id], "project_id": project_id})
+            columns = (
+                "id","project_id","name","source_revision","source_fingerprint","provider_id",
+                "model","desired_count","min_duration","max_duration","status","created_at","updated_at",
+            )
+            db.execute(
+                f"INSERT INTO clip_sets({','.join(columns)}) VALUES ({','.join('?' for _ in columns)})",
+                [item.get(key) for key in columns],
+            )
+        for item in clip_candidates:
+            old_candidate_id = item["id"]
+            item.update({
+                "id": candidate_map[old_candidate_id],
+                "clip_set_id": clip_set_map.get(item["clip_set_id"], item["clip_set_id"]),
+            })
+            columns = (
+                "id","clip_set_id","title","hook","reason","score","start","end",
+                "start_segment_index","end_segment_index","selected","revision",
+                "source_confirmed_revision","sort_order","created_at","updated_at",
+            )
+            db.execute(
+                f"INSERT INTO clip_candidates({','.join(columns)}) VALUES ({','.join('?' for _ in columns)})",
+                [item.get(key) for key in columns],
+            )
+        for item in clip_layouts:
+            item["candidate_id"] = candidate_map.get(item["candidate_id"], item["candidate_id"])
+            columns = (
+                "candidate_id","aspect_ratio","enabled","composition","focal_x","focal_y",
+                "subtitle_mode","style_json","revision","updated_at",
+            )
+            db.execute(
+                f"INSERT INTO clip_layouts({','.join(columns)}) VALUES ({','.join('?' for _ in columns)})",
+                [item.get(key) for key in columns],
             )
         db.commit()
     except Exception:

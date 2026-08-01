@@ -30,7 +30,7 @@ describe('playlist batches', () => {
     vi.mocked(api.previewPlaylist).mockResolvedValue(preview);
     vi.mocked(api.createPlaylistBatch).mockResolvedValue({ action: 'created', batch_id: 'batch-1', added_count: 2, existing_count: 0, batch: detail.batch });
     const user = userEvent.setup();
-    render(<PlaylistBatchDialog url={preview.playlist.url} workflow={{ model: 'small', runtime: 'cpu', language: 'en', target_language: 'zh', clean_target_length: 42 }} appSettings={{ download_quality: 'best', download_container: 'mp4' }} health={{ runtime: { ffmpeg: { ok: true }, yt_dlp: { ok: true }, disk: { ok: true, message: '空间充足' } } } as any} aiReady onClose={() => undefined} onCreated={() => undefined}/>);
+    render(<PlaylistBatchDialog url={preview.playlist.url} workflow={{ model: 'small', runtime: 'cpu', language: 'en', target_language: 'zh', clean_target_length: 42 }} appSettings={{ download_quality: 'best', download_container: 'mp4' }} health={{ runtime: { ffmpeg: { ok: true }, ffprobe: { ok: true }, yt_dlp: { ok: true }, deno: { ok: true }, ejs: { ok: true }, disk: { ok: true, message: '空间充足' } } } as any} aiReady onClose={() => undefined} onCreated={() => undefined}/>);
     expect(await screen.findByText('Piano course')).toBeInTheDocument();
     await user.click(screen.getByRole('checkbox', { name: /AI 整理/ }));
     expect(screen.getByRole('button', { name: /创建并处理/ })).toBeDisabled();
@@ -54,7 +54,8 @@ describe('playlist batches', () => {
     const user = userEvent.setup();
     render(<PlaylistBatchGroups batches={[detail]} search="" collapsed={new Set()} workflow={{}} onToggle={() => undefined} onOpenProject={() => undefined} onChanged={onChanged} onMessage={onMessage}/>);
 
-    await user.click(screen.getByRole('button', { name: '删除播放列表' }));
+    await user.click(screen.getByText('•••'));
+    await user.click(screen.getByRole('menuitem', { name: '删除播放列表…' }));
     expect(screen.getByRole('dialog', { name: '永久删除播放列表？' })).toBeInTheDocument();
     expect(screen.getByText(/本地下载视频、音频、字幕、封面、导出文件和任务记录/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '永久删除全部文件' })).toBeDisabled();
@@ -73,7 +74,8 @@ describe('playlist batches', () => {
     const user = userEvent.setup();
     render(<PlaylistBatchGroups batches={[detail]} search="" collapsed={new Set()} workflow={{ model: 'small' }} onToggle={() => undefined} onOpenProject={() => undefined} onChanged={() => undefined} onMessage={() => undefined}/>);
 
-    await user.click(screen.getByRole('button', { name: 'AI 整理' }));
+    await user.click(screen.getByText('•••'));
+    await user.click(screen.getByRole('menuitem', { name: 'AI 整理…' }));
     expect(screen.getByRole('dialog', { name: '确认批量 AI 整理' })).toBeInTheDocument();
     expect(api.runPlaylistStage).not.toHaveBeenCalled();
 

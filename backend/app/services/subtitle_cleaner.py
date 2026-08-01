@@ -10,7 +10,12 @@ from difflib import SequenceMatcher
 
 from ..models.database import get_db
 from ..utils.task_manager import TaskCancelled, task_manager
-from .ai_providers import assigned_provider
+from .ai_providers import (
+    AIProviderRequestError,
+    assigned_provider,
+    prepare_chat_payload,
+    raise_for_provider_status,
+)
 from .ai_settings import get_ai_settings
 from .editor import SEGMENT_COLUMNS, history_step
 
@@ -77,6 +82,7 @@ def clean_subtitles(task_id: str, project_id: str, target_length: int = 42, prov
     cache_hits = 0
     prompt_tokens = 0
     completion_tokens = 0
+    reasoning_tokens = 0
     failed_leaf_batches = 0
     task_manager.add_log(
         task_id, "info", "AI 句子重组",
@@ -124,10 +130,11 @@ def clean_subtitles(task_id: str, project_id: str, target_length: int = 42, prov
             cache_hits += int(diagnostics.get("cache_hits", 0))
             prompt_tokens += int(diagnostics.get("prompt_tokens", 0))
             completion_tokens += int(diagnostics.get("completion_tokens", 0))
+            reasoning_tokens += int(diagnostics.get("reasoning_tokens", 0))
             failed_leaf_batches += int(diagnostics.get("failed_leaf_batches", 0))
             if error:
                 failed_batches += 1; failed_batch_indexes.append(index); task_manager.add_log(task_id,"warning","AI 句子重组",f"第 {index}/{total_batches} 批未能重组",detail=str(error),suggestion="可在“整理”设置中单独重试该批次")
-            task_manager.update_task(task_id,step="restructuring",progress=5+done_count/max(total_batches,1)*88,message=f"已完成 {done_count}/{total_batches} 个批次",details={"total_segments":len(rows),"total_batches":total_batches,"completed_batches":done_count,"failed_batches":failed_batches,"failed_batch_indexes":sorted(failed_batch_indexes),"ai_provider":ai["provider"],"ai_model":ai["model"],"request_attempts":request_attempts,"adaptive_splits":adaptive_splits,"length_recoveries":length_recoveries,"cache_hits":cache_hits,"prompt_tokens":prompt_tokens,"completion_tokens":completion_tokens,"failed_leaf_batches":failed_leaf_batches})
+            task_manager.update_task(task_id,step="restructuring",progress=5+done_count/max(total_batches,1)*88,message=f"已完成 {done_count}/{total_batches} 个批次",details={"total_segments":len(rows),"total_batches":total_batches,"completed_batches":done_count,"failed_batches":failed_batches,"failed_batch_indexes":sorted(failed_batch_indexes),"ai_provider":ai["provider"],"ai_model":ai["model"],"request_attempts":request_attempts,"adaptive_splits":adaptive_splits,"length_recoveries":length_recoveries,"cache_hits":cache_hits,"prompt_tokens":prompt_tokens,"completion_tokens":completion_tokens,"reasoning_tokens":reasoning_tokens,"failed_leaf_batches":failed_leaf_batches})
     for index in range(1,total_batches+1): grouped_results.extend(completed[index])
 
     # AI results stay in memory until every batch has completed. Cancellation at
@@ -158,6 +165,7 @@ def clean_subtitles(task_id: str, project_id: str, target_length: int = 42, prov
             "cache_hits": cache_hits,
             "prompt_tokens": prompt_tokens,
             "completion_tokens": completion_tokens,
+            "reasoning_tokens": reasoning_tokens,
             "failed_leaf_batches": failed_leaf_batches,
         },
     )
@@ -419,22 +427,27 @@ def _call_llm_group(
             }
             if ai.get("provider") in {"deepseek", "openai"}:
                 payload["response_format"] = {"type": "json_object"}
+            payload = prepare_chat_payload(ai, payload)
             diagnostics["request_attempts"] = int(diagnostics.get("request_attempts", 0)) + 1
             response = httpx.post(
                 f"{ai['base_url'].rstrip('/')}/chat/completions",
                 headers={"Authorization": f"Bearer {ai['api_key']}", "Content-Type": "application/json"},
                 json=payload, timeout=120,
             )
-            response.raise_for_status()
+            raise_for_provider_status(response)
             if task_id:
                 task_manager.checkpoint(task_id)
             response_data = response.json()
             choice = response_data["choices"][0]
-            if choice.get("finish_reason") == "length":
-                raise AIOutputLengthError("AI 输出达到长度上限，JSON 被截断")
             usage = response_data.get("usage") or {}
             diagnostics["prompt_tokens"] = int(diagnostics.get("prompt_tokens", 0)) + int(usage.get("prompt_tokens") or 0)
             diagnostics["completion_tokens"] = int(diagnostics.get("completion_tokens", 0)) + int(usage.get("completion_tokens") or 0)
+            completion_details = usage.get("completion_tokens_details") or {}
+            diagnostics["reasoning_tokens"] = int(diagnostics.get("reasoning_tokens", 0)) + int(
+                completion_details.get("reasoning_tokens") or usage.get("reasoning_tokens") or 0
+            )
+            if choice.get("finish_reason") == "length":
+                raise AIOutputLengthError("AI 输出达到长度上限，JSON 被截断")
             content = choice["message"]["content"]
             parsed = _extract_json(content)
             validated = _validate_grouped_results(batch, parsed)
@@ -449,16 +462,29 @@ def _call_llm_group(
                 len(batch), _depth,
             )
             break
+        except AIProviderRequestError as exc:
+            error = exc
+            logger.warning("[Cleaner] AI 服务请求失败（第 %s 次）: %s", attempt + 1, exc)
+            if not exc.retryable or attempt >= 1:
+                raise
+            retry_after = getattr(getattr(exc, "__cause__", None), "response", None)
+            retry_after = getattr(retry_after, "headers", {}).get("Retry-After")
+            try:
+                delay = min(30.0, max(0.0, float(retry_after))) if retry_after else 2 ** attempt
+            except (TypeError, ValueError):
+                delay = 2 ** attempt
+            time.sleep(delay)
+        except httpx.RequestError as exc:
+            error = exc
+            logger.warning("[Cleaner] AI 网络请求失败（第 %s 次）: %s", attempt + 1, exc)
+            if attempt >= 1:
+                raise RuntimeError(f"AI 网络请求失败：{exc}") from exc
+            time.sleep(2 ** attempt)
         except Exception as exc:
             error = exc
             logger.warning("[Cleaner] LLM 句子重组失败（第 %s 次）: %s", attempt + 1, exc)
-            if getattr(getattr(exc,"response",None),"status_code",None) in (401,403):
-                raise RuntimeError(f"AI 认证失败：{exc}") from exc
             if attempt < 1:
-                retry_after=getattr(getattr(exc,"response",None),"headers",{}).get("Retry-After")
-                try: delay=min(30.0,max(0.0,float(retry_after))) if retry_after else 2 ** attempt
-                except (TypeError,ValueError): delay=2 ** attempt
-                time.sleep(delay)
+                time.sleep(2 ** attempt)
 
     if len(batch) == 1:
         diagnostics["failed_leaf_batches"] = int(diagnostics.get("failed_leaf_batches", 0)) + 1

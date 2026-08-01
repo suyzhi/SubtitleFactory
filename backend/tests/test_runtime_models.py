@@ -29,6 +29,20 @@ def _executable(folder: Path, name: str, output: str = "tool version 1") -> Path
 
 
 class DownloadRuntimeTests(unittest.TestCase):
+    def test_download_runtime_health_reports_deno_ejs_and_po_token_capability(self):
+        status = runtime.get_download_runtime_status()
+        self.assertIn("deno", status)
+        self.assertIn("ejs", status)
+        self.assertIn("po_token", status)
+        self.assertFalse(status["po_token"]["bundled_provider"])
+
+    def test_missing_deno_blocks_youtube_before_network(self):
+        with patch.object(downloader, "resolve_deno_path", return_value=None):
+            with self.assertRaises(downloader.DownloadServiceError) as raised:
+                downloader._download_options("task", "/tmp/%(title)s.%(ext)s")
+        self.assertEqual(raised.exception.error_code, "DOWNLOAD_RUNTIME_MISSING")
+        self.assertEqual(raised.exception.details["runtime_component"], "deno")
+
     def test_ffmpeg_resolution_prefers_bundled_then_user_then_environment_then_path(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
@@ -113,7 +127,7 @@ class DownloadRuntimeTests(unittest.TestCase):
     def test_download_error_classification_is_stable(self):
         unavailable = downloader._classify_download_error(Exception("ERROR: Video unavailable"))
         merged = downloader._classify_download_error(Exception("ffmpeg merger exited with code 1"))
-        self.assertEqual(unavailable.error_code, "VIDEO_UNAVAILABLE")
+        self.assertEqual(unavailable.error_code, "DOWNLOAD_FAILED")
         self.assertEqual(merged.error_code, "MERGE_FAILED")
 
 

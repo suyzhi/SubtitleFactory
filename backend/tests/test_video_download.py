@@ -22,6 +22,112 @@ from app.services import downloader
 
 
 class DownloadQualityTests(unittest.TestCase):
+    def test_error_classifier_covers_stable_download_failure_model(self):
+        cases = [
+            ("Join this channel to get access to members-only content", "MEMBERSHIP_REQUIRED", False),
+            ("ERROR: This is a private video", "PRIVATE_VIDEO", False),
+            ("Sign in to confirm your age", "AGE_RESTRICTED", False),
+            ("not available in your country", "GEO_RESTRICTED", False),
+            ("This video has been removed because of copyright", "VIDEO_REMOVED", False),
+            ("This video is DRM protected", "DRM_PROTECTED", False),
+            ("HTTP Error 429: Too Many Requests", "RATE_LIMITED", False),
+            ("could not copy Chrome cookie database", "COOKIE_ACCESS_FAILED", False),
+            ("YouTube requires a PO Token", "PO_TOKEN_REQUIRED", False),
+            ("HTTP Error 403: Forbidden", "MEDIA_ACCESS_DENIED", False),
+            ("HTTP Error 503: Service Unavailable", "NETWORK_TEMPORARY", True),
+            ("requested format is not available", "FORMAT_UNAVAILABLE", False),
+            ("ffmpeg merger exited with code 1", "MERGE_FAILED", False),
+            ("totally unknown extractor failure", "DOWNLOAD_FAILED", False),
+        ]
+        for message, expected_code, automatic_retry in cases:
+            with self.subTest(message=message):
+                failure = downloader._classify_download_error(Exception(message))
+                self.assertEqual(failure.error_code, expected_code)
+                self.assertEqual(failure.automatic_retry, automatic_retry)
+
+        self.assertEqual(
+            downloader._classify_download_error(OSError(28, "No space left")).error_code,
+            "DISK_FULL",
+        )
+        self.assertEqual(
+            downloader._classify_download_error(PermissionError(13, "Permission denied")).error_code,
+            "OUTPUT_PERMISSION_DENIED",
+        )
+
+    def test_members_only_metadata_retries_once_with_chrome_and_then_succeeds(self):
+        captured_options = []
+
+        class FakeYoutubeDL:
+            def __init__(self, options):
+                self.options = options
+                captured_options.append(options)
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def extract_info(self, _url, download):
+                self.assert_download = download
+                if "cookiesfrombrowser" not in self.options:
+                    raise downloader.yt_dlp.utils.DownloadError(
+                        "Join this channel to get access to members-only content"
+                    )
+                return {
+                    "id": "LWq_LwsKLTI",
+                    "title": "会员视频",
+                    "duration": 2421,
+                    "availability": "subscriber_only",
+                }
+
+        with (
+            patch.object(downloader.yt_dlp, "YoutubeDL", FakeYoutubeDL),
+            patch.object(downloader.task_manager, "checkpoint"),
+            patch.object(downloader.task_manager, "update_task"),
+        ):
+            info, details = downloader.extract_youtube_info(
+                "https://www.youtube.com/watch?v=LWq_LwsKLTI",
+                task_id="membership-test",
+            )
+
+        self.assertEqual(info["id"], "LWq_LwsKLTI")
+        self.assertTrue(details["authenticated_attempted"])
+        self.assertEqual([item["mode"] for item in details["attempts"]], ["anonymous", "chrome"])
+        self.assertEqual(len(captured_options), 2)
+        self.assertNotIn("cookiesfrombrowser", captured_options[0])
+        self.assertEqual(captured_options[1]["cookiesfrombrowser"], ("chrome",))
+
+    def test_public_metadata_never_reads_chrome_cookies(self):
+        captured_options = []
+
+        class FakeYoutubeDL:
+            def __init__(self, options):
+                self.options = options
+                captured_options.append(options)
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def extract_info(self, _url, download):
+                return {"id": "dQw4w9WgXcQ", "title": "Public", "duration": 213}
+
+        with (
+            patch.object(downloader.yt_dlp, "YoutubeDL", FakeYoutubeDL),
+            patch.object(downloader.task_manager, "checkpoint"),
+        ):
+            _, details = downloader.extract_youtube_info(
+                "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+                task_id="public-test",
+            )
+
+        self.assertFalse(details["authenticated_attempted"])
+        self.assertEqual(len(captured_options), 1)
+        self.assertNotIn("cookiesfrombrowser", captured_options[0])
+
     def test_audio_only_download_uses_task_local_staging_without_video_merge(self):
         captured = {}
 
@@ -85,11 +191,72 @@ class DownloadQualityTests(unittest.TestCase):
         }])
         self.assertTrue(options["writethumbnail"])
         self.assertEqual(options["outtmpl"]["thumbnail"], "/tmp/thumbnail.%(ext)s")
-        self.assertEqual(options["retries"], 10)
-        self.assertEqual(options["extractor_retries"], 5)
+        self.assertEqual(options["retries"], 3)
+        self.assertEqual(options["fragment_retries"], 5)
+        self.assertEqual(options["extractor_retries"], 3)
+        self.assertEqual(options["file_access_retries"], 3)
         self.assertEqual(options["socket_timeout"], 30)
         self.assertTrue(options["continuedl"])
-        self.assertEqual(options["retry_sleep_functions"]["http"](8), 30)
+        self.assertEqual(options["retry_sleep_functions"]["http"](n=8), 20)
+
+    def test_media_stream_403_retries_once_with_chrome_cookies(self):
+        captured_options = []
+
+        class FakeYoutubeDL:
+            def __init__(self, options):
+                self.options = options
+                captured_options.append(options)
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def extract_info(self, _url, download):
+                if "cookiesfrombrowser" not in self.options:
+                    raise downloader.yt_dlp.utils.DownloadError(
+                        "ERROR: unable to download video data: HTTP Error 403: Forbidden"
+                    )
+                project_dir = Path(self.options["outtmpl"]["default"]).parent
+                final_video = project_dir / "authenticated.mp4"
+                final_video.write_bytes(b"authenticated-video")
+                return {
+                    "id": "video-id",
+                    "title": "Authenticated video",
+                    "filepath": str(final_video),
+                }
+
+            def prepare_filename(self, info):
+                return info["filepath"]
+
+        with tempfile.TemporaryDirectory() as folder:
+            with (
+                patch.object(downloader.yt_dlp, "YoutubeDL", FakeYoutubeDL),
+                patch.object(
+                    downloader,
+                    "resolve_ffmpeg_path",
+                    return_value=SimpleNamespace(path=Path("/app/bin/ffmpeg"), source="bundled"),
+                ),
+                patch.object(downloader.task_manager, "update_task"),
+                patch.object(downloader.task_manager, "checkpoint"),
+                patch.object(downloader, "_probe_media", return_value={
+                    "duration": 60, "container": "mp4", "format_name": "mp4",
+                    "video_codec": "av1", "audio_codec": "opus", "file_size": 19,
+                }),
+            ):
+                result = downloader.download_video(
+                    "task-id",
+                    "https://www.youtube.com/watch?v=video-id",
+                    "project-id",
+                    download_dir=folder,
+                )
+
+        self.assertTrue(Path(result).name.startswith("video-video-id-"))
+        self.assertFalse((Path(folder) / "project-id" / ".download-task-id").exists())
+        self.assertEqual(len(captured_options), 2)
+        self.assertNotIn("cookiesfrombrowser", captured_options[0])
+        self.assertEqual(captured_options[1]["cookiesfrombrowser"], ("chrome",))
 
     def test_quality_limit_and_container_settings_change_yt_dlp_options(self):
         limited = downloader._download_options(
@@ -173,19 +340,29 @@ class DownloadQualityTests(unittest.TestCase):
                     return_value=SimpleNamespace(path=Path("/app/bin/ffmpeg"), source="bundled"),
                 ),
                 patch.object(downloader.task_manager, "update_task") as update_task,
+                patch.object(downloader, "_probe_media", return_value={
+                    "duration": 60, "container": "mp4", "format_name": "mp4",
+                    "video_codec": "av1", "audio_codec": "opus",
+                    "file_size": len(b"merged-video-and-audio"),
+                }),
             ):
                 result = downloader.download_video(
                     "task-id", "https://example.test/watch", "project-id"
                 )
 
-            self.assertEqual(Path(result).name, "highest-quality.mp4")
+            self.assertTrue(Path(result).name.startswith("video-video-id-"))
             self.assertEqual(Path(result).read_bytes(), b"merged-video-and-audio")
-            details = update_task.call_args_list[-1].kwargs["details"]
+            details = next(
+                call.kwargs["details"]
+                for call in reversed(update_task.call_args_list)
+                if "video_path" in call.kwargs.get("details", {})
+            )
             self.assertEqual(details["video_path"], result)
             self.assertEqual(
                 details["thumbnail_url"], "https://cdn.example.test/cover.webp"
             )
-            self.assertEqual(Path(details["thumbnail_path"]).name, "thumbnail.webp")
+            self.assertTrue(Path(details["thumbnail_path"]).name.startswith("thumbnail-"))
+            self.assertFalse((Path(folder) / "project-id" / ".download-task-id").exists())
             self.assertEqual(captured_options[0]["format"], "bestvideo+bestaudio/best")
             self.assertEqual(captured_options[0]["ffmpeg_location"], "/app/bin/ffmpeg")
 
@@ -329,6 +506,83 @@ class ProjectThumbnailPersistenceTests(unittest.TestCase):
                     fallback["thumbnail_url"],
                     "https://cdn.example.test/cover.jpg",
                 )
+
+    def test_database_commit_failure_keeps_old_media_and_removes_new_candidates(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            db_path = root / "projects.db"
+            project_dir = root / "downloads" / "project-id"
+            project_dir.mkdir(parents=True)
+            old_video = project_dir / "old.mp4"
+            old_thumbnail = project_dir / "old.webp"
+            new_video = project_dir / "video-new.mp4"
+            new_thumbnail = project_dir / "thumbnail-new.webp"
+            for path, content in (
+                (old_video, b"old-video"),
+                (old_thumbnail, b"old-cover"),
+                (new_video, b"new-video"),
+                (new_thumbnail, b"new-cover"),
+            ):
+                path.write_bytes(content)
+            now = time.strftime("%Y-%m-%d %H:%M:%S")
+
+            with patch.object(database, "DB_PATH", db_path):
+                database.init_db()
+                conn = database.get_db()
+                conn.execute(
+                    """INSERT INTO projects
+                       (id,title,source_type,source_url,video_path,thumbnail_path,
+                        language,target_language,created_at,updated_at)
+                       VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                    (
+                        "project-id", "Old", "youtube", "https://youtube.test/watch",
+                        str(old_video), str(old_thumbnail), "auto", "zh", now, now,
+                    ),
+                )
+                conn.commit()
+                conn.close()
+
+                real = database.get_db()
+
+                class CommitFailingConnection:
+                    def __getattr__(self, name):
+                        return getattr(real, name)
+
+                    def commit(self):
+                        raise sqlite3.OperationalError("simulated commit failure")
+
+                task = {
+                    "details": {
+                        "title": "New",
+                        "thumbnail_path": str(new_thumbnail),
+                        "thumbnail_url": "https://cdn.example.test/new.webp",
+                    },
+                }
+                with (
+                    patch.object(projects, "download_video", return_value=str(new_video)),
+                    patch.object(projects, "get_app_settings", return_value={
+                        "download_directory": str(root / "downloads"),
+                    }),
+                    patch.object(projects, "get_db", return_value=CommitFailingConnection()),
+                    patch.object(projects.task_manager, "get_task", return_value=task),
+                    patch.object(projects.task_manager, "checkpoint"),
+                ):
+                    with self.assertRaisesRegex(sqlite3.OperationalError, "commit failure"):
+                        projects._do_download(
+                            "task-id", "project-id", "https://youtube.test/watch",
+                        )
+
+                self.assertTrue(old_video.is_file())
+                self.assertTrue(old_thumbnail.is_file())
+                self.assertFalse(new_video.exists())
+                self.assertFalse(new_thumbnail.exists())
+                conn = database.get_db()
+                row = conn.execute(
+                    "SELECT video_path,thumbnail_path FROM projects WHERE id='project-id'"
+                ).fetchone()
+                conn.close()
+                self.assertEqual(row["video_path"], str(old_video))
+                self.assertEqual(row["thumbnail_path"], str(old_thumbnail))
 
 
 if __name__ == "__main__":

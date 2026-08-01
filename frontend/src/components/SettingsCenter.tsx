@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import * as api from '../api/backend';
 import type {
   AISettings, AppSettings, HealthStatus, PathValidationResult,
@@ -22,6 +23,7 @@ const CATEGORIES: { id: Category; icon: string; label: string }[] = [
 
 interface ModelStatusResult {
   recommended_model: string;
+  recommendation_reason?: string;
   category_order?: string[];
   models: api.TranscriptionModelStatus[];
 }
@@ -84,19 +86,43 @@ export default function SettingsCenter(props: Props) {
   const [validatingModel, setValidatingModel] = useState('');
   const [favoriteLanguage, setFavoriteLanguage] = useState('fr');
   const [providerCards,setProviderCards]=useState<api.AIProviderCard[]>([]);
-  const [assignments,setAssignments]=useState({clean_provider_id:'deepseek',translate_provider_id:'deepseek'});
+  const [assignments,setAssignments]=useState<api.AIAssignments>({
+    clean_provider_id:'deepseek',
+    translate_provider_id:'deepseek',
+    content_provider_id:'deepseek',
+  });
   const [scannedModels,setScannedModels]=useState<api.ScannedModel[]>([]);
+  const [modelSearch, setModelSearch] = useState('');
+  const [modelLanguage, setModelLanguage] = useState('all');
+  const [modelScenario, setModelScenario] = useState('all');
+  const [modelFamily, setModelFamily] = useState('all');
+  const [modelDevice, setModelDevice] = useState('all');
+  const [modelReadyFilter, setModelReadyFilter] = useState('all');
+  const [modelTimestamp, setModelTimestamp] = useState('all');
   const dialogRef = useRef<HTMLElement>(null);
+  const onCloseRef = useRef(onClose);
+
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
 
   useEffect(() => {
     if (!open) return;
     setMessage('');
     setError('');
-    Promise.all([api.getAppSettings(), api.getAISettings(), api.getAIProviders()])
-      .then(([app, , providers]) => {
+    Promise.all([
+      api.getAppSettings(),
+      api.getAISettings().catch(() => null),
+      api.getAIProviders().catch(() => null),
+    ])
+      .then(([app, ai, providers]) => {
         setDraft(app.settings || {});
         setWarnings(app.warnings || []);
-        setProviderCards(providers.providers); setAssignments(providers.assignments);
+        if (providers) {
+          setProviderCards(providers.providers);
+          setAssignments(providers.assignments);
+        }
+        if (!ai || !providers) setError('AI 凭据暂时无法读取；本地转写和其他设置仍可使用。');
       })
       .catch(reason => setError(reason.message));
     onRefreshHealth();
@@ -138,7 +164,7 @@ export default function SettingsCenter(props: Props) {
       if (event.defaultPrevented) return;
       if (event.key === 'Escape') {
         event.preventDefault();
-        onClose();
+        onCloseRef.current();
         return;
       }
       if (event.key !== 'Tab') return;
@@ -169,12 +195,34 @@ export default function SettingsCenter(props: Props) {
       window.removeEventListener('keydown', onKeyDown);
       previousFocus?.focus();
     };
-  }, [onClose, open]);
+  }, [open]);
 
   const resolvedSourceLanguage = String(draft.source_language || config.language);
   const resolvedTargetLanguage = String(draft.translation_target_language || config.target_language);
   const resolvedModel = String(draft.default_model || config.model);
   const runtime = health?.runtime;
+  const catalogFamilies = useMemo(() => Array.from(new Set(
+    (modelStatus?.models || []).map(model => model.family).filter((value): value is string => Boolean(value)),
+  )).sort((left, right) => left.localeCompare(right)), [modelStatus]);
+  const filteredModels = useMemo(() => {
+    const search = modelSearch.trim().toLocaleLowerCase();
+    return (modelStatus?.models || []).filter(model => {
+      const searchable = [
+        model.name, model.family, model.purpose, model.language_description,
+        ...(model.tags || []), ...(model.scenarios || []),
+        ...(model.strengths || []), ...(model.limitations || []),
+      ].filter(Boolean).join(' ').toLocaleLowerCase();
+      if (search && !searchable.includes(search)) return false;
+      if (modelLanguage !== 'all' && !(model.languages || []).some(language => language === '*' || language === modelLanguage)) return false;
+      if (modelScenario !== 'all' && !(model.scenarios || []).includes(modelScenario)) return false;
+      if (modelFamily !== 'all' && model.family !== modelFamily) return false;
+      if (modelDevice !== 'all' && !(model.runtimes || []).some(item => item.id === modelDevice)) return false;
+      if (modelReadyFilter === 'ready' && !(model.runtimes || []).some(item => item.model_ready)) return false;
+      if (modelReadyFilter === 'download' && !(model.runtimes || []).some(item => item.download_required)) return false;
+      if (modelTimestamp !== 'all' && model.timestamp_mode !== modelTimestamp) return false;
+      return true;
+    });
+  }, [modelDevice, modelFamily, modelLanguage, modelReadyFilter, modelScenario, modelSearch, modelStatus, modelTimestamp]);
 
   const modelSourceLabels = useMemo(() => ({
     bundled: '内置', app_download: 'App 下载', external_detected: '外部检测', custom: '自定义路径',
@@ -266,6 +314,17 @@ export default function SettingsCenter(props: Props) {
     finally { setValidatingModel(''); }
   };
 
+  const removeModel = async (model: api.TranscriptionModelStatus) => {
+    if (!window.confirm(`移除“${model.name}”的本地模型文件吗？以后可以重新下载。`)) return;
+    setBusy(true); setError(''); setMessage('');
+    try {
+      const result = await api.removeTranscriptionModel(model.id);
+      setMessage(`${result.message}，释放 ${bytes(result.removed_bytes)}`);
+      onRefreshModels();
+    } catch (reason: any) { setError(reason.message); }
+    finally { setBusy(false); }
+  };
+
   const addFavoriteLanguage = () => {
     const language = favoriteLanguage.trim();
     if (!language || language === 'auto' || language === 'none') return;
@@ -280,7 +339,10 @@ export default function SettingsCenter(props: Props) {
       status: health?.status,
       runtime: {
         ffmpeg: runtime?.ffmpeg && { ok: runtime.ffmpeg.ok, status: runtime.ffmpeg.status, source: runtime.ffmpeg.source, version: runtime.ffmpeg.version },
+        ffprobe: runtime?.ffprobe && { ok: runtime.ffprobe.ok, status: runtime.ffprobe.status, source: runtime.ffprobe.source, version: runtime.ffprobe.version },
         yt_dlp: runtime?.yt_dlp && { ok: runtime.yt_dlp.ok, status: runtime.yt_dlp.status, source: runtime.yt_dlp.source, version: runtime.yt_dlp.version },
+        deno: runtime?.deno && { ok: runtime.deno.ok, status: runtime.deno.status, source: runtime.deno.source, version: runtime.deno.version },
+        ejs: runtime?.ejs && { ok: runtime.ejs.ok, status: runtime.ejs.status, source: runtime.ejs.source, version: runtime.ejs.version },
         disk: runtime?.disk && { ok: runtime.disk.ok, status: runtime.disk.status, free_bytes: runtime.disk.free_bytes },
         models: modelStatus?.models.map(model => ({ id: model.id, ready: model.ready, source: model.source, status: model.status })),
       },
@@ -308,8 +370,8 @@ export default function SettingsCenter(props: Props) {
     </div>;
   };
 
-  return (
-    <div className="modal-backdrop settings-backdrop" role="presentation" onMouseDown={onClose}>
+  return createPortal(
+    <div className={`modal-backdrop settings-backdrop theme-${theme}`} role="presentation" onMouseDown={onClose}>
       <section ref={dialogRef} tabIndex={-1} className="settings-center" role="dialog" aria-modal="true" aria-label="设置中心" onMouseDown={event => event.stopPropagation()}>
         <aside className="settings-navigation">
           <div className="settings-title"><strong>设置</strong><small>字幕工厂</small></div>
@@ -344,27 +406,61 @@ export default function SettingsCenter(props: Props) {
             </>}
 
             {category === 'transcription' && <>
-              <SettingsSection title="默认转写" description="自动选择在普通用户电脑上使用 Whisper Small。">
-                <label className="settings-field horizontal"><span><strong>默认模型</strong><small>按用途分组；Whisper Small 仍是默认推荐</small></span>
-                  <AppSelect value={resolvedModel} onChange={default_model=>updateDraft({default_model})} label="默认模型" searchable options={[{value:'auto',label:'自动选择',description:'日常均衡 · Whisper Small · 多语言'},...(modelStatus?.models||[]).map(model=>({value:model.id,label:model.name,description:[model.category_name,model.language_description,model.size_label].filter(Boolean).join(' · ')}))]}/>
+              <SettingsSection title="默认转写" description="自动选择只使用已经下载且匹配源语言的模型，不会在后台下载大模型。">
+                {modelStatus?.recommendation_reason && <div className="settings-notice">{modelStatus.recommendation_reason}</div>}
+                <label className="settings-field horizontal"><span><strong>默认模型</strong><small>没有合适的已下载模型时安全回退到 Whisper Small</small></span>
+                  <AppSelect value={resolvedModel} onChange={default_model=>updateDraft({default_model})} label="默认模型" searchable options={[{value:'auto',label:'智能自动选择',description:'按源语言选择已下载模型 · 不自动下载 · 安全回退'},...(modelStatus?.models||[]).map(model=>({value:model.id,label:model.name,description:[model.category_name,model.language_description,model.size_label].filter(Boolean).join(' · ')}))]}/>
                 </label>
-                <label className="settings-field horizontal"><span><strong>源语言</strong><small>可搜索 20 种常用语言</small></span>
+                <label className="settings-field horizontal"><span><strong>源语言</strong><small>可搜索常用语言、粤语和吴语</small></span>
                   <LanguagePicker value={resolvedSourceLanguage} onChange={source_language => updateDraft({ source_language })}/>
                 </label>
               </SettingsSection>
               <SettingsSection title="模型管理" description="下载对应运行设备的固定版本；本地导入和已有缓存保持原位。" action={<div className="inline-actions"><button className="button secondary" onClick={scanModelFolder}>导入本地模型</button><button className="button secondary" onClick={onRefreshModels}>刷新状态</button></div>}>
+                <div className="model-catalog-filters" aria-label="模型筛选">
+                  <label className="model-search"><span>搜索模型</span><input value={modelSearch} onChange={event => setModelSearch(event.target.value)} placeholder="名称、语言、场景或特点"/></label>
+                  <AppSelect value={modelLanguage} onChange={setModelLanguage} label="按语言筛选" options={[
+                    {value:'all',label:'全部语言'}, {value:'zh',label:'普通话'}, {value:'yue',label:'粤语'},
+                    {value:'wuu',label:'吴语'}, {value:'en',label:'英语'}, {value:'ja',label:'日语'},
+                    {value:'ko',label:'韩语'}, {value:'ru',label:'俄语'},
+                  ]}/>
+                  <AppSelect value={modelScenario} onChange={setModelScenario} label="按场景筛选" options={[
+                    {value:'all',label:'全部场景'}, {value:'通用字幕',label:'通用字幕'}, {value:'低配置',label:'低配置'},
+                    {value:'高精度',label:'高精度'}, {value:'方言',label:'方言'}, {value:'电话录音',label:'电话录音'},
+                    {value:'医疗',label:'医疗'}, {value:'声音事件',label:'声音事件'}, {value:'歌词与说唱',label:'歌词与说唱'},
+                  ]}/>
+                  <AppSelect value={modelFamily} onChange={setModelFamily} label="按模型家族筛选" options={[
+                    {value:'all',label:'全部家族'}, ...catalogFamilies.map(family => ({value:family,label:family})),
+                  ]}/>
+                  <AppSelect value={modelDevice} onChange={setModelDevice} label="按设备筛选" options={[
+                    {value:'all',label:'全部设备'}, {value:'cpu',label:'CPU'}, {value:'coreml',label:'Core ML'}, {value:'mlx',label:'Apple GPU'},
+                  ]}/>
+                  <AppSelect value={modelReadyFilter} onChange={setModelReadyFilter} label="按状态筛选" options={[
+                    {value:'all',label:'全部状态'}, {value:'ready',label:'已下载'}, {value:'download',label:'可下载'},
+                  ]}/>
+                  <AppSelect value={modelTimestamp} onChange={setModelTimestamp} label="按时间戳筛选" options={[
+                    {value:'all',label:'全部时间轴'}, {value:'word',label:'逐词时间戳'},
+                    {value:'token',label:'逐字/词元时间戳'}, {value:'segment',label:'语音片段级'},
+                  ]}/>
+                  <button className="button secondary" onClick={() => {
+                    setModelSearch(''); setModelLanguage('all'); setModelScenario('all'); setModelFamily('all');
+                    setModelDevice('all'); setModelReadyFilter('all'); setModelTimestamp('all');
+                  }}>清除筛选</button>
+                </div>
                 <div className="model-catalog">
                   {!modelStatus && <div className="settings-empty">正在读取模型状态…</div>}
+                  {modelStatus && !filteredModels.length && <div className="settings-empty">没有符合当前筛选条件的模型。</div>}
                   {[...(modelStatus?.category_order || ['lightweight','balanced','performance','english','parakeet']), ...((modelStatus?.models || []).some(model => model.category_id === 'local') ? ['local'] : [])].map(categoryId => {
-                    const models = (modelStatus?.models || []).filter(model => model.category_id === categoryId);
+                    const models = filteredModels.filter(model => model.category_id === categoryId);
                     if (!models.length) return null;
                     return <section className="model-category" key={categoryId}>
                       <header><strong>{models[0].category_name || categoryId}</strong><span>{models.length} 个模型</span></header>
                       <div className="model-list">{models.map(model => {
-                        const selectedRuntime = String((draft.transcription_runtime_by_model as Record<string, string> | undefined)?.[model.id] || model.selected_runtime || model.runtimes?.[0]?.id || '');
+                        const selectedRuntime = String((draft.transcription_runtime_by_model as Record<string, string> | undefined)?.[model.id] || model.selected_runtime || '');
                         const selectedVariant = model.runtimes?.find(runtime => runtime.id === selectedRuntime);
                         const ready = Boolean(selectedVariant?.model_ready);
                         const canDownload = Boolean(selectedVariant?.download_required);
+                        const modelReady = Boolean(model.ready || model.runtimes?.some(runtime => runtime.model_ready));
+                        const hasDownloadableRuntime = Boolean(model.runtimes?.some(runtime => runtime.download_required));
                         const isExternalCoreML = model.id === 'parakeet-tdt-0.6b-v3-coreml';
                         const taskKey = `${model.id}:${selectedRuntime}`;
                         const task = modelTasks[taskKey];
@@ -373,11 +469,26 @@ export default function SettingsCenter(props: Props) {
                         const progressBytes = Number(progress?.downloaded_bytes || 0);
                         const totalBytes = Number(progress?.total_bytes || selectedVariant?.download_bytes || 0);
                         return <article className="model-row model-catalog-row" key={model.id}>
-                          <span className={`status-orb ${ready ? 'ok' : canDownload ? 'warning' : 'error'}`}/>
+                          <span className={`status-orb ${modelReady ? 'ok' : hasDownloadableRuntime ? 'warning' : 'error'}`}/>
                           <div className="model-copy">
-                            <strong>{model.name}{model.id === 'small' && <b className="model-recommended">推荐</b>}</strong>
+                            <strong>{model.name}{model.id === modelStatus?.recommended_model && <b className="model-recommended">推荐</b>}</strong>
                             <small>{model.purpose} · {model.language_description} · {model.size_label}</small>
-                            <span className="model-tags">{model.tags?.map(tag => <i key={tag}>{tag}</i>)}</span>
+                            <span className="model-tags">
+                              {model.family && <i>{model.family}</i>}
+                              {model.speed_tier && <i>速度 {model.speed_tier}</i>}
+                              {model.accuracy_tier && <i>精度 {model.accuracy_tier}</i>}
+                              {model.memory_tier && <i>内存 {model.memory_tier}</i>}
+                              {model.timestamp_mode && <i>{model.timestamp_mode === 'word' ? '逐词时间戳' : model.timestamp_mode === 'token' ? '逐字/词元时间戳' : '语音片段级时间轴'}</i>}
+                              {model.punctuation_mode && <i>{model.punctuation_mode === 'native' ? '原生标点' : model.punctuation_mode === 'none' ? '不补标点' : '有限标点'}</i>}
+                              {model.tags?.map(tag => <i key={tag}>{tag}</i>)}
+                            </span>
+                            {(model.strengths?.length || model.limitations?.length || model.scenarios?.length) && <details className="model-explanation">
+                              <summary>查看适用场景和限制</summary>
+                              {!!model.scenarios?.length && <p><strong>适合：</strong>{model.scenarios.join('、')}</p>}
+                              {!!model.strengths?.length && <p><strong>优势：</strong>{model.strengths.join('；')}</p>}
+                              {!!model.limitations?.length && <p><strong>不适合：</strong>{model.limitations.join('；')}</p>}
+                              <p><strong>来源：</strong>{model.publisher || model.source_site || '官方模型'}{model.license ? ` · 许可证 ${model.license}` : ''}</p>
+                            </details>}
                             {task && !['success','failed','cancelled'].includes(task.status) && <span className="model-progress">
                               <progress max={100} value={task.progress}/>
                               <small>{task.step === 'verifying_model' ? '正在校验 SHA-256' : `${bytes(progressBytes)} / ${bytes(totalBytes)} · ${task.progress.toFixed(1)}%${progress?.resumed ? ' · 断点续传' : ''}`}</small>
@@ -397,7 +508,9 @@ export default function SettingsCenter(props: Props) {
                             <button className="button secondary model-action" disabled={!!validatingModel} onClick={() => void validateModel(model.id)}>{validatingModel === model.id ? '校验中…' : '校验'}</button>
                             {isExternalCoreML
                               ? <button className="button secondary model-action" onClick={() => void choosePath('coreml_model_path', 'coreml_model', true)}>重新选择目录</button>
-                              : (ready || canDownload) && <button className="button secondary model-action" disabled={!!preparingModel} onClick={() => void prepareModel(model.id, selectedRuntime, ready)}>{preparingModel === taskKey ? '处理中…' : ready ? '修复' : '下载'}</button>}
+                              : selectedRuntime && (ready || canDownload) && <button className="button secondary model-action" disabled={!!preparingModel} onClick={() => void prepareModel(model.id, selectedRuntime, ready)}>{preparingModel === taskKey ? '处理中…' : ready ? '修复' : '下载'}</button>}
+                            {!isExternalCoreML && !selectedRuntime && (modelReady || hasDownloadableRuntime) && <small className="model-runtime-required">先选择运行设备</small>}
+                            {modelReady && model.removable && <button className="button secondary model-action danger" disabled={busy || !!preparingModel} onClick={() => void removeModel(model)}>移除</button>}
                             {preparingModel === taskKey && task && <button className="button secondary model-action danger" onClick={() => void api.cancelTask(task.id)}>取消</button>}
                           </span>
                         </article>;
@@ -415,8 +528,13 @@ export default function SettingsCenter(props: Props) {
             </>}
 
             {category === 'ai' && <>
-              <SettingsSection title="任务分配" description="整理和翻译可使用不同的服务商与模型。">
-                <div className="provider-assignments"><label>AI 整理<AppSelect value={assignments.clean_provider_id} onChange={clean_provider_id=>setAssignments({...assignments,clean_provider_id})} label="AI 整理供应商" options={providerCards.map(card=>({value:card.provider_id,label:card.name,description:card.model}))}/></label><label>AI 翻译<AppSelect value={assignments.translate_provider_id} onChange={translate_provider_id=>setAssignments({...assignments,translate_provider_id})} label="AI 翻译供应商" options={providerCards.map(card=>({value:card.provider_id,label:card.name,description:card.model}))}/></label><button className="button primary" onClick={()=>void api.saveAIAssignments(assignments).then(()=>setMessage('任务分配已保存')).catch(reason=>setError(reason.message))}>保存分配</button></div>
+              <SettingsSection title="任务分配" description="整理、翻译与内容生成分别选择服务商，不会静默继承彼此的配置。">
+                <div className="provider-assignments">
+                  <label>AI 整理<AppSelect value={assignments.clean_provider_id} onChange={clean_provider_id=>setAssignments({...assignments,clean_provider_id})} label="AI 整理供应商" options={providerCards.map(card=>({value:card.provider_id,label:card.name,description:card.model}))}/></label>
+                  <label>AI 翻译<AppSelect value={assignments.translate_provider_id} onChange={translate_provider_id=>setAssignments({...assignments,translate_provider_id})} label="AI 翻译供应商" options={providerCards.map(card=>({value:card.provider_id,label:card.name,description:card.model}))}/></label>
+                  <label>内容生成<AppSelect value={assignments.content_provider_id} onChange={content_provider_id=>setAssignments({...assignments,content_provider_id})} label="内容生成供应商" options={providerCards.map(card=>({value:card.provider_id,label:card.name,description:card.model}))}/></label>
+                  <button className="button primary" onClick={()=>void api.saveAIAssignments(assignments).then(()=>setMessage('任务分配已保存')).catch(reason=>setError(reason.message))}>保存分配</button>
+                </div>
               </SettingsSection>
               <SettingsSection title="模型供应商" description="每张卡的地址、密钥和模型互相隔离，密钥只保存在本机。">
                 <div className="provider-card-grid">{providerCards.map(card=><article className="provider-card" key={card.provider_id}><header><strong>{card.name}</strong><span className={card.has_api_key?'ready':''}>{card.has_api_key?'已配置':'未配置'}</span></header><label>Base URL<input value={card.base_url} onChange={event=>updateProvider(card.provider_id,{base_url:event.target.value})}/></label><label>模型<input value={card.model} onChange={event=>updateProvider(card.provider_id,{model:event.target.value})}/></label>{!!card.models.length&&<div className="provider-model-chips">{card.models.map(model=><button type="button" className={model===card.model?'active':''} key={model} onClick={()=>updateProvider(card.provider_id,{model})}>{model}</button>)}</div>}<label>API Key<input type="password" value={card.api_key} placeholder={card.has_api_key?'留空保留现有密钥':'sk-…'} onChange={event=>updateProvider(card.provider_id,{api_key:event.target.value})}/></label><footer><button className="button secondary" disabled={busy||!card.has_api_key} onClick={()=>void api.testAIProvider(card.provider_id).then(result=>{updateProvider(card.provider_id,{last_test_status:'success',last_latency_ms:result.latency_ms});setMessage(`${card.name} ${result.latency_ms}ms`);}).catch(reason=>setError(reason.message))}>测试连接</button><button className="button primary" disabled={busy} onClick={()=>void saveProvider(card)}>保存</button></footer></article>)}</div>
@@ -451,14 +569,16 @@ export default function SettingsCenter(props: Props) {
               </SettingsSection>
               <SettingsSection title="运行状态" description="下载前请确保所有关键项目均为可用。" action={<button className="button secondary" onClick={onRefreshHealth}>重新检查</button>}>
                 <RuntimeRow label="FFmpeg" value={runtimeCopy(runtime?.ffmpeg as any)}/>
+                <RuntimeRow label="FFprobe" value={runtimeCopy(runtime?.ffprobe as any)}/>
                 <RuntimeRow label="yt-dlp" value={runtimeCopy(runtime?.yt_dlp as any)}/>
+                <RuntimeRow label="Deno" value={runtimeCopy(runtime?.deno as any)}/>
+                <RuntimeRow label="EJS 挑战组件" value={runtimeCopy(runtime?.ejs as any)}/>
                 <RuntimeRow label="输出目录" value={runtimeCopy(runtime?.output_directory as any)}/>
                 <RuntimeRow label="磁盘空间" value={{ ...runtimeCopy(runtime?.disk as any), detail: runtime?.disk?.free_bytes ? `${bytes(runtime.disk.free_bytes)} 可用` : runtimeCopy(runtime?.disk as any).detail }}/>
               </SettingsSection>
-              <SettingsSection title="路径" description="解析顺序：App 内置 → 用户自定义 → 环境变量 → 系统 PATH。">
+              <SettingsSection title="路径" description="下载器固定使用 App 内置的 yt-dlp Python API；旧版 yt_dlp_path 设置会继续保留但不再参与下载。">
                 {renderPath('下载目录', 'download_directory', 'download_directory', 'App 默认数据目录', true)}
                 {renderPath('FFmpeg 自定义路径', 'ffmpeg_path', 'ffmpeg', '通常无需设置')}
-                {renderPath('yt-dlp 自定义路径', 'yt_dlp_path', 'yt_dlp', '通常无需设置')}
               </SettingsSection>
               <SettingsSection title="数据库备份" description="默认保留 7 份每日备份和 4 份每周备份；恢复前会再创建安全备份。" action={<button className="button secondary" disabled={busy} onClick={() => void backupNow()}>立即备份</button>}>
                 <div className="backup-list">
@@ -499,7 +619,8 @@ export default function SettingsCenter(props: Props) {
           {(category === 'ai' || category === 'appearance' || category === 'about') && (message || error) && <footer className="settings-footer"><div>{message && <span className="success-copy">{message}</span>}{error && <span className="error-copy">{error}</span>}</div></footer>}
         </div>
       </section>
-    </div>
+    </div>,
+    document.body,
   );
 }
 

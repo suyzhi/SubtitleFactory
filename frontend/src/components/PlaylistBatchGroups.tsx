@@ -75,23 +75,31 @@ export default function PlaylistBatchGroups({ batches, search, collapsed, workfl
           </button>
           <div className="playlist-batch-actions">
             {batch.status === 'paused' ? <button onClick={() => void act('批次已继续', () => api.resumePlaylistBatch(batch.id))}>继续</button> : <button disabled={!['running','pending'].includes(batch.status)} onClick={() => void act('批次已暂停', () => api.pausePlaylistBatch(batch.id))}>暂停</button>}
-            <button onClick={() => void act('已提交失败项重试', () => api.retryPlaylistBatch(batch.id))}>重试失败项</button>
-            <button onClick={() => void act('播放列表已同步', () => api.syncPlaylistBatch(batch.id))}>同步</button>
-            <button onClick={() => void act('已启动批量转写', () => api.runPlaylistStage(batch.id, 'transcribe', workflow))}>批量转写</button>
-            <button onClick={() => setPendingAction({ title: '确认批量 AI 整理', message: '将把该播放列表中符合条件的字幕发送到当前 AI 整理服务，可能产生费用。', confirmLabel: '授权并开始整理', success: '已启动 AI 整理', action: () => api.runPlaylistStage(batch.id, 'clean', { ...workflow, ai_authorized: true }) })}>AI 整理</button>
-            <button onClick={() => setPendingAction({ title: '确认批量 AI 翻译', message: '将把该播放列表中符合条件的字幕发送到当前 AI 翻译服务，可能产生费用。', confirmLabel: '授权并开始翻译', success: '已启动 AI 翻译', action: () => api.runPlaylistStage(batch.id, 'translate', { ...workflow, ai_authorized: true }) })}>AI 翻译</button>
-            <button onClick={() => setPendingAction({ title: '取消未完成任务？', message: '将终止尚未完成的任务；已下载媒体、已有字幕和项目记录都会保留。', confirmLabel: '取消未完成任务', danger: true, success: '未完成任务已取消', action: () => api.cancelPlaylistBatch(batch.id) })}>取消</button>
-            <button className="danger" onClick={() => { setDeletePhrase(''); setDeleteTarget({ id: batch.id, title: batch.title, itemCount: batch.item_count }); }}>删除播放列表</button>
+            {!!batch.failed_count && <button className="attention" onClick={() => void act('已提交失败项重试', () => api.retryPlaylistBatch(batch.id))}>重试 {batch.failed_count} 项</button>}
+            <details className="playlist-batch-more">
+              <summary aria-label={`更多批量操作：${batch.title}`}>•••</summary>
+              <div role="menu" aria-label={`批量操作：${batch.title}`}>
+                {!batch.failed_count && <button role="menuitem" onClick={() => void act('已提交失败项重试', () => api.retryPlaylistBatch(batch.id))}>重试失败项</button>}
+                <button role="menuitem" onClick={() => void act('播放列表已同步', () => api.syncPlaylistBatch(batch.id))}>同步播放列表</button>
+                <button role="menuitem" onClick={() => void act('已启动批量转写', () => api.runPlaylistStage(batch.id, 'transcribe', workflow))}>批量转写</button>
+                <button role="menuitem" onClick={() => setPendingAction({ title: '确认批量 AI 整理', message: '将把该播放列表中符合条件的字幕发送到当前 AI 整理服务，可能产生费用。', confirmLabel: '授权并开始整理', success: '已启动 AI 整理', action: () => api.runPlaylistStage(batch.id, 'clean', { ...workflow, ai_authorized: true }) })}>AI 整理…</button>
+                <button role="menuitem" onClick={() => setPendingAction({ title: '确认批量 AI 翻译', message: '将把该播放列表中符合条件的字幕发送到当前 AI 翻译服务，可能产生费用。', confirmLabel: '授权并开始翻译', success: '已启动 AI 翻译', action: () => api.runPlaylistStage(batch.id, 'translate', { ...workflow, ai_authorized: true }) })}>AI 翻译…</button>
+                <hr/>
+                <button role="menuitem" onClick={() => setPendingAction({ title: '取消未完成任务？', message: '将终止尚未完成的任务；已下载媒体、已有字幕和项目记录都会保留。', confirmLabel: '取消未完成任务', danger: true, success: '未完成任务已取消', action: () => api.cancelPlaylistBatch(batch.id) })}>取消未完成任务…</button>
+                <button role="menuitem" className="danger" onClick={() => { setDeletePhrase(''); setDeleteTarget({ id: batch.id, title: batch.title, itemCount: batch.item_count }); }}>删除播放列表…</button>
+              </div>
+            </details>
           </div>
         </header>
         {!isCollapsed && <div className="playlist-batch-items">{items.map(item => <div className={`playlist-batch-item ${item.status}`} key={item.id}>
           <button className="playlist-item-main" disabled={!item.project} onClick={() => item.project && onOpenProject(item.project)}>
             <span>{item.thumbnail_url ? <img src={item.thumbnail_url} alt="" loading="lazy"/> : item.position}</span>
-            <span><strong>{item.position}. {item.title}</strong><small>{item.source_state === 'removed' ? '已从源播放列表移除' : item.source_state === 'unavailable' ? '视频不可用' : item.status}</small></span>
+            <span><strong>{item.position}. {item.title}</strong><small>{item.source_state === 'removed' ? '已从源播放列表移除' : item.source_state === 'permission_required' ? '需要账号权限' : item.source_state === 'unavailable' ? '视频不可用' : item.status}</small>{item.error && <small className="playlist-item-error">{item.error}</small>}</span>
           </button>
           <div className="playlist-stage-pills">{Object.entries(stageLabels).map(([stage, label]) => {
             const state = item.stages[stage as keyof typeof item.stages]?.status || 'skipped';
-            return <span className={state} title={item.stages[stage as keyof typeof item.stages]?.error || ''} key={stage}>{label}</span>;
+            const detail = item.stages[stage as keyof typeof item.stages];
+            return <span className={state} title={[detail?.error_code, detail?.error].filter(Boolean).join(' · ')} key={stage}>{label}{detail?.error_code ? ` · ${detail.error_code}` : ''}</span>;
           })}</div>
           {['failed','partial','cancelled'].includes(item.status) && <button className="playlist-item-retry" onClick={() => retryItem(batch.id, item)}>重试</button>}
         </div>)}</div>}

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-VERSION="0.3.2"
+VERSION="0.4.1"
 UI_MARKER="subtitle-factory-ui:professional-v2"
 UI_LAYOUT_MARKER="subtitle-factory-ui:library-workspace-v2"
 OLD_UI_MARKER="ai-settings-dialog"
@@ -22,7 +22,9 @@ cleanup_build_outputs() {
   done
   while IFS= read -r -d '' cache_dir; do
     find "$cache_dir" -depth -delete
-  done < <(find "$ROOT/backend" "$ROOT/frontend" -type d -name __pycache__ -print0)
+  done < <(find "$ROOT/backend" "$ROOT/frontend" \
+    \( -path "$ROOT/backend/.venv" -o -path "$ROOT/frontend/node_modules" \) -prune -o \
+    -type d -name __pycache__ -print0)
 }
 
 trap cleanup_build_outputs EXIT

@@ -126,6 +126,12 @@ fn start_backend(app: &tauri::App, session: &BackendSession) -> Result<BackendPr
         .path()
         .app_data_dir()
         .map_err(|error| error.to_string())?;
+    // Keep the normal packaged location by default, but honor an explicit
+    // override for isolated QA, portable deployments, and support diagnostics.
+    // The backend already validates and creates the selected directory.
+    let backend_data = std::env::var_os("SUBTITLE_FACTORY_DATA_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| app_data.join("data"));
     fs::create_dir_all(&app_data).map_err(|error| error.to_string())?;
     let pid_file = app_data.join("backend.pid");
     stop_stale_process_group(&pid_file);
@@ -203,7 +209,7 @@ fn start_backend(app: &tauri::App, session: &BackendSession) -> Result<BackendPr
     let error_file = log_file.try_clone().map_err(|error| error.to_string())?;
 
     command
-        .env("SUBTITLE_FACTORY_DATA_DIR", app_data.join("data"))
+        .env("SUBTITLE_FACTORY_DATA_DIR", backend_data)
         .env("SUBTITLE_FACTORY_APP_VERSION", env!("CARGO_PKG_VERSION"))
         .env("SUBTITLE_FACTORY_PORT", session.port.to_string())
         .env("SUBTITLE_FACTORY_API_TOKEN", &session.token)

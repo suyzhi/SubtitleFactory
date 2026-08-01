@@ -7,6 +7,8 @@ export interface LanguageOption {
 export const LANGUAGES: LanguageOption[] = [
   { code: 'auto', name: '自动检测', nativeName: 'Auto' },
   { code: 'zh', name: '中文', nativeName: '中文' },
+  { code: 'yue', name: '粤语', nativeName: '粵語' },
+  { code: 'wuu', name: '吴语', nativeName: '吴语 / 上海话' },
   { code: 'en', name: '英语', nativeName: 'English' },
   { code: 'ja', name: '日语', nativeName: '日本語' },
   { code: 'ko', name: '韩语', nativeName: '한국어' },

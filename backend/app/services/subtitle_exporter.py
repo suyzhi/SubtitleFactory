@@ -134,8 +134,12 @@ def export_ass(segments: list, output_path: str, bilingual: bool = False,
     font_name = raw_font.split(",", 1)[0].strip().strip('"\'') or font_name
     font_size = int(settings.get("originalFontSize") or settings.get("fontSize") or font_size)
     secondary_size = int(settings.get("translatedFontSize") or max(8, font_size - 2))
+    play_res_x = max(320, int(settings.get("_play_res_x") or 1920))
+    play_res_y = max(320, int(settings.get("_play_res_y") or 1080))
     vertical_position = max(5, min(95, float(settings.get("verticalPosition", 88))))
-    margin_vertical = max(8, round((100 - vertical_position) / 100 * 1080))
+    safe_margin = max(0.03, min(0.15, float(settings.get("_safe_margin_ratio") or 0.03)))
+    margin_vertical = max(round(play_res_y * safe_margin), round((100 - vertical_position) / 100 * play_res_y))
+    margin_horizontal = max(20, round(play_res_x * safe_margin))
     background_mode = settings.get("backgroundMode", "none")
     shadow_enabled = bool(settings.get("shadow", True))
 
@@ -158,8 +162,8 @@ def export_ass(segments: list, output_path: str, bilingual: bool = False,
     box_color = pysubs2.Color(255, 255, 255) if background_mode == "white" else pysubs2.Color(0, 0, 0)
 
     subs = pysubs2.SSAFile()
-    subs.info["PlayResX"] = "1920"
-    subs.info["PlayResY"] = "1080"
+    subs.info["PlayResX"] = str(play_res_x)
+    subs.info["PlayResY"] = str(play_res_y)
     subs.styles[style_name] = pysubs2.SSAStyle(
         fontname=font_name,
         fontsize=font_size,
@@ -179,8 +183,8 @@ def export_ass(segments: list, output_path: str, bilingual: bool = False,
         outline=1.5 if background_mode == "none" else 0,
         shadow=1 if shadow_enabled else 0,
         alignment=pysubs2.Alignment.BOTTOM_CENTER,
-        marginl=20,
-        marginr=20,
+        marginl=margin_horizontal,
+        marginr=margin_horizontal,
         marginv=margin_vertical,
         alphalevel=0,
         encoding=1,
@@ -205,8 +209,8 @@ def export_ass(segments: list, output_path: str, bilingual: bool = False,
         outline=1.0 if background_mode == "none" else 0,
         shadow=1 if shadow_enabled else 0,
         alignment=pysubs2.Alignment.BOTTOM_CENTER,
-        marginl=20,
-        marginr=20,
+        marginl=margin_horizontal,
+        marginr=margin_horizontal,
         marginv=margin_vertical,
         alphalevel=0,
         encoding=1,
@@ -225,7 +229,7 @@ def export_ass(segments: list, output_path: str, bilingual: bool = False,
             else:
                 subtitle_text = f"{{\\fs{secondary_size}\\c{translated_override}}}{translated}\\N{{\\fs{font_size}\\c{original_override}}}{text}"
         else:
-            subtitle_text = text
+            subtitle_text = translated if primary_lang == "translated" and translated else text
 
         event = pysubs2.SSAEvent(
             start=start_ms,

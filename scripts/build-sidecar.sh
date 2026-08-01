@@ -46,6 +46,7 @@ cd "$ROOT/backend"
   --collect-all av \
   --collect-all uvicorn \
   --collect-all pysubs2 \
+  --collect-all PIL \
   --collect-all yt_dlp \
   --exclude-module torch \
   --hidden-import app.main \

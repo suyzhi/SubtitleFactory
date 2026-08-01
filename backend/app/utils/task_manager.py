@@ -286,6 +286,7 @@ class TaskManager:
         when the executor has not started them yet; otherwise the worker exits at
         its next checkpoint.
         """
+        task_type = ""
         with self._lock:
             task = self._tasks.get(task_id)
             if not task:
@@ -297,6 +298,7 @@ class TaskManager:
 
             now = time.strftime("%Y-%m-%d %H:%M:%S")
             task["status"] = "cancelled"
+            task_type = str(task.get("type") or "")
             task["message"] = "任务已终止"
             task["error"] = None
             task["updated_at"] = now
@@ -316,7 +318,21 @@ class TaskManager:
             if condition:
                 condition.notify_all()
             self._persist(task)
-            return True
+        if task_type == "clip_render_batch":
+            try:
+                from ..models.database import get_db
+                db = get_db()
+                db.execute(
+                    """UPDATE clip_renders
+                          SET status='cancelled',updated_at=datetime('now','localtime')
+                        WHERE task_id=? AND status IN ('pending','running')""",
+                    (task_id,),
+                )
+                db.commit()
+                db.close()
+            except Exception:
+                logger.debug("Unable to cancel dependent clip render rows", exc_info=True)
+        return True
 
     def is_cancelled(self, task_id: str) -> bool:
         """Return whether cancellation has been requested for a task."""
@@ -373,10 +389,10 @@ class TaskManager:
                     except Exception as e:
                         error_code = str(getattr(e, "error_code", "UNEXPECTED_ERROR"))
                         recoverable = bool(getattr(e, "recoverable", False))
+                        automatic_retry = bool(getattr(e, "automatic_retry", False))
                         current = self.get_task(task_id) or {}
                         attempt = int(current.get("attempt", 1)); maximum = int(current.get("max_attempts", 1))
-                        terminal_code = any(marker in error_code.upper() for marker in ("AUTH", "BALANCE", "PATH", "CANCEL"))
-                        if recoverable and not terminal_code and attempt < maximum:
+                        if automatic_retry and attempt < maximum:
                             delay = min(30, 2 ** (attempt - 1))
                             retry_at = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(time.time() + delay))
                             self.update_task(task_id, status="pending", attempt=attempt + 1, next_retry_at=retry_at,
@@ -389,9 +405,19 @@ class TaskManager:
                         logger.error(f"[TaskManager] 任务失败: {task_id} - {str(e)}", exc_info=True)
                         actions = list(getattr(e, "available_actions", ["retry"] if recoverable else []))
                         suggestion = getattr(e, "suggestion", "请复制诊断信息并检查运行日志")
+                        failure_details = {"failure_suggestion": suggestion}
+                        exception_details = getattr(e, "details", None)
+                        if isinstance(exception_details, dict) and exception_details:
+                            download_details = dict(
+                                (current.get("details") or {}).get("download") or {}
+                            )
+                            download_details.update(exception_details)
+                            download_details["task_attempt"] = attempt
+                            download_details["automatic_retry"] = automatic_retry
+                            failure_details["download"] = download_details
                         self.update_task(task_id, status="failed", error=str(e), error_code=error_code,
                                          recoverable=recoverable, available_actions=actions, message=str(e),
-                                         details={"failure_suggestion": suggestion})
+                                         details=failure_details)
                         self.add_log(task_id, "error", "任务失败", str(e), suggestion=suggestion)
                         try:
                             from ..models.database import get_db

@@ -2,6 +2,7 @@
 
 import '@testing-library/jest-dom/vitest';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import type { ComponentProps } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import SettingsCenter from './SettingsCenter';
 import * as api from '../api/backend';
@@ -19,6 +20,10 @@ vi.mock('../api/backend', async importOriginal => {
       step: 'model_ready', progress: 100, message: '完成', error: null,
       created_at: '', updated_at: '', details: {}, logs: [],
     }),
+    removeTranscriptionModel: vi.fn().mockResolvedValue({
+      model_id: 'medasr-ctc-en-int8-2025-12-25', removed: true,
+      removed_bytes: 154_111_131, message: '模型文件已移除，可随时重新下载',
+    }),
   };
 });
 
@@ -28,9 +33,14 @@ const categoryNames: Record<string, string> = {
   performance: '高性能 / 高精度',
   english: '英语专用',
   parakeet: 'Parakeet',
+  multilingual: '通用多语言',
+  chinese: '中文与中英混说',
+  dialects: '中文方言专用',
+  east_asian: '日韩与俄语',
+  specialized: '专业场景',
 };
 
-const models: api.TranscriptionModelStatus[] = [
+const legacyModels: api.TranscriptionModelStatus[] = [
   ['tiny', 'Whisper Tiny', 'lightweight'],
   ['base', 'Whisper Base', 'lightweight'],
   ['small', 'Whisper Small', 'balanced'],
@@ -61,36 +71,134 @@ const models: api.TranscriptionModelStatus[] = [
   selected_runtime: 'cpu',
 }));
 
+const managedModelIds = [
+  'dolphin-base-ctc-multi-lang-int8-2025-04-02',
+  'omnilingual-asr-1600-languages-300m-ctc-v2-int8-2026-02-05',
+  'qwen3-asr-0.6b-int8-2026-03-25',
+  'moonshine-base-zh-quantized-2026-02-27',
+  'paraformer-zh-2023-09-14',
+  'fire-red-asr2-ctc-zh-en-int8-2026-02-25',
+  'telespeech-ctc-int8-zh-2024-06-04',
+  'paraformer-zh-int8-2025-10-07',
+  'wenetspeech-yue-u2pp-conformer-ctc-zh-en-cantonese-int8-2025-09-10',
+  'wenetspeech-wu-u2pp-conformer-ctc-zh-int8-2026-02-03',
+  'sense-voice-zh-en-ja-ko-yue-int8-2025-09-09',
+  'moonshine-tiny-en-quantized-2026-02-27',
+  'medasr-ctc-en-int8-2025-12-25',
+  'moonshine-tiny-ja-quantized-2026-02-27',
+  'nemo-parakeet-tdt-ctc-0.6b-ja-35000-int8',
+  'moonshine-tiny-ko-quantized-2026-02-27',
+  'zipformer-korean-2024-06-24',
+  'nemo-transducer-punct-giga-am-v3-russian-2025-12-16',
+] as const;
+
+const managedModels: api.TranscriptionModelStatus[] = managedModelIds.map((id, index) => {
+  const medical = id.startsWith('medasr');
+  const category = medical || id.startsWith('qwen3') || id.startsWith('telespeech') || id.startsWith('sense')
+    ? 'specialized'
+    : id.startsWith('dolphin') || id.startsWith('omnilingual')
+      ? 'multilingual'
+      : id.includes('yue') || id.includes('wu-') || id === 'paraformer-zh-int8-2025-10-07'
+        ? 'dialects'
+        : id.includes('ja-') || id.includes('ko-') || id.includes('korean') || id.includes('russian')
+          ? 'east_asian'
+          : id.startsWith('moonshine-base')
+            ? 'lightweight'
+            : 'chinese';
+  return {
+    id,
+    name: medical ? 'MedASR 英语医疗' : `托管模型 ${index + 1}`,
+    category_id: category,
+    category_name: categoryNames[category],
+    purpose: medical ? '英语医疗术语' : '测试用途',
+    language_description: medical ? '英语医疗语音' : '多语言',
+    size_label: '下载约 120 MiB，安装约 150 MiB',
+    publisher: '官方 sherpa-onnx 模型',
+    tags: medical ? ['医疗', 'CPU'] : ['CPU'],
+    family: medical ? 'MedASR CTC' : '测试家族',
+    scenarios: medical ? ['医疗'] : ['通用字幕'],
+    strengths: ['固定官方资源', '逐文件校验'],
+    limitations: medical ? ['仅英语', '不会自动启用'] : ['测试限制'],
+    speed_tier: '快', accuracy_tier: '高', memory_tier: '中',
+    timestamp_mode: medical ? 'token' : 'segment',
+    punctuation_mode: 'native',
+    installed_bytes: 150_000_000,
+    license: '官方许可',
+    removable: true,
+    ready: medical,
+    download_required: !medical,
+    languages: medical ? ['en'] : ['*'],
+    runtimes: [{
+      id: 'cpu', name: 'CPU', engine: 'sherpa-onnx', available: true,
+      model_ready: medical, download_required: !medical,
+      download_bytes: 120_000_000, source: medical ? 'app_download' : 'github',
+    }],
+    selected_runtime: 'cpu',
+  };
+});
+
+const models = [...legacyModels, ...managedModels];
+
+function settingsProps(overrides: Partial<ComponentProps<typeof SettingsCenter>> = {}): ComponentProps<typeof SettingsCenter> {
+  return {
+    open: true,
+    onClose: vi.fn(),
+    config: { model: 'small', language: 'auto', target_language: 'zh' } as never,
+    onConfigChange: vi.fn(),
+    appSettings: { default_model: 'small' } as never,
+    onAppSettingsChange: vi.fn(),
+    aiSettings: null,
+    onAISaved: vi.fn(),
+    theme: 'dark',
+    onThemeChange: vi.fn(),
+    motionEnabled: true,
+    onMotionEnabledChange: vi.fn(),
+    density: 'comfortable',
+    onDensityChange: vi.fn(),
+    health: null,
+    onRefreshHealth: vi.fn(),
+    modelStatus: {
+      recommended_model: 'small',
+      recommendation_reason: '没有已下载且匹配所选语言的专用模型，已回退 Whisper Small',
+      category_order: [
+        'lightweight','balanced','performance','multilingual','chinese',
+        'dialects','english','east_asian','specialized','parakeet',
+      ],
+      models,
+    },
+    onRefreshModels: vi.fn(),
+    onOpenLogs: vi.fn(),
+    ...overrides,
+  };
+}
+
 describe('SettingsCenter model catalog', () => {
-  it('groups nine models and downloads the currently selected runtime', async () => {
-    render(<SettingsCenter
-      open
-      onClose={vi.fn()}
-      config={{ model: 'small', language: 'auto', target_language: 'zh' } as never}
-      onConfigChange={vi.fn()}
-      appSettings={{ default_model: 'small' } as never}
-      onAppSettingsChange={vi.fn()}
-      aiSettings={null}
-      onAISaved={vi.fn()}
-      theme="dark"
-      onThemeChange={vi.fn()}
-      motionEnabled
-      onMotionEnabledChange={vi.fn()}
-      density="comfortable"
-      onDensityChange={vi.fn()}
-      health={null}
-      onRefreshHealth={vi.fn()}
-      modelStatus={{
-        recommended_model: 'small',
-        category_order: ['lightweight','balanced','performance','english','parakeet'],
-        models,
-      }}
-      onRefreshModels={vi.fn()}
-      onOpenLogs={vi.fn()}
-    />);
+  it('renders the settings surface at the document root', () => {
+    render(<SettingsCenter {...settingsProps()}/>);
+    const dialog = screen.getByRole('dialog', { name: '设置中心' });
+    const backdrop = dialog.closest('.settings-backdrop');
+    expect(backdrop?.parentElement).toBe(document.body);
+    expect(backdrop).toHaveClass('theme-dark');
+  });
+
+  it('carries the light theme into the document-level portal', () => {
+    render(<SettingsCenter {...settingsProps({ theme: 'light' })}/>);
+    expect(screen.getByRole('dialog', { name: '设置中心' }).closest('.settings-backdrop'))
+      .toHaveClass('theme-light');
+  });
+
+  it('keeps non-AI settings usable when provider credentials cannot be loaded', async () => {
+    vi.mocked(api.getAIProviders).mockRejectedValueOnce(new Error('Keychain unavailable'));
+    render(<SettingsCenter {...settingsProps()}/>);
+    expect(await screen.findByText('AI 凭据暂时无法读取；本地转写和其他设置仍可使用。')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '保存更改' })).toBeEnabled();
+  });
+
+  it('groups twenty-seven models and downloads the selected runtime', async () => {
+    render(<SettingsCenter {...settingsProps()}/>);
     fireEvent.click(screen.getByRole('button', { name: /转写/ }));
     await waitFor(() => expect(screen.getByText('轻量快速')).toBeInTheDocument());
-    expect(screen.getAllByText(/Whisper|Parakeet/).length).toBeGreaterThanOrEqual(9);
+    expect(document.querySelectorAll('.model-catalog-row')).toHaveLength(27);
     for (const category of Object.values(categoryNames)) {
       expect(screen.getByText(category)).toBeInTheDocument();
     }
@@ -99,5 +207,63 @@ describe('SettingsCenter model catalog', () => {
     expect(tinyRow).not.toBeNull();
     fireEvent.click(within(tinyRow as HTMLElement).getByRole('button', { name: '下载' }));
     await waitFor(() => expect(api.prepareTranscriptionModel).toHaveBeenCalledWith('tiny', 'cpu', false));
+  });
+
+  it('searches professional metadata and removes only managed files after confirmation', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValueOnce(true);
+    render(<SettingsCenter {...settingsProps()}/>);
+    fireEvent.click(screen.getByRole('button', { name: /转写/ }));
+    fireEvent.change(await screen.findByPlaceholderText('名称、语言、场景或特点'), {
+      target: { value: '医疗' },
+    });
+    const row = (await screen.findByText('MedASR 英语医疗')).closest('article');
+    expect(row).not.toBeNull();
+    expect(document.querySelectorAll('.model-catalog-row')).toHaveLength(1);
+    fireEvent.click(within(row as HTMLElement).getByRole('button', { name: '移除' }));
+    await waitFor(() => expect(api.removeTranscriptionModel).toHaveBeenCalledWith(
+      'medasr-ctc-en-int8-2025-12-25',
+    ));
+  });
+
+  it('keeps focus and typed model text when the parent supplies a new close callback', async () => {
+    vi.mocked(api.getAIProviders).mockResolvedValueOnce({
+      providers: [{
+        provider_id: 'deepseek',
+        name: 'DeepSeek',
+        base_url: 'https://api.deepseek.com/v1',
+        api_key: '',
+        model: 'deepseek-v4-flash',
+        models: ['deepseek-v4-flash', 'deepseek-v4-pro'],
+        enabled: true,
+        has_api_key: true,
+      }],
+      assignments: {
+        clean_provider_id: 'deepseek',
+        translate_provider_id: 'deepseek',
+        content_provider_id: 'deepseek',
+      },
+    });
+    const firstClose = vi.fn();
+    const secondClose = vi.fn();
+    const stableProps = settingsProps({ onClose: firstClose });
+    const { rerender } = render(<SettingsCenter {...stableProps}/>);
+
+    fireEvent.click(screen.getByRole('button', { name: /AI 服务/ }));
+    const providerSection = (await screen.findByText('模型供应商')).closest('section');
+    const card = providerSection?.querySelector('article.provider-card') || null;
+    expect(card).not.toBeNull();
+    const modelInput = within(card as HTMLElement).getByLabelText('模型');
+    modelInput.focus();
+    fireEvent.change(modelInput, { target: { value: 'deepseek-v4-f' } });
+    expect(modelInput).toHaveFocus();
+
+    rerender(<SettingsCenter {...stableProps} onClose={secondClose}/>);
+    expect(modelInput).toHaveFocus();
+    fireEvent.change(modelInput, { target: { value: 'deepseek-v4-flash' } });
+    expect(modelInput).toHaveValue('deepseek-v4-flash');
+
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(firstClose).not.toHaveBeenCalled();
+    expect(secondClose).toHaveBeenCalledOnce();
   });
 });

@@ -51,7 +51,13 @@ def _playlist_call(function, *args):
     except PlaylistBatchError as exc:
         raise HTTPException(
             404 if exc.error_code == "BATCH_NOT_FOUND" else 422,
-            detail={"code": exc.error_code, "message": str(exc), "recoverable": exc.recoverable},
+            detail={
+                "code": exc.error_code,
+                "message": str(exc),
+                "recoverable": exc.recoverable,
+                "suggestion": exc.suggestion,
+                "available_actions": exc.available_actions,
+            },
         ) from exc
 
 

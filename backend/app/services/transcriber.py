@@ -43,12 +43,21 @@ from .model_catalog import (
     resolve_local_model,
     runtime_model_status,
 )
+from .managed_sherpa import (
+    create_managed_session,
+    managed_model_status,
+    recommended_ready_model,
+)
+from .sherpa_catalog import MANAGED_SHERPA_BY_ID
 
 logger = logging.getLogger(__name__)
 
 WHISPER_MODEL_IDS = frozenset(WHISPER_CATALOG_BY_ID)
 PARAKEET_MODEL_IDS = frozenset({PARAKEET_MODEL_ID, PARAKEET_ONNX_MODEL_ID})
-SUPPORTED_TRANSCRIPTION_MODELS = WHISPER_MODEL_IDS | PARAKEET_MODEL_IDS | {"custom"}
+MANAGED_SHERPA_MODEL_IDS = frozenset(MANAGED_SHERPA_BY_ID)
+SUPPORTED_TRANSCRIPTION_MODELS = (
+    WHISPER_MODEL_IDS | PARAKEET_MODEL_IDS | MANAGED_SHERPA_MODEL_IDS | {"custom"}
+)
 SAFE_TRANSCRIPTION_MODEL = "small"
 _WHISPER_REQUIRED_FILES = frozenset({"model.bin", "config.json", "tokenizer.json"})
 
@@ -136,6 +145,8 @@ def get_transcription_model_status(
     coreml_cli_path: str | Path | None = None,
 ) -> dict:
     """Return model state with explicit source categories for the settings UI."""
+    if model_id in MANAGED_SHERPA_MODEL_IDS:
+        return managed_model_status(model_id)
     if model_id in PARAKEET_MODEL_IDS:
         return get_parakeet_model_status(
             model_id,
@@ -190,8 +201,12 @@ def resolve_transcription_model(
     requested = (model_size or "auto").strip()
     candidate = requested
     if candidate == "auto":
-        configured = (default_model or SAFE_TRANSCRIPTION_MODEL).strip()
-        candidate = configured if configured and configured != "auto" else SAFE_TRANSCRIPTION_MODEL
+        configured = (default_model or "auto").strip()
+        candidate = (
+            configured
+            if configured and configured != "auto"
+            else recommended_ready_model(language) or SAFE_TRANSCRIPTION_MODEL
+        )
 
     normalized_language = (language or "auto").lower()
     if candidate.startswith("local:"):
@@ -219,6 +234,27 @@ def resolve_transcription_model(
         return ModelResolution(
             requested, SAFE_TRANSCRIPTION_MODEL, SAFE_TRANSCRIPTION_MODEL, "app_download",
             "Distil-Whisper Large V3 仅支持英语，已切换到 Whisper Small",
+        )
+
+    if candidate in MANAGED_SHERPA_MODEL_IDS:
+        definition = MANAGED_SHERPA_BY_ID[candidate]
+        if (
+            normalized_language not in {"", "auto"}
+            and "*" not in definition.languages
+            and normalized_language not in definition.languages
+        ):
+            return ModelResolution(
+                requested,
+                SAFE_TRANSCRIPTION_MODEL,
+                SAFE_TRANSCRIPTION_MODEL,
+                "app_download",
+                f"{definition.name} 不支持所选源语言，已切换到 Whisper Small",
+            )
+        return ModelResolution(
+            requested,
+            candidate,
+            candidate,
+            "app_download",
         )
 
     if candidate == PARAKEET_MODEL_ID:
@@ -331,7 +367,22 @@ def transcribe_audio(task_id: str, audio_path: str, project_id: str, language: s
         if not imported["ready"]:
             raise TranscriptionError("导入模型路径失效，需要重新定位", "MODEL_NEEDS_RELINK")
 
-    if imported and imported["format"] == "memo-coreml":
+    if model_id in MANAGED_SHERPA_MODEL_IDS:
+        session = create_managed_session(
+            task_id,
+            audio_path,
+            language,
+            model_id,
+            runtime or "cpu",
+        )
+        segments_gen = session.segments
+        detected_lang = session.detected_language
+        audio_duration = session.audio_duration
+        device = session.device
+        compute_type = session.compute_type
+        runtime_model_name = session.model_label
+        progress_start = session.progress_start
+    elif imported and imported["format"] == "memo-coreml":
         session = create_parakeet_session(task_id,audio_path,language,PARAKEET_MODEL_ID,
             coreml_model_dir=imported["path"],coreml_cli_path=imported.get("cli_path"),runtime="external_coreml")
         segments_gen=session.segments; detected_lang=session.detected_language; audio_duration=session.audio_duration

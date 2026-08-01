@@ -5,11 +5,15 @@
 import os
 import re
 import sqlite3
+import threading
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 from ..utils.config import DB_PATH
 from .migrations import run_migrations
 from ..security import signed_media_url
+
+
+_INIT_DB_LOCK = threading.RLock()
 
 
 def get_db(timeout: float = 30) -> sqlite3.Connection:
@@ -28,6 +32,15 @@ def get_db(timeout: float = 30) -> sqlite3.Connection:
 
 def init_db():
     """初始化数据库表结构（含迁移）"""
+    # Several project-library requests can arrive together during startup.
+    # Serialize schema setup inside one backend process so two worker threads
+    # cannot both observe a half-migrated database and apply the same seed row.
+    with _INIT_DB_LOCK:
+        _init_db_unlocked()
+
+
+def _init_db_unlocked():
+    """Initialize the database while the caller holds ``_INIT_DB_LOCK``."""
     conn = get_db()
     conn.executescript("""
         CREATE TABLE IF NOT EXISTS projects (
@@ -229,7 +242,7 @@ def init_db():
     legacy = conn.execute("SELECT * FROM ai_settings WHERE id=1").fetchone()
     if legacy and not conn.execute("SELECT 1 FROM ai_provider_configs LIMIT 1").fetchone():
         conn.execute(
-            """INSERT INTO ai_provider_configs
+            """INSERT OR IGNORE INTO ai_provider_configs
                (provider_id,base_url,api_key,model,updated_at,last_test_status,last_test_at,last_latency_ms)
                VALUES (?,?,?,?,?,?,?,?)""",
             (legacy["provider"], legacy["base_url"], legacy["api_key"], legacy["model"],
@@ -254,6 +267,35 @@ def mark_interrupted_tasks():
            available_actions='[\"retry\"]', message='任务已中断，可重新开始',
            updated_at=datetime('now','localtime')
            WHERE status IN ('pending','running','paused')"""
+    )
+    # Reconcile feature-owned state as well as the task row.  These tables are
+    # initialized before startup recovery runs, so no newly-created task can be
+    # mistaken for an interrupted worker.
+    conn.execute(
+        """UPDATE clip_renders
+              SET status='failed',error='应用在渲染期间退出',
+                  updated_at=datetime('now','localtime')
+            WHERE status IN ('pending','running')"""
+    )
+    conn.execute(
+        """UPDATE clip_sets SET status='failed',updated_at=datetime('now','localtime')
+            WHERE status='pending'"""
+    )
+    conn.execute(
+        """UPDATE content_pack_sections
+              SET status='failed',error='应用在生成期间退出',
+                  updated_at=datetime('now','localtime')
+            WHERE status IN ('pending','generating')"""
+    )
+    conn.execute(
+        """UPDATE content_packs
+              SET status=CASE
+                    WHEN EXISTS(
+                        SELECT 1 FROM content_pack_sections s
+                        WHERE s.pack_id=content_packs.id AND s.status='ready'
+                    ) THEN 'partial' ELSE 'failed' END,
+                  updated_at=datetime('now','localtime')
+            WHERE status IN ('pending','generating')"""
     )
     conn.commit()
     conn.close()

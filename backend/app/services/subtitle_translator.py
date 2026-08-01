@@ -14,8 +14,13 @@ from typing import List
 
 from ..utils.task_manager import TaskCancelled, task_manager
 from ..models.database import get_db
-from .ai_providers import assigned_provider
-from .subtitle_cleaner import _validate_batch_results
+from .ai_providers import (
+    AIProviderRequestError,
+    assigned_provider,
+    prepare_chat_payload,
+    raise_for_provider_status,
+)
+from .subtitle_cleaner import AIOutputLengthError, _validate_batch_results
 from .terminology import exact_memory, relevant_terms, remember_translation
 from .editor import SEGMENT_COLUMNS
 
@@ -250,7 +255,9 @@ def _call_llm_translate(batch: list, system_prompt: str, ai: dict,
         "temperature": 0.1,
         "max_tokens": 4096,
     }
+    payload = prepare_chat_payload(ai, payload)
 
+    error: Exception | None = None
     for attempt in range(3):
         if task_id:
             task_manager.checkpoint(task_id)
@@ -261,29 +268,41 @@ def _call_llm_translate(batch: list, system_prompt: str, ai: dict,
                     headers=headers,
                     json=payload,
                 )
-                response.raise_for_status()
+                raise_for_provider_status(response)
                 if task_id:
                     task_manager.checkpoint(task_id)
                 data = response.json()
-                content = data["choices"][0]["message"]["content"]
+                choice = data["choices"][0]
+                if choice.get("finish_reason") == "length":
+                    raise AIOutputLengthError("AI 翻译达到输出长度上限")
+                content = choice["message"]["content"]
 
             parsed = _extract_json(content)
             if parsed and isinstance(parsed, list):
                 return _validate_batch_results(batch, parsed, "translated_text")
+            error = ValueError("AI 翻译返回格式不完整")
 
         except TaskCancelled:
             raise
-        except Exception as e:
-            logger.warning(f"[Translator] LLM 调用失败 (尝试 {attempt + 1}): {e}")
-            if getattr(getattr(e,"response",None),"status_code",None) in (401,403):
+        except AIProviderRequestError as exc:
+            error = exc
+            logger.warning(f"[Translator] AI 服务请求失败 (尝试 {attempt + 1}): {exc}")
+            if not exc.retryable:
                 break
             if attempt < 2:
-                retry_after=getattr(getattr(e,"response",None),"headers",{}).get("Retry-After")
-                try: delay=min(30.0,max(0.0,float(retry_after))) if retry_after else 2 ** attempt
-                except (TypeError,ValueError): delay=2 ** attempt
-                time.sleep(delay)
+                time.sleep(2 ** attempt)
+        except httpx.RequestError as exc:
+            error = exc
+            logger.warning(f"[Translator] AI 网络请求失败 (尝试 {attempt + 1}): {exc}")
+            if attempt < 2:
+                time.sleep(2 ** attempt)
+        except Exception as e:
+            error = e
+            logger.warning(f"[Translator] LLM 调用失败 (尝试 {attempt + 1}): {e}")
+            if attempt < 2:
+                time.sleep(2 ** attempt)
 
-    raise RuntimeError("AI 翻译连续三次失败或返回格式不完整")
+    raise RuntimeError(f"AI 翻译失败：{error or '返回格式不完整'}") from error
 
 
 def _extract_json(text: str):

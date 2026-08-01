@@ -11,7 +11,9 @@ import type {
   ProjectCreate, SegmentUpdate, ExportRequest, AIProviderPreset, AISettings,
   AppSettings, AppSettingsResponse, HealthStatus, PathValidationResult,
   EditorOperationResponse, SegmentOperationRequest, QualityIssue,
-  PlaylistPreview, PlaylistBatchDetail, PlaylistStageName
+  PlaylistPreview, PlaylistBatchDetail, PlaylistStageName,
+  SegmentSearchHit, ContentPack, ContentPackInputMode,
+  ClipSet, ClipAspectRatio, ClipRender,
 } from '../types';
 
 export interface BackendErrorPayload {
@@ -308,6 +310,12 @@ export interface TranscriptionModelStatus {
   category_id?: string; category_name?: string; purpose?: string;
   language_description?: string; size_label?: string; publisher?: string;
   tags?: string[]; source_site?: string;
+  family?: string; scenarios?: string[]; strengths?: string[]; limitations?: string[];
+  speed_tier?: string; accuracy_tier?: string; memory_tier?: string;
+  timestamp_mode?: 'word' | 'token' | 'segment' | string;
+  punctuation_mode?: 'native' | 'none' | 'limited' | string;
+  installed_bytes?: number; license?: string;
+  removable?: boolean;
   runtimes?: {
     id: string; name: string; engine?:string; available:boolean; reason?:string;
     model_ready?: boolean; download_required?: boolean; download_bytes?: number;
@@ -323,6 +331,7 @@ export async function updateProjectTargetLanguage(projectId: string, target_lang
 
 export async function getTranscriptionModels(projectId?: string, language = 'auto'): Promise<{
   recommended_model: string;
+  recommendation_reason?: string;
   audio?: { ok: boolean; error_code?: string; message?: string; duration?: number } | null;
   category_order?: string[];
   models: TranscriptionModelStatus[];
@@ -342,6 +351,14 @@ export async function prepareTranscriptionModel(modelId: string, runtime: string
 
 export async function validateTranscriptionModel(modelId: string): Promise<TranscriptionModelStatus> {
   return request(`/api/transcription/models/${encodeURIComponent(modelId)}/validate`);
+}
+
+export async function removeTranscriptionModel(modelId: string): Promise<{
+  model_id: string; removed: boolean; removed_bytes: number; message: string;
+}> {
+  return request(`/api/transcription/models/${encodeURIComponent(modelId)}/files`, {
+    method: 'DELETE',
+  });
 }
 
 // ── AI Clean ──
@@ -546,7 +563,7 @@ export async function startOCR(projectId: string, input: {region: {x: number; y:
 export async function commitOCR(projectId: string, expectedRevision: number, cues: OCRCue[]): Promise<EditorOperationResponse> {
   return request(`/api/projects/${projectId}/ocr/commit`, { method: 'POST', body: JSON.stringify({ expected_revision: expectedRevision, cues }) });
 }
-export interface CloudAuthorization { capability: 'ocr' | 'speaker' | 'quality'; provider_id: string | null; granted: boolean | number; disclosure_version: string; granted_at: string | null; revoked_at: string | null; }
+export interface CloudAuthorization { capability: 'ocr' | 'speaker' | 'quality' | 'content'; provider_id: string | null; granted: boolean | number; disclosure_version: string; granted_at: string | null; revoked_at: string | null; }
 export async function getCloudAuthorizations(): Promise<{authorizations: CloudAuthorization[]}> { return request('/api/cloud-authorizations'); }
 export async function setCloudAuthorization(capability: CloudAuthorization['capability'], granted: boolean, providerId?: string): Promise<void> {
   await request(`/api/cloud-authorizations/${capability}`, { method: 'PUT', body: JSON.stringify({ granted, provider_id: providerId || null, disclosure_version: '1.0' }) });
@@ -660,6 +677,188 @@ export async function importProjectPackage(file: File): Promise<{project_id: str
   if (!response.ok) throw await parseError(response); return response.json();
 }
 
+// ── Library search / content publication / short clips ──
+
+export interface SegmentSearchFilters {
+  page?: number;
+  page_size?: number;
+  project_id?: string;
+  group_name?: string;
+  speaker_id?: string;
+  source_language?: string;
+  target_language?: string;
+  created_from?: string;
+  created_to?: string;
+}
+
+export interface SegmentSearchFacets {
+  projects?: Array<{
+    id: string;
+    title: string;
+    group_name?: string | null;
+    source_language: string;
+    target_language: string;
+  }>;
+  speakers?: Array<{ id: string; name: string; project_id: string; project_title: string }>;
+  groups?: string[];
+}
+
+export async function searchSegments(
+  query: string,
+  filters: SegmentSearchFilters = {},
+): Promise<{
+  query: string;
+  hits: SegmentSearchHit[];
+  total: number;
+  page: number;
+  page_size: number;
+  facets: SegmentSearchFacets;
+}> {
+  const params = new URLSearchParams({ q: query });
+  Object.entries(filters).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && value !== '') params.set(key, String(value));
+  });
+  return request(`/api/search/segments?${params}`);
+}
+
+export async function rebuildSearchIndex(): Promise<{ indexed: number; source: number }> {
+  return request('/api/maintenance/search-index/rebuild', { method: 'POST' });
+}
+
+export async function getContentPacks(projectId: string): Promise<{ packs: ContentPack[] }> {
+  return request(`/api/projects/${projectId}/content-packs`);
+}
+
+export async function createContentPack(projectId: string, data: {
+  name: string;
+  input_mode: ContentPackInputMode;
+  output_language: string;
+  allow_translation_fallback: boolean;
+}): Promise<{ pack: ContentPack; task_id: string }> {
+  return request(`/api/projects/${projectId}/content-packs`, {
+    method: 'POST', body: JSON.stringify(data),
+  });
+}
+
+export async function getContentPack(packId: string): Promise<ContentPack> {
+  return request(`/api/content-packs/${packId}`);
+}
+
+export async function updateContentPack(
+  packId: string, name: string, expectedRevision: number,
+): Promise<ContentPack> {
+  return request(`/api/content-packs/${packId}`, {
+    method: 'PATCH', body: JSON.stringify({ name, expected_revision: expectedRevision }),
+  });
+}
+
+export async function updateContentSection(
+  packId: string, kind: string, content: Record<string, unknown>, expectedRevision: number,
+): Promise<ContentPack> {
+  return request(`/api/content-packs/${packId}/sections/${kind}`, {
+    method: 'PUT', body: JSON.stringify({ content, expected_revision: expectedRevision }),
+  });
+}
+
+export async function regenerateContentSection(packId: string, kind: string): Promise<{ task_id: string }> {
+  return request(`/api/content-packs/${packId}/sections/${kind}/regenerate`, { method: 'POST' });
+}
+
+export async function deleteContentPack(packId: string): Promise<void> {
+  await request(`/api/content-packs/${packId}?confirm=true`, { method: 'DELETE' });
+}
+
+export async function exportContentPack(packId: string): Promise<{ export_id: string; filename: string }> {
+  return request(`/api/content-packs/${packId}/export`, { method: 'POST' });
+}
+
+export async function downloadContentPack(exportId: string, filename: string): Promise<void> {
+  const response = await authorizedFetch(`/api/content-pack-exports/${encodeURIComponent(exportId)}/download`);
+  if (!response.ok) throw await parseError(response);
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.click();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+export async function getClipSets(projectId: string): Promise<{ clip_sets: ClipSet[] }> {
+  return request(`/api/projects/${projectId}/clip-sets`);
+}
+
+export async function createClipSet(projectId: string, data: {
+  name: string;
+  desired_count: 3 | 5 | 10;
+  min_duration: number;
+  max_duration: number;
+}): Promise<{ clip_set_id: string; task_id: string }> {
+  return request(`/api/projects/${projectId}/clip-sets`, {
+    method: 'POST', body: JSON.stringify(data),
+  });
+}
+
+export async function getClipSet(clipSetId: string): Promise<ClipSet> {
+  return request(`/api/clip-sets/${clipSetId}`);
+}
+
+export async function updateClipCandidate(candidateId: string, data: {
+  title: string;
+  start: number;
+  end: number;
+  selected: boolean;
+  expected_revision: number;
+  confirm_current_source?: boolean;
+}): Promise<ClipSet> {
+  return request(`/api/clip-candidates/${candidateId}`, {
+    method: 'PATCH', body: JSON.stringify(data),
+  });
+}
+
+export async function updateClipLayout(candidateId: string, aspectRatio: ClipAspectRatio, data: {
+  enabled: boolean;
+  composition: 'blur' | 'crop';
+  focal_x: number;
+  focal_y: number;
+  subtitle_mode: 'off' | 'original' | 'translated' | 'bilingual';
+  style: Record<string, unknown>;
+  expected_revision: number;
+}): Promise<ClipSet> {
+  return request(`/api/clip-candidates/${candidateId}/layouts/${encodeURIComponent(aspectRatio)}`, {
+    method: 'PUT', body: JSON.stringify(data),
+  });
+}
+
+export async function renderClips(projectId: string, data: {
+  items: Array<{ candidate_id: string; aspect_ratio: ClipAspectRatio }>;
+  confirm_stale?: boolean;
+}): Promise<{ task_id: string | null; render_ids: string[]; reused: boolean }> {
+  return request(`/api/projects/${projectId}/clip-renders`, {
+    method: 'POST', body: JSON.stringify(data),
+  });
+}
+
+export async function getClipRender(renderId: string): Promise<ClipRender> {
+  return request(`/api/clip-renders/${renderId}`);
+}
+
+export async function downloadClipRender(renderId: string, filename = 'short-clip.mp4'): Promise<void> {
+  const response = await authorizedFetch(`/api/clip-renders/${renderId}/download`);
+  if (!response.ok) throw await parseError(response);
+  const blob = await response.blob();
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.click();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+export async function deleteClipRender(renderId: string): Promise<void> {
+  await request(`/api/clip-renders/${renderId}?confirm=true`, { method: 'DELETE' });
+}
+
 // ── Tasks / Health ──
 
 export async function getTaskStatus(taskId: string): Promise<TaskStatus> {
@@ -715,10 +914,11 @@ export async function testAISettings(settings: AISettings): Promise<{ ok: boolea
 }
 
 export interface AIProviderCard { provider_id:string; name:string; base_url:string; api_key:string; model:string; models:string[]; enabled:boolean; has_api_key:boolean; last_test_status?:string; last_latency_ms?:number; }
-export const getAIProviders=()=>request<{providers:AIProviderCard[];assignments:{clean_provider_id:string;translate_provider_id:string}}>('/api/settings/ai/providers');
+export interface AIAssignments { clean_provider_id:string; translate_provider_id:string; content_provider_id:string; }
+export const getAIProviders=()=>request<{providers:AIProviderCard[];assignments:AIAssignments}>('/api/settings/ai/providers');
 export const saveAIProvider=async(id:string,data:Partial<AIProviderCard>)=>(await request<{provider:AIProviderCard}>(`/api/settings/ai/providers/${id}`,{method:'PUT',body:JSON.stringify(data)})).provider;
 export const testAIProvider=(id:string)=>request<{ok:boolean;latency_ms:number}>(`/api/settings/ai/providers/${id}/test`,{method:'POST'});
-export const saveAIAssignments=(data:{clean_provider_id:string;translate_provider_id:string})=>request('/api/settings/ai/assignments',{method:'PUT',body:JSON.stringify(data)});
+export const saveAIAssignments=(data:AIAssignments)=>request('/api/settings/ai/assignments',{method:'PUT',body:JSON.stringify(data)});
 
 export interface ScannedModel { path:string;display_name:string;family:string;format:string;version:string;supported:boolean;reason?:string;cli_path?:string;runtimes?:string[]; }
 export const scanLocalModels=(path:string)=>request<{models:ScannedModel[]}>(`/api/transcription/models/scan`,{method:'POST',body:JSON.stringify({root_path:path})});

@@ -2,6 +2,7 @@ import os
 import sys
 import tempfile
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 import uuid
 from pathlib import Path
 from unittest.mock import patch
@@ -169,6 +170,23 @@ class VersionedMigrationTests(unittest.TestCase):
             self.assertEqual(version, migrations.CURRENT_SCHEMA_VERSION)
             self.assertIsNotNone(operations)
             self.assertTrue(list((Path(folder) / "backups").glob("schema-v1-*.db")))
+
+    def test_concurrent_initialization_is_safe(self):
+        with tempfile.TemporaryDirectory() as folder:
+            db_path = Path(folder) / "startup.db"
+            with patch.object(database, "DB_PATH", db_path):
+                with ThreadPoolExecutor(max_workers=8) as pool:
+                    list(pool.map(lambda _: database.init_db(), range(16)))
+                db = database.get_db()
+                provider_count = db.execute(
+                    "SELECT COUNT(*) FROM ai_provider_configs"
+                ).fetchone()[0]
+                version = db.execute(
+                    "SELECT MAX(version) FROM schema_migrations"
+                ).fetchone()[0]
+                db.close()
+            self.assertLessEqual(provider_count, 1)
+            self.assertEqual(version, migrations.CURRENT_SCHEMA_VERSION)
 
 
 if __name__ == "__main__":

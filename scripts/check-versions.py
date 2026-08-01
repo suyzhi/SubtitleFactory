@@ -12,6 +12,11 @@ versions = {
     "frontend": json.loads((ROOT / "frontend/package.json").read_text())["version"],
     "tauri": json.loads((ROOT / "frontend/src-tauri/tauri.conf.json").read_text())["version"],
     "cargo": re.search(r'^version\s*=\s*"([^"]+)"', (ROOT / "frontend/src-tauri/Cargo.toml").read_text(), re.MULTILINE).group(1),
+    "package_script": re.search(
+        r'^VERSION="([^"]+)"',
+        (ROOT / "scripts/package-app.sh").read_text(),
+        re.MULTILINE,
+    ).group(1),
 }
 if len(set(versions.values())) != 1:
     raise SystemExit("版本号不一致: " + ", ".join(f"{name}={value}" for name, value in versions.items()))

@@ -7,7 +7,11 @@ import re
 
 import httpx
 
-from .ai_providers import assigned_provider
+from .ai_providers import (
+    assigned_provider,
+    prepare_chat_payload,
+    raise_for_provider_status,
+)
 
 
 def generate_quality_preview(issue: dict) -> dict:
@@ -19,18 +23,21 @@ def generate_quality_preview(issue: dict) -> dict:
         "suggestion": issue.get("suggestion"), "clean_text": source,
         "translated_text": translation,
     }
+    payload = {
+        "model": ai["model"], "temperature": 0, "max_tokens": 512,
+        "messages": [
+            {"role": "system", "content": "你是字幕质检修复助手。只修复给定问题，不增删事实，不解释。返回 JSON 对象，只能包含 clean_text 和 translated_text。"},
+            {"role": "user", "content": json.dumps(prompt, ensure_ascii=False)},
+        ],
+    }
+    if ai.get("provider") in {"deepseek", "openai"}:
+        payload["response_format"] = {"type": "json_object"}
     response = httpx.post(
         f"{ai['base_url'].rstrip('/')}/chat/completions",
         headers={"Authorization": f"Bearer {ai['api_key']}", "Content-Type": "application/json"},
-        json={
-            "model": ai["model"], "temperature": 0,
-            "messages": [
-                {"role": "system", "content": "你是字幕质检修复助手。只修复给定问题，不增删事实，不解释。返回 JSON 对象，只能包含 clean_text 和 translated_text。"},
-                {"role": "user", "content": json.dumps(prompt, ensure_ascii=False)},
-            ],
-        }, timeout=45,
+        json=prepare_chat_payload(ai, payload), timeout=45,
     )
-    response.raise_for_status()
+    raise_for_provider_status(response)
     content = response.json()["choices"][0]["message"]["content"]
     content = re.sub(r"^```(?:json)?\s*|\s*```$", "", content.strip(), flags=re.IGNORECASE)
     result = json.loads(content)

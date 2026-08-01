@@ -36,10 +36,12 @@ from ..security import signed_media_url
 from ..services.app_settings import get_app_settings
 from ..services.downloader import (
     download_audio_source, download_video, get_video_info, normalize_youtube_url,
+    remove_managed_download_file,
 )
 from ..services.audio_extractor import extract_audio
 from ..services.audio_preview import generate_track_preview
 from ..services.transcriber import (
+    MANAGED_SHERPA_MODEL_IDS,
     PARAKEET_MODEL_IDS,
     SUPPORTED_TRANSCRIPTION_MODELS,
     get_transcription_model_status,
@@ -57,6 +59,16 @@ from ..services.model_catalog import (
     WHISPER_CATALOG_BY_ID,
     prepare_whisper_model,
     runtime_model_status,
+)
+from ..services.managed_sherpa import (
+    managed_model_status,
+    prepare_managed_model,
+    remove_managed_model,
+)
+from ..services.sherpa_catalog import (
+    MANAGED_SHERPA_BY_ID,
+    MANAGED_SHERPA_MODELS,
+    MODEL_CATEGORY_ORDER as SHERPA_CATEGORY_ORDER,
 )
 from ..services.subtitle_cleaner import clean_subtitles, undo_last_clean
 from ..services.subtitle_translator import translate_subtitles
@@ -89,6 +101,8 @@ RUNTIME_LABELS = {
 def _runtime_ids(model_id: str, imported: dict | None = None) -> list[str]:
     if imported: return list(imported.get("runtimes") or [])
     if model_id in WHISPER_CATALOG_BY_ID: return ["cpu", "mlx"]
+    if model_id in MANAGED_SHERPA_BY_ID:
+        return list(MANAGED_SHERPA_BY_ID[model_id].runtimes)
     if model_id == PARAKEET_MODEL_ID: return ["external_coreml"]
     if model_id == PARAKEET_ONNX_MODEL_ID: return ["cpu", "coreml"]
     return ["cpu"]
@@ -116,6 +130,20 @@ def _runtime_options(model_id: str, imported: dict | None = None, model_ready: b
         item={"id":runtime_id,"name":label,"engine":engine,"available":available,"reason":reason}
         if model_id in WHISPER_CATALOG_BY_ID:
             item.update(runtime_model_status(model_id, runtime_id))
+        elif model_id in MANAGED_SHERPA_BY_ID:
+            definition = MANAGED_SHERPA_BY_ID[model_id]
+            status = managed_model_status(model_id)
+            item.update({
+                "model_ready": bool(status.get("ready")),
+                "download_required": not bool(status.get("ready")),
+                "download_bytes": status.get("download_bytes", definition.archive_size),
+                "installed_bytes": definition.installed_bytes,
+                "repository": "k2-fsa/sherpa-onnx",
+                "revision": "asr-models",
+                "source_url": definition.source_url,
+                "source": status.get("source", "github"),
+                "status": status.get("state"),
+            })
         elif model_id == PARAKEET_ONNX_MODEL_ID:
             status = get_transcription_model_status(model_id)
             item.update({
@@ -292,7 +320,7 @@ def _resolve_model(model: str, language: str) -> str:
     resolution = resolve_transcription_model(
         model,
         language,
-        default_model=settings.get("default_model") or "small",
+        default_model=settings.get("default_model") or "auto",
         custom_model_path=settings.get("custom_model_path"),
         coreml_model_path=settings.get("coreml_model_path"),
         coreml_cli_path=settings.get("coreml_cli_path"),
@@ -322,6 +350,45 @@ def _audio_preflight(audio_path: str | None) -> dict:
     return {"ok": True, "duration": round(duration, 2), "free_bytes": free_bytes}
 
 
+_WHISPER_TIERS = {
+    "tiny": ("很快", "基础", "很低", ("低配置", "快速草稿")),
+    "base": ("很快", "基础", "低", ("低配置", "快速草稿")),
+    "small": ("快", "均衡", "中", ("通用字幕", "多语言")),
+    "medium": ("中等", "高", "高", ("高精度", "嘈杂录音")),
+    "large-v3": ("较慢", "很高", "很高", ("高精度", "复杂多语言")),
+    "large-v3-turbo": ("中等", "很高", "高", ("高精度", "长节目")),
+    "distil-large-v3": ("快", "高", "高", ("英语", "长节目")),
+}
+
+
+def _whisper_presentation(model_id: str) -> dict:
+    speed, accuracy, memory, scenarios = _WHISPER_TIERS[model_id]
+    definition = WHISPER_CATALOG_BY_ID[model_id]
+    english_only = model_id == "distil-large-v3"
+    return {
+        "family": "Whisper",
+        "scenarios": list(scenarios),
+        "strengths": [
+            "成熟的多语言字幕模型" if not english_only else "英语转写速度与精度均衡",
+            "原生逐词时间戳",
+            "支持 CPU 与 Apple GPU",
+        ],
+        "limitations": [
+            "不会参与专业场景自动选择",
+            "方言或专业术语可改用对应专用模型",
+        ] if not english_only else ["仅支持英语", "不适合中文和其他语言"],
+        "speed_tier": speed,
+        "accuracy_tier": accuracy,
+        "memory_tier": memory,
+        "timestamp_mode": "word",
+        "punctuation_mode": "native",
+        "installed_bytes": min(
+            variant.download_bytes for variant in definition.variants.values()
+        ),
+        "license": "MIT",
+    }
+
+
 @router.get("/transcription/models")
 def transcription_models(project_id: Optional[str] = None, language: str = "auto"):
     try:
@@ -335,6 +402,19 @@ def transcription_models(project_id: Optional[str] = None, language: str = "auto
         db.close()
         audio = _audio_preflight(row["audio_path"] if row else None)
     recommended = _resolve_model("auto", language)
+    normalized_language = (language or "auto").lower()
+    if normalized_language in {"", "auto"}:
+        recommendation_reason = "源语言为自动检测，按约定使用 Whisper Small"
+    elif recommended in MANAGED_SHERPA_BY_ID:
+        recommendation_reason = (
+            f"已下载的 {MANAGED_SHERPA_BY_ID[recommended].name} 与所选语言匹配"
+        )
+    elif recommended == "small":
+        recommendation_reason = (
+            "没有已下载且匹配所选语言的专用模型，已回退 Whisper Small"
+        )
+    else:
+        recommendation_reason = "使用设置中明确选择的默认模型"
     model_definitions = [
         {
             "id": item.id,
@@ -348,8 +428,39 @@ def transcription_models(project_id: Optional[str] = None, language: str = "auto
             "publisher": item.publisher,
             "tags": list(item.tags),
             "source_site": "Hugging Face",
+            **_whisper_presentation(item.id),
         }
         for item in WHISPER_MODEL_CATALOG
+    ] + [
+        {
+            "id": item.id,
+            "name": item.name,
+            "languages": list(item.languages),
+            "category_id": item.category_id,
+            "category_name": item.category_name,
+            "purpose": item.purpose,
+            "language_description": item.language_description,
+            "size_label": (
+                f"下载约 {item.archive_size / 1024 ** 2:.0f} MiB，"
+                f"安装约 {item.installed_bytes / 1024 ** 2:.0f} MiB"
+            ),
+            "publisher": "官方 sherpa-onnx 模型",
+            "tags": list(item.tags),
+            "source_site": "GitHub 官方发布页",
+            "family": item.family,
+            "scenarios": list(item.scenarios),
+            "strengths": list(item.strengths),
+            "limitations": list(item.limitations),
+            "speed_tier": item.speed_tier,
+            "accuracy_tier": item.accuracy_tier,
+            "memory_tier": item.memory_tier,
+            "timestamp_mode": item.timestamp_mode,
+            "punctuation_mode": item.punctuation_mode,
+            "installed_bytes": item.installed_bytes,
+            "license": item.license,
+            "removable": True,
+        }
+        for item in MANAGED_SHERPA_MODELS
     ] + [
         {
             "id": PARAKEET_ONNX_MODEL_ID,
@@ -363,6 +474,14 @@ def transcription_models(project_id: Optional[str] = None, language: str = "auto
             "publisher": "NVIDIA / k2-fsa",
             "tags": ["欧洲语种", "CPU", "Core ML", "ONNX"],
             "source_site": "GitHub 官方发布页",
+            "family": "NeMo TDT",
+            "scenarios": ["欧洲语种", "通用字幕", "长节目"],
+            "strengths": ["英语和欧洲语种速度快", "原生词元时间戳", "支持 CPU 与 Core ML"],
+            "limitations": ["不支持中文、日韩和俄语", "不是小语种通用兜底"],
+            "speed_tier": "很快", "accuracy_tier": "高", "memory_tier": "中",
+            "timestamp_mode": "token", "punctuation_mode": "native",
+            "installed_bytes": 672 * 1024 * 1024,
+            "license": "以上游 NVIDIA Parakeet 模型许可为准",
         },
         {
             "id": PARAKEET_MODEL_ID,
@@ -376,6 +495,14 @@ def transcription_models(project_id: Optional[str] = None, language: str = "auto
             "publisher": "本地 Memo 模型",
             "tags": ["欧洲语种", "外部模型", "Core ML"],
             "source_site": "本地目录",
+            "family": "NeMo TDT",
+            "scenarios": ["欧洲语种", "外部 Core ML"],
+            "strengths": ["复用用户已有 Memo 模型", "不复制外部模型文件"],
+            "limitations": ["需要用户提供并校验外部模型与 CLI", "不能由 App 下载或删除"],
+            "speed_tier": "很快", "accuracy_tier": "高", "memory_tier": "中",
+            "timestamp_mode": "token", "punctuation_mode": "native",
+            "installed_bytes": 0,
+            "license": "以上游 NVIDIA Parakeet 模型许可为准",
         },
     ]
     model_items = []
@@ -430,8 +557,9 @@ def transcription_models(project_id: Optional[str] = None, language: str = "auto
                             "format": imported["format"], "version": imported["version"]})
     return {
         "recommended_model": recommended,
+        "recommendation_reason": recommendation_reason,
         "audio": audio,
-        "category_order": list(MODEL_CATEGORY_ORDER),
+        "category_order": list(dict.fromkeys((*SHERPA_CATEGORY_ORDER, *MODEL_CATEGORY_ORDER))),
         "models": model_items,
     }
 
@@ -477,15 +605,21 @@ def validate_transcription_model(model_id: str):
         coreml_model_path=settings.get("coreml_model_path"),
         coreml_cli_path=settings.get("coreml_cli_path"),
     )
+    if model_id in MANAGED_SHERPA_BY_ID:
+        status = managed_model_status(model_id, deep=True)
     names = {
         **{item.id: item.name for item in WHISPER_MODEL_CATALOG},
+        **{item.id: item.name for item in MANAGED_SHERPA_MODELS},
         "custom": "自定义 Whisper",
         PARAKEET_MODEL_ID: "Parakeet V3 Core ML",
         PARAKEET_ONNX_MODEL_ID: "Parakeet V3 ONNX",
     }
     languages = (
         sorted(PARAKEET_SUPPORTED_LANGUAGES)
-        if model_id in PARAKEET_MODEL_IDS else ["*"]
+        if model_id in PARAKEET_MODEL_IDS
+        else list(MANAGED_SHERPA_BY_ID[model_id].languages)
+        if model_id in MANAGED_SHERPA_BY_ID
+        else ["*"]
     )
     return {
         "id": model_id,
@@ -502,6 +636,8 @@ def _do_prepare_transcription_model(
 ):
     if model_id in WHISPER_CATALOG_BY_ID:
         prepare_whisper_model(task_id, model_id, runtime, repair=repair)
+    elif model_id in MANAGED_SHERPA_BY_ID:
+        prepare_managed_model(task_id, model_id, repair=repair)
     else:
         prepare_parakeet_model(
             task_id,
@@ -514,7 +650,11 @@ def _do_prepare_transcription_model(
 
 @router.post("/transcription/models/{model_id}/prepare")
 def prepare_transcription_model(model_id: str, request: ModelPrepareRequest):
-    if model_id not in PARAKEET_MODEL_IDS and model_id not in WHISPER_CATALOG_BY_ID:
+    if (
+        model_id not in PARAKEET_MODEL_IDS
+        and model_id not in WHISPER_CATALOG_BY_ID
+        and model_id not in MANAGED_SHERPA_BY_ID
+    ):
         raise HTTPException(
             400,
             detail={
@@ -538,6 +678,16 @@ def prepare_transcription_model(model_id: str, request: ModelPrepareRequest):
                     "message": "Whisper 下载格式只能选择 CPU 或 Apple GPU",
                 },
             )
+    elif model_id in MANAGED_SHERPA_BY_ID:
+        runtime = runtime or "cpu"
+        if runtime not in MANAGED_SHERPA_BY_ID[model_id].runtimes:
+            raise HTTPException(
+                400,
+                detail={
+                    "code": "RUNTIME_NOT_SUPPORTED",
+                    "message": "所选运行设备不支持当前模型",
+                },
+            )
     elif model_id == PARAKEET_ONNX_MODEL_ID:
         runtime = runtime or "cpu"
         if runtime not in {"cpu", "coreml"}:
@@ -551,6 +701,10 @@ def prepare_transcription_model(model_id: str, request: ModelPrepareRequest):
     else:
         runtime = "external_coreml"
     task_id = task_manager.create_task(None, "prepare_model")
+    task_manager.update_task(
+        task_id,
+        details={"model_id": model_id, "runtime": runtime},
+    )
     task_manager.run_background(
         task_id, _do_prepare_transcription_model,
         model_id, runtime, request.repair, settings,
@@ -561,6 +715,22 @@ def prepare_transcription_model(model_id: str, request: ModelPrepareRequest):
         "runtime": runtime,
         "message": "正在修复模型" if request.repair else "正在准备模型",
     }
+
+
+@router.delete("/transcription/models/{model_id}/files")
+def delete_transcription_model_files(model_id: str):
+    try:
+        return remove_managed_model(model_id)
+    except Exception as exc:
+        status_code = 409 if getattr(exc, "error_code", "") == "MODEL_IN_USE" else 400
+        raise HTTPException(
+            status_code,
+            detail={
+                "code": getattr(exc, "error_code", "MODEL_REMOVE_FAILED"),
+                "message": str(exc),
+                "suggestion": getattr(exc, "suggestion", "请检查模型状态后重试"),
+            },
+        ) from exc
 
 
 # ============================
@@ -1031,13 +1201,20 @@ def _do_download(
     )
     task_manager.checkpoint(task_id)
 
+    old_video_path = None
+    old_thumbnail_path = None
+    candidate_thumbnail_path = None
+    committed = False
     db = get_db()
     try:
         details = (task_manager.get_task(task_id) or {}).get("details", {})
         existing = db.execute(
-            "SELECT title,thumbnail_url,thumbnail_path FROM projects WHERE id=?",
+            "SELECT title,video_path,thumbnail_url,thumbnail_path FROM projects WHERE id=?",
             (project_id,),
         ).fetchone()
+        old_video_path = existing["video_path"] if existing else None
+        old_thumbnail_path = existing["thumbnail_path"] if existing else None
+        candidate_thumbnail_path = details.get("thumbnail_path")
         title = (
             existing["title"] if preserve_metadata and existing
             else details.get("title") or os.path.basename(video_path)
@@ -1064,11 +1241,41 @@ def _do_download(
         )
         task_manager.checkpoint(task_id)
         db.commit()
+        committed = True
     except Exception:
         db.rollback()
         raise
     finally:
         db.close()
+        if not committed:
+            remove_managed_download_file(
+                video_path, project_id=project_id,
+                download_dir=app_settings.get("download_directory"),
+            )
+            remove_managed_download_file(
+                candidate_thumbnail_path, project_id=project_id,
+                download_dir=app_settings.get("download_directory"),
+            )
+
+    if old_video_path and old_video_path != video_path:
+        remove_managed_download_file(
+            old_video_path, project_id=project_id,
+            download_dir=app_settings.get("download_directory"),
+        )
+    if (
+        not preserve_metadata
+        and old_thumbnail_path
+        and old_thumbnail_path != candidate_thumbnail_path
+    ):
+        remove_managed_download_file(
+            old_thumbnail_path, project_id=project_id,
+            download_dir=app_settings.get("download_directory"),
+        )
+    if preserve_metadata and candidate_thumbnail_path != old_thumbnail_path:
+        remove_managed_download_file(
+            candidate_thumbnail_path, project_id=project_id,
+            download_dir=app_settings.get("download_directory"),
+        )
 
     task_manager.update_task(
         task_id, step="downloaded", progress=completed_progress,
@@ -1422,6 +1629,10 @@ def start_transcribe(project_id: str, language: str = Form("auto"), model: str =
     mapping=dict(settings.get("transcription_runtime_by_model") or {}); mapping[model]=runtime
     save_app_settings({"transcription_runtime_by_model":mapping})
     task_id = task_manager.create_task(project_id, "transcribe")
+    task_manager.update_task(
+        task_id,
+        details={"model_id": model, "runtime": runtime},
+    )
     task_manager.run_background(task_id, _do_transcribe, project_id, row["audio_path"], language, model, runtime)
     return {"task_id": task_id, "message": "转写任务已创建"}
 
@@ -1577,6 +1788,10 @@ def retry_transcription(project_id: str, request: TranscriptionRetryRequest):
     settings=get_app_settings(); imported=get_imported(model) if model.startswith("local:") else None
     runtime=_select_runtime(model,request.runtime,settings,imported)
     task_id = task_manager.create_task(project_id, "transcribe")
+    task_manager.update_task(
+        task_id,
+        details={"model_id": model, "runtime": runtime},
+    )
     task_manager.run_background(task_id, _do_transcribe, project_id, row["audio_path"], request.language, model, runtime)
     return {"task_id": task_id, "message": "转写重试任务已创建", "model": model}
 
@@ -1775,6 +1990,8 @@ def _do_video_export(
     subtitle_path: str,
     output_path: str,
     fmt: str,
+    bilingual: bool,
+    style_settings: dict | None,
 ):
     row = _project_row(project_id)
     if not row:
@@ -1806,7 +2023,10 @@ def _do_video_export(
         message="本地视频已就绪，正在压制字幕",
         details={"stages": stages, "format": fmt},
     )
-    burn_subtitles(task_id, video_path, subtitle_path, output_path, project_id)
+    burn_subtitles(
+        task_id, video_path, subtitle_path, output_path, project_id,
+        bilingual=bilingual, style_settings=style_settings,
+    )
     stages["render_video"] = "success"
     task_manager.update_task(
         task_id, step="render_done", progress=95,
@@ -1882,7 +2102,7 @@ def export_subtitles(project_id: str, req: ExportRequest):
         output_path = os.path.join(EXPORTS_DIR, f"{project_id}_hardsub.{fmt}")
         task_manager.run_background(
             task_id, _do_video_export,
-            project_id, ass_path, output_path, fmt,
+            project_id, ass_path, output_path, fmt, bilingual, style_settings,
         )
         return {"task_id": task_id, "message": f"{fmt.upper()} 视频导出任务已创建"}
     else:

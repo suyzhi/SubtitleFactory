@@ -9,7 +9,7 @@ from .secret_store import get_secret, keychain_enabled, save_secret
 
 
 PROVIDER_PRESETS = [
-    {"id": "deepseek", "name": "DeepSeek", "base_url": "https://api.deepseek.com/v1", "model": "deepseek-chat", "models": ["deepseek-chat", "deepseek-reasoner"]},
+    {"id": "deepseek", "name": "DeepSeek", "base_url": "https://api.deepseek.com/v1", "model": "deepseek-v4-flash", "models": ["deepseek-v4-flash", "deepseek-v4-pro"]},
     {"id": "openai", "name": "OpenAI", "base_url": "https://api.openai.com/v1", "model": "gpt-4.1-mini", "models": ["gpt-4.1-mini", "gpt-4.1", "gpt-4o-mini"]},
     {"id": "openrouter", "name": "OpenRouter", "base_url": "https://openrouter.ai/api/v1", "model": "openai/gpt-4.1-mini", "models": ["openai/gpt-4.1-mini", "anthropic/claude-sonnet-4", "google/gemini-2.5-flash"]},
     {"id": "siliconflow", "name": "SiliconFlow", "base_url": "https://api.siliconflow.cn/v1", "model": "deepseek-ai/DeepSeek-V3", "models": ["deepseek-ai/DeepSeek-V3", "Qwen/Qwen3-32B"]},

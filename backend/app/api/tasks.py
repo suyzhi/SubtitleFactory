@@ -19,11 +19,20 @@ router = APIRouter(prefix="/api")
 def _task_dict(row) -> dict:
     task = dict(row)
     for key, fallback in (("details", {}), ("logs", []), ("available_actions", [])):
-        try:
-            task[key] = json.loads(task.get(key) or json.dumps(fallback))
-        except json.JSONDecodeError:
-            task[key] = fallback
+        value = task.get(key)
+        if isinstance(value, type(fallback)):
+            task[key] = value
+        else:
+            try:
+                task[key] = json.loads(value or json.dumps(fallback))
+            except (TypeError, json.JSONDecodeError):
+                task[key] = fallback
     task["recoverable"] = bool(task.get("recoverable"))
+    task["suggestion"] = (
+        task.get("suggestion")
+        or (task.get("details") or {}).get("failure_suggestion")
+        or ""
+    )
     return task
 
 
@@ -65,7 +74,7 @@ def get_task_status(task_id: str):
     task = task_manager.get_task(task_id)
     if not task:
         raise HTTPException(404, "任务不存在")
-    return task
+    return _task_dict(task)
 
 
 @router.post("/tasks/{task_id}/pause")
@@ -75,7 +84,7 @@ def pause_task(task_id: str):
         raise HTTPException(404, "任务不存在")
     if not task_manager.pause_task(task_id):
         raise HTTPException(409, "当前任务状态无法暂停")
-    return task_manager.get_task(task_id)
+    return _task_dict(task_manager.get_task(task_id))
 
 
 @router.post("/tasks/{task_id}/resume")
@@ -85,7 +94,7 @@ def resume_task(task_id: str):
         raise HTTPException(404, "任务不存在")
     if not task_manager.resume_task(task_id):
         raise HTTPException(409, "当前任务未处于暂停状态")
-    return task_manager.get_task(task_id)
+    return _task_dict(task_manager.get_task(task_id))
 
 
 @router.post("/tasks/{task_id}/cancel")
@@ -95,7 +104,7 @@ def cancel_task(task_id: str):
         raise HTTPException(404, "任务不存在")
     if not task_manager.cancel_task(task_id):
         raise HTTPException(409, "当前任务状态无法终止")
-    return task_manager.get_task(task_id)
+    return _task_dict(task_manager.get_task(task_id))
 
 
 @router.post("/tasks/{task_id}/retry-failed-batches")

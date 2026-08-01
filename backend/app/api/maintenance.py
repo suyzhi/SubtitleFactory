@@ -15,6 +15,7 @@ from pydantic import BaseModel
 
 from ..services.backups import backup_directory, create_backup, list_backups, restore_backup
 from ..services.app_settings import get_app_settings
+from ..services.search_index import rebuild_search_index, search_index_status
 from ..utils.config import LOGS_DIR
 
 
@@ -74,3 +75,13 @@ def diagnostics():
         bundle.writestr("settings-shape.json", json.dumps(settings, ensure_ascii=False, indent=2))
         bundle.writestr("app.log", log_tail)
     return FileResponse(target, filename=target.name, media_type="application/zip")
+
+
+@router.get("/maintenance/search-index")
+def inspect_search_index():
+    return search_index_status()
+
+
+@router.post("/maintenance/search-index/rebuild")
+def rebuild_full_text_search_index():
+    return rebuild_search_index()

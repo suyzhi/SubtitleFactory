@@ -41,7 +41,10 @@ export default function PlaylistBatchDialog({ url, workflow, appSettings, health
   const blockers = useMemo(() => {
     const values: string[] = [];
     if (!health?.runtime?.ffmpeg?.ok) values.push('FFmpeg 不可用');
+    if (!health?.runtime?.ffprobe?.ok) values.push('FFprobe 不可用');
     if (!health?.runtime?.yt_dlp?.ok) values.push('yt-dlp 不可用');
+    if (!health?.runtime?.deno?.ok) values.push('Deno 不可用');
+    if (!health?.runtime?.ejs?.ok) values.push('EJS 挑战组件不可用');
     if (transcribe && !workflow.runtime) values.push('尚未选择转写运行设备');
     if ((clean || translate) && !aiReady) values.push('AI 服务尚未配置可用的 API Key');
     if (translate && workflow.target_language === 'none') values.push('AI 翻译需要目标语言');
@@ -90,7 +93,7 @@ export default function PlaylistBatchDialog({ url, workflow, appSettings, health
           <label><input type="checkbox" checked={translate} onChange={event => { setTranslate(event.target.checked); if (event.target.checked) setTranscribe(true); }}/><span><strong>AI 翻译</strong><small>目标语言：{workflow.target_language}</small></span></label>
         </fieldset>
         {(clean || translate) && <label className="playlist-ai-consent"><input type="checkbox" checked={aiAuthorized} onChange={event => setAiAuthorized(event.target.checked)}/><span><strong>确认批量调用 AI 服务</strong><small>所选 {preview.playlist.available_count} 个项目的字幕内容会发送给当前配置的 AI 服务，可能产生费用。</small></span></label>}
-        <details className="playlist-preview-list"><summary>查看全部 {preview.items.length} 个条目</summary><ol>{preview.items.map(item => <li key={item.source_id} className={item.availability}><span>{item.position}</span><strong>{item.title}</strong><small>{item.availability === 'unavailable' ? '不可用' : durationLabel(item.duration)}</small></li>)}</ol></details>
+        <details className="playlist-preview-list"><summary>查看全部 {preview.items.length} 个条目</summary><ol>{preview.items.map(item => <li key={item.source_id} className={item.availability}><span>{item.position}</span><strong>{item.title}</strong><small>{item.availability === 'unavailable' ? '不可用' : item.availability === 'permission_required' ? `${item.error_code || 'AUTH_REQUIRED'} · ${item.suggestion || '需要账号权限'}` : durationLabel(item.duration)}</small></li>)}</ol></details>
         {preview.warnings.map(warning => <div className="playlist-warning" key={warning}>{warning}</div>)}
         {!!blockers.length && <div className="playlist-blockers">{blockers.map(value => <span key={value}>! {value}</span>)}</div>}
       </>}

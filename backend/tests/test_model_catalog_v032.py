@@ -67,7 +67,7 @@ EXPECTED_REPOSITORIES = {
 
 
 class CatalogContractTests(unittest.TestCase):
-    def test_api_exposes_exactly_nine_grouped_release_models(self):
+    def test_api_exposes_exactly_twenty_seven_grouped_release_models(self):
         response = TestClient(app).get(
             "/api/transcription/models",
             headers={"Authorization": f"Bearer {API_TOKEN}"},
@@ -78,16 +78,27 @@ class CatalogContractTests(unittest.TestCase):
             item for item in payload["models"]
             if item.get("category_id") in payload["category_order"]
         ]
-        self.assertEqual(len(release_models), 9)
+        self.assertEqual(len(release_models), 27)
         self.assertEqual(payload["recommended_model"], "small")
         self.assertEqual(
             payload["category_order"],
-            ["lightweight", "balanced", "performance", "english", "parakeet"],
+            [
+                "lightweight", "balanced", "performance", "multilingual",
+                "chinese", "dialects", "english", "east_asian", "european",
+                "specialized", "parakeet",
+            ],
         )
         for item in release_models:
             self.assertTrue(item["purpose"])
             self.assertTrue(item["language_description"])
             self.assertTrue(item["publisher"])
+            for field in (
+                "family", "scenarios", "strengths", "limitations",
+                "speed_tier", "accuracy_tier", "memory_tier",
+                "timestamp_mode", "punctuation_mode", "installed_bytes",
+                "license",
+            ):
+                self.assertIn(field, item)
             for runtime in item["runtimes"]:
                 self.assertIn("model_ready", runtime)
                 self.assertIn("download_required", runtime)

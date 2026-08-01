@@ -1,6 +1,7 @@
 """Independent local configurations for AI providers."""
 
 import time
+from typing import Any
 from urllib.parse import urlparse
 
 from ..models.database import get_db
@@ -9,6 +10,75 @@ from .secret_store import get_secret, keychain_enabled, save_secret
 
 
 PRESETS = {item["id"]: item for item in PROVIDER_PRESETS}
+DEEPSEEK_V4_MODELS = {"deepseek-v4-flash", "deepseek-v4-pro"}
+
+
+class AIProviderRequestError(RuntimeError):
+    """An HTTP failure that must not be mistaken for malformed model output."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        status_code: int | None = None,
+        retryable: bool = False,
+    ):
+        super().__init__(message)
+        self.status_code = status_code
+        self.retryable = retryable
+
+
+def prepare_chat_payload(ai: dict, payload: dict[str, Any]) -> dict[str, Any]:
+    """Apply provider/model compatibility without changing the caller's payload."""
+    prepared = dict(payload)
+    provider = str(ai.get("provider") or ai.get("provider_id") or "").strip().lower()
+    model = str(ai.get("model") or "").strip().lower()
+    if provider == "deepseek" and model in DEEPSEEK_V4_MODELS:
+        # DeepSeek V4 enables thinking by default. Subtitle transforms require a
+        # short deterministic final JSON response, so reasoning would only consume
+        # the output budget before the JSON body is complete.
+        prepared["thinking"] = {"type": "disabled"}
+    return prepared
+
+
+def _provider_error_message(response, fallback: str) -> str:
+    try:
+        payload = response.json()
+        error = payload.get("error") if isinstance(payload, dict) else None
+        if isinstance(error, dict):
+            detail = error.get("message") or error.get("code")
+        else:
+            detail = error
+        if detail:
+            return str(detail).strip()[:500]
+    except (TypeError, ValueError):
+        pass
+    detail = str(getattr(response, "text", "") or "").strip()
+    return detail[:500] or fallback
+
+
+def raise_for_provider_status(response) -> None:
+    """Raise a classified provider error while preserving the service message."""
+    try:
+        response.raise_for_status()
+    except Exception as exc:
+        status_code = getattr(response, "status_code", None)
+        if status_code is None:
+            status_code = getattr(getattr(exc, "response", None), "status_code", None)
+        if status_code is None:
+            raise
+        status_code = int(status_code)
+        retryable = status_code in {408, 425, 429} or status_code >= 500
+        detail = _provider_error_message(response, str(exc))
+        if status_code in {401, 403}:
+            message = f"AI 认证失败（HTTP {status_code}）：{detail}"
+        else:
+            message = f"AI 服务请求失败（HTTP {status_code}）：{detail}"
+        raise AIProviderRequestError(
+            message,
+            status_code=status_code,
+            retryable=retryable,
+        ) from exc
 
 
 def _validate_url(value: str) -> str:

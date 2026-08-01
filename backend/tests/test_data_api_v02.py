@@ -224,7 +224,7 @@ class AppSettingsAPITests(unittest.TestCase):
 
     def test_defaults_are_safe_and_partial_updates_persist(self):
         initial = self.client.get("/api/settings/app").json()
-        self.assertEqual(initial["settings"]["default_model"], "small")
+        self.assertEqual(initial["settings"]["default_model"], "auto")
         self.assertEqual(initial["settings"]["youtube_media_mode"], "local")
         self.assertIsNone(initial["settings"]["coreml_model_path"])
         updated = self.client.put(

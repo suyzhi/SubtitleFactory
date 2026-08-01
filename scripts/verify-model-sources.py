@@ -22,6 +22,7 @@ from app.services.parakeet_transcriber import (  # noqa: E402
     SILERO_VAD_SHA256,
     SILERO_VAD_URL,
 )
+from app.services.sherpa_catalog import MANAGED_SHERPA_MODELS  # noqa: E402
 
 
 # Git blob IDs protect regular repository files. LFS/Xet files expose their
@@ -156,7 +157,36 @@ def verify_github() -> int:
             raise RuntimeError(f"来源漂移：{name} 大小已变化")
         if asset.get("digest") != f"sha256:{sha256}":
             raise RuntimeError(f"来源漂移：{name} SHA-256 已变化")
-    return len(expected)
+    for definition in MANAGED_SHERPA_MODELS:
+        asset = assets.get(definition.archive_name)
+        if not asset:
+            raise RuntimeError(
+                f"来源漂移：GitHub 发布页缺少 {definition.archive_name}"
+            )
+        if asset.get("id") != definition.asset_id:
+            raise RuntimeError(
+                f"来源漂移：{definition.archive_name} 资源 ID 已变化"
+            )
+        if asset.get("size") != definition.archive_size:
+            raise RuntimeError(
+                f"来源漂移：{definition.archive_name} 大小已变化"
+            )
+        if asset.get("updated_at") != definition.asset_updated_at:
+            raise RuntimeError(
+                f"来源漂移：{definition.archive_name} 更新时间已变化"
+            )
+        # GitHub does not backfill ``digest`` for many older release assets.
+        # Runtime downloads still enforce the pinned full archive SHA-256.
+        if len(definition.archive_sha256) != 64:
+            raise RuntimeError(
+                f"发布清单缺少压缩包 SHA-256：{definition.archive_name}"
+            )
+        for item in definition.files:
+            if len(item.sha256) != 64 or item.size <= 0:
+                raise RuntimeError(
+                    f"发布清单缺少逐文件身份：{definition.id}/{item.name}"
+                )
+    return len(expected) + len(MANAGED_SHERPA_MODELS)
 
 
 def main() -> int:

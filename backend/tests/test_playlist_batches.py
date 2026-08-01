@@ -76,7 +76,7 @@ class PlaylistBatchTests(unittest.TestCase):
             item.stop()
         self.temp.cleanup()
 
-    def test_v8_schema_is_migrated_and_local_batch_defaults_remain(self):
+    def test_current_schema_is_migrated_and_local_batch_defaults_remain(self):
         db = database.get_db()
         busy_timeout = db.execute("PRAGMA busy_timeout").fetchone()[0]
         version = db.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0]
@@ -84,7 +84,6 @@ class PlaylistBatchTests(unittest.TestCase):
         stage_table = db.execute("SELECT name FROM sqlite_master WHERE name='batch_item_stages'").fetchone()
         db.close()
         self.assertEqual(version, migrations.CURRENT_SCHEMA_VERSION)
-        self.assertEqual(version, 8)
         self.assertEqual(busy_timeout, 30000)
         self.assertIn("source_external_id", batch_columns)
         self.assertIsNotNone(stage_table)
@@ -286,23 +285,45 @@ class PlaylistBatchTests(unittest.TestCase):
         self.assertEqual(detail["translate"]["status"], "skipped")
 
     def test_preview_deduplicates_and_retains_unavailable_entries(self):
-        class FakeYDL:
-            def __init__(self, _options): pass
-            def __enter__(self): return self
-            def __exit__(self, *_args): return False
-            def extract_info(self, _url, download=False):
-                self.download = download
-                return {"_type": "playlist", "id": "PL-test", "title": "Playlist", "channel": "Channel", "entries": [
-                    {"id": "aaaaaaaaaaa", "title": "First", "duration": 60},
-                    {"id": "aaaaaaaaaaa", "title": "Duplicate", "duration": 60},
-                    None,
-                ]}
-        with patch.object(playlist_batches.yt_dlp, "YoutubeDL", FakeYDL):
+        info = {
+            "_type": "playlist", "id": "PL-test", "title": "Playlist",
+            "channel": "Channel", "entries": [
+                {"id": "aaaaaaaaaaa", "title": "First", "duration": 60},
+                {"id": "aaaaaaaaaaa", "title": "Duplicate", "duration": 60},
+                None,
+            ],
+        }
+        with patch.object(
+            playlist_batches, "extract_youtube_info",
+            return_value=(info, {"authenticated_attempted": False, "attempts": []}),
+        ):
             result = playlist_batches.preview_playlist("https://www.youtube.com/playlist?list=PL-test")
         self.assertEqual(result["playlist"]["item_count"], 2)
         self.assertEqual(result["playlist"]["unavailable_count"], 1)
         self.assertEqual(result["items"][0]["position"], 1)
         self.assertEqual(result["items"][1]["availability"], "unavailable")
+
+    def test_preview_marks_permission_entries_with_actionable_code(self):
+        info = {
+            "_type": "playlist", "id": "PL-test", "title": "Playlist",
+            "entries": [{
+                "id": "aaaaaaaaaaa", "title": "Member lesson",
+                "availability": "subscriber_only", "duration": 60,
+            }],
+        }
+        with patch.object(
+            playlist_batches, "extract_youtube_info",
+            return_value=(info, {
+                "authenticated_attempted": True,
+                "attempts": [{"mode": "anonymous"}, {"mode": "chrome"}],
+            }),
+        ):
+            result = playlist_batches.preview_playlist(
+                "https://www.youtube.com/playlist?list=PL-test"
+            )
+        self.assertEqual(result["items"][0]["availability"], "permission_required")
+        self.assertEqual(result["items"][0]["error_code"], "MEMBERSHIP_REQUIRED")
+        self.assertIn("Chrome", result["items"][0]["suggestion"])
 
     def test_dispatch_submits_only_the_available_io_capacity(self):
         created = playlist_batches.create_or_sync_playlist(

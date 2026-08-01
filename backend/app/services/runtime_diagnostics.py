@@ -12,6 +12,7 @@ import platform
 import shutil
 import subprocess
 import sys
+from importlib import import_module
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Iterable, Sequence
@@ -235,6 +236,36 @@ def resolve_yt_dlp_path(
     )
 
 
+def resolve_deno_path(
+    user_path: str | os.PathLike[str] | None = None,
+) -> RuntimeExecutable | None:
+    """Resolve the JavaScript runtime used by yt-dlp's YouTube challenges."""
+    return _resolve_executable(
+        "deno", user_path=user_path,
+        environment_variable="SUBTITLE_FACTORY_BUNDLED_DENO",
+        version_args=("--version",),
+    )
+
+
+def _ejs_status() -> dict:
+    """Report whether yt-dlp's EJS challenge implementation is importable."""
+    try:
+        module = import_module("yt_dlp.extractor.youtube.jsc")
+    except Exception as exc:
+        return {
+            "available": False,
+            "source": "yt_dlp_python_package",
+            "version": "",
+            "error": f"无法加载 EJS 挑战组件：{type(exc).__name__}",
+        }
+    return {
+        "available": bool(module),
+        "source": "yt_dlp_python_package",
+        "version": getattr(getattr(yt_dlp, "version", None), "__version__", ""),
+        "error": "",
+    }
+
+
 def _output_directory_status(output_dir: str | os.PathLike[str] | None) -> dict:
     path = Path(output_dir or DOWNLOADS_DIR).expanduser()
     existing = path if path.exists() else path.parent
@@ -262,7 +293,9 @@ def get_download_runtime_status(
     """Status payload shared by health checks and the settings preflight."""
     ffmpeg = resolve_ffmpeg_path(user_ffmpeg_path)
     ffprobe = resolve_ffprobe_path(None)
+    deno = resolve_deno_path(None)
     cli = resolve_yt_dlp_path(user_yt_dlp_path)
+    ejs = _ejs_status()
     version = getattr(getattr(yt_dlp, "version", None), "__version__", "")
     yt_dlp_status = {
         "available": bool(version),
@@ -272,7 +305,10 @@ def get_download_runtime_status(
     }
     output = _output_directory_status(user_download_dir)
     return {
-        "ok": bool(ffmpeg and yt_dlp_status["available"] and output["writable"]),
+        "ok": bool(
+            ffmpeg and ffprobe and deno and ejs["available"]
+            and yt_dlp_status["available"] and output["writable"]
+        ),
         "ffmpeg": ffmpeg.to_dict() if ffmpeg else {
             "name": "ffmpeg", "available": False, "error": "未找到可用的 FFmpeg",
             "path": "", "source": "unavailable", "version": "", "architectures": [],
@@ -282,5 +318,17 @@ def get_download_runtime_status(
             "path": "", "source": "unavailable", "version": "", "architectures": [],
         },
         "yt_dlp": yt_dlp_status,
+        "deno": deno.to_dict() if deno else {
+            "name": "deno", "available": False, "error": "未找到可用的 Deno",
+            "path": "", "source": "unavailable", "version": "", "architectures": [],
+        },
+        "ejs": ejs,
+        "po_token": {
+            "available": False,
+            "bundled_provider": False,
+            "source": "not_configured",
+            "extension_point": "SUBTITLE_FACTORY_PO_TOKEN_PROVIDER",
+            "message": "未捆绑第三方 PO Token 提供器",
+        },
         "output": output,
     }

@@ -13,8 +13,9 @@ APP_SETTINGS_DEFAULTS: dict[str, Any] = {
     "default_workflow": "automatic",
     "auto_save": True,
     "startup_behavior": "restore_last",
-    # A release install must be usable without Memo or a developer-only path.
-    "default_model": "small",
+    # Automatic selection never downloads a model. It uses a ready
+    # language-specific model when available and otherwise falls back to Small.
+    "default_model": "auto",
     "source_language": "auto",
     "custom_model_path": None,
     "coreml_model_path": None,
@@ -30,6 +31,7 @@ APP_SETTINGS_DEFAULTS: dict[str, Any] = {
     "download_directory": None,
     "clean_provider_id": "deepseek",
     "translate_provider_id": "deepseek",
+    "content_provider_id": "deepseek",
     "transcription_runtime_by_model": {},
 }
 

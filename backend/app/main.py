@@ -21,7 +21,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from .models.database import init_db, mark_interrupted_tasks
 from .utils.config import LOGS_DIR, DATA_DIR, is_frozen_app
-from .api import batches, editor, maintenance, media, ocr, packages, projects, quality, settings, speakers, tasks, templates, terminology, watch_folders
+from .api import batches, content, clips, editor, maintenance, media, ocr, packages, projects, quality, search, settings, speakers, tasks, templates, terminology, watch_folders
 from .security import ALLOWED_ORIGINS, require_loopback_session
 from .services.secret_store import migrate_database_secrets
 from .services.backups import scheduled_backup
@@ -102,6 +102,7 @@ async def structured_http_error(request: Request, exc: HTTPException):
             "suggestion": exc.detail.get("suggestion") or "",
             "details": exc.detail.get("details") or {},
             "recoverable": bool(exc.detail.get("recoverable", exc.status_code < 500)),
+            "available_actions": exc.detail.get("available_actions") or [],
         }
         return JSONResponse(
             content={"error": error, "detail": exc.detail},
@@ -159,6 +160,9 @@ app.include_router(watch_folders.router)
 app.include_router(batches.router)
 app.include_router(speakers.router)
 app.include_router(ocr.router)
+app.include_router(search.router)
+app.include_router(content.router)
+app.include_router(clips.router)
 
 
 # ── 根路径 / 健康检查 ──

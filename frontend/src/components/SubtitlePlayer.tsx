@@ -32,6 +32,8 @@ export type PlayerPresentationMode = 'normal' | 'theater' | 'fullscreen';
 
 export interface SubtitlePlayerHandle {
   seekTo: (time: number) => void;
+  previewRange: (start: number, end: number) => void;
+  clearPreviewRange: () => void;
 }
 
 function timecode(value: number) {
@@ -77,6 +79,7 @@ const SubtitlePlayer = forwardRef<SubtitlePlayerHandle, Props>(function Subtitle
   const [availableRates, setAvailableRates] = useState([0.5, 0.75, 1, 1.25, 1.5, 2]);
   const [bridgeUrl, setBridgeUrl] = useState('');
   const [loopCurrent, setLoopCurrent] = useState(false);
+  const [previewRangeState, setPreviewRangeState] = useState<{ start: number; end: number } | null>(null);
   const [showSubtitleMenu, setShowSubtitleMenu] = useState(false);
   const [controlsVisible, setControlsVisible] = useState(true);
   const [frameDuration, setFrameDuration] = useState(1 / 30);
@@ -183,13 +186,39 @@ const SubtitlePlayer = forwardRef<SubtitlePlayerHandle, Props>(function Subtitle
     await video.play().catch(() => undefined);
   }, [isWeb, onTimeUpdate, seekAndRefresh, sendWebCommand]);
 
-  useImperativeHandle(ref, () => ({ seekTo }), [seekTo]);
+  const previewRange = useCallback(async (start: number, end: number) => {
+    if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return;
+    const range = { start: Math.max(0, start), end };
+    setLoopCurrent(false);
+    setPreviewRangeState(range);
+    if (isWeb) {
+      sendWebCommand('seek', range.start);
+      sendWebCommand('play');
+      setTime(range.start);
+      setPlaying(true);
+      onTimeUpdate(range.start);
+      return;
+    }
+    const video = videoRef.current;
+    if (!video) return;
+    await seekAndRefresh(range.start);
+    await video.play().catch(() => undefined);
+  }, [isWeb, onTimeUpdate, seekAndRefresh, sendWebCommand]);
+
+  const clearPreviewRange = useCallback(() => setPreviewRangeState(null), []);
+
+  useImperativeHandle(
+    ref,
+    () => ({ seekTo, previewRange: (start, end) => { void previewRange(start, end); }, clearPreviewRange }),
+    [clearPreviewRange, previewRange, seekTo],
+  );
 
   useEffect(() => {
     if (isWeb) {
       setPlaying(false);
       setTime(0);
       setDuration(0);
+      setPreviewRangeState(null);
       return;
     }
     const video = videoRef.current;
@@ -199,6 +228,7 @@ const SubtitlePlayer = forwardRef<SubtitlePlayerHandle, Props>(function Subtitle
     setPlaying(false);
     setTime(0);
     setDuration(0);
+    setPreviewRangeState(null);
   }, [isWeb, videoUrl, youtubeVideoId]);
 
   useEffect(() => {
@@ -245,6 +275,10 @@ const SubtitlePlayer = forwardRef<SubtitlePlayerHandle, Props>(function Subtitle
       if (data.type === 'time') {
         const nextTime = Number(data.time || 0);
         const nextDuration = Number(data.duration || 0);
+        if (previewRangeState && nextTime >= previewRangeState.end) {
+          seekTo(previewRangeState.start);
+          return;
+        }
         if (loopCurrent && active && nextTime >= active.end) {
           seekTo(active.start);
           return;
@@ -273,7 +307,7 @@ const SubtitlePlayer = forwardRef<SubtitlePlayerHandle, Props>(function Subtitle
       window.removeEventListener('message', handleMessage);
       if (webReadyTimer.current) window.clearTimeout(webReadyTimer.current);
     };
-  }, [active, bridgeUrl, isWeb, loopCurrent, onDurationChange, onTimeUpdate, onWebPlayerError, seekTo]);
+  }, [active, bridgeUrl, isWeb, loopCurrent, onDurationChange, onTimeUpdate, onWebPlayerError, previewRangeState, seekTo]);
 
   useEffect(() => {
     let activeRequest = true;
@@ -393,6 +427,7 @@ const SubtitlePlayer = forwardRef<SubtitlePlayerHandle, Props>(function Subtitle
         onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)}
         onTimeUpdate={() => {
           const current = videoRef.current?.currentTime || 0;
+          if (previewRangeState && current >= previewRangeState.end) { seekTo(previewRangeState.start); return; }
           if (loopCurrent && active && current >= active.end) { seekTo(active.start); return; }
           setTime(current); onTimeUpdate(current);
         }}
@@ -453,7 +488,10 @@ const SubtitlePlayer = forwardRef<SubtitlePlayerHandle, Props>(function Subtitle
             <button className="player-icon-btn player-frame-btn" aria-label="后一帧" aria-keyshortcuts="."
               title={`后一帧 (. · ${frameRateReliable ? '视频帧率' : '回退 30 FPS'})`}
               onClick={() => stepFrame(1)}><b>▶│</b><span>后一帧</span></button>
-            <button className={`player-icon-btn player-step-btn ${loopCurrent ? 'active' : ''}`} aria-label="循环当前字幕" aria-pressed={loopCurrent} onClick={() => setLoopCurrent(value => !value)}>↻</button>
+            <button className={`player-icon-btn player-step-btn ${loopCurrent || previewRangeState ? 'active' : ''}`} aria-label={previewRangeState ? '停止循环短片范围' : '循环当前字幕'} aria-pressed={loopCurrent || Boolean(previewRangeState)} onClick={() => {
+              if (previewRangeState) setPreviewRangeState(null);
+              else setLoopCurrent(value => !value);
+            }}>↻</button>
             <button className="player-icon-btn" aria-label={muted ? '取消静音' : '静音'} onClick={() => {
               const next = !muted;
               setMuted(next);

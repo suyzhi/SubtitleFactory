@@ -180,10 +180,29 @@ class ExportRequest(BaseModel):
 
 class ProcessingConfig(BaseModel):
     model: Literal[
-        "tiny", "base", "small", "medium", "large-v3",
+        "auto", "tiny", "base", "small", "medium", "large-v3",
+        "large-v3-turbo", "distil-large-v3",
         "parakeet-tdt-0.6b-v3-coreml",
         "parakeet-tdt-0.6b-v3-int8",
-    ] = "small"
+        "dolphin-base-ctc-multi-lang-int8-2025-04-02",
+        "omnilingual-asr-1600-languages-300m-ctc-v2-int8-2026-02-05",
+        "qwen3-asr-0.6b-int8-2026-03-25",
+        "moonshine-base-zh-quantized-2026-02-27",
+        "paraformer-zh-2023-09-14",
+        "fire-red-asr2-ctc-zh-en-int8-2026-02-25",
+        "telespeech-ctc-int8-zh-2024-06-04",
+        "paraformer-zh-int8-2025-10-07",
+        "wenetspeech-yue-u2pp-conformer-ctc-zh-en-cantonese-int8-2025-09-10",
+        "wenetspeech-wu-u2pp-conformer-ctc-zh-int8-2026-02-03",
+        "sense-voice-zh-en-ja-ko-yue-int8-2025-09-09",
+        "moonshine-tiny-en-quantized-2026-02-27",
+        "medasr-ctc-en-int8-2025-12-25",
+        "moonshine-tiny-ja-quantized-2026-02-27",
+        "nemo-parakeet-tdt-ctc-0.6b-ja-35000-int8",
+        "moonshine-tiny-ko-quantized-2026-02-27",
+        "zipformer-korean-2024-06-24",
+        "nemo-transducer-punct-giga-am-v3-russian-2025-12-16",
+    ] = "auto"
     language: str = "auto"             # auto | en | zh | ja
     target_language: str = "zh"        # zh | en | ja | none
     enable_clean: bool = True
@@ -250,6 +269,7 @@ class AIProviderUpdate(BaseModel):
 class AIAssignmentsUpdate(BaseModel):
     clean_provider_id: str
     translate_provider_id: str
+    content_provider_id: str
 
 
 class ModelScanRequest(BaseModel):
@@ -288,6 +308,7 @@ class AppSettingsUpdate(BaseModel):
     download_directory: Optional[str] = None
     clean_provider_id: Optional[str] = None
     translate_provider_id: Optional[str] = None
+    content_provider_id: Optional[str] = None
     transcription_runtime_by_model: Optional[dict[str, str]] = None
 
     @field_validator(

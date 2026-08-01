@@ -4,13 +4,15 @@ pydantic>=2.13.4
 pydantic-settings>=2.13.1
 faster-whisper>=1.2.1
 mlx-whisper>=0.4.3; platform_system == "Darwin" and platform_machine == "arm64"
-sherpa-onnx==1.13.4
+# 1.13.4 / ORT 1.27 regresses the official Korean Zipformer int8 model on arm64.
+sherpa-onnx==1.13.3
 srt>=3.5.3
 yt-dlp>=2025.10.14
 python-dotenv>=1.0.0
 aiofiles>=24.1.0
 httpx>=0.28.0
 pysubs2>=1.8.0
+Pillow>=11.3.0
 python-multipart>=0.0.22
 keyring>=25.7.0
 av>=11.0.0

@@ -12,8 +12,6 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
-import yt_dlp
-
 from ..models.database import get_db, project_to_dict
 from ..utils.config import PROJECTS_DIR
 from ..utils.task_manager import TaskCancelled, task_manager
@@ -21,7 +19,13 @@ from .app_settings import get_app_settings
 from .ai_settings import get_ai_settings
 from .ai_providers import assigned_provider
 from .audio_extractor import extract_audio
-from .downloader import download_audio_source, download_video
+from .downloader import (
+    DownloadServiceError,
+    download_audio_source,
+    download_video,
+    extract_youtube_info,
+    remove_managed_download_file,
+)
 from .subtitle_cleaner import clean_subtitles
 from .subtitle_translator import translate_subtitles
 from .transcriber import transcribe_audio
@@ -33,11 +37,19 @@ TERMINAL_STAGE_STATES = {"success", "partial", "failed", "cancelled", "skipped"}
 
 
 class PlaylistBatchError(RuntimeError):
-    def __init__(self, message: str, code: str, *, recoverable: bool = True):
+    def __init__(
+        self, message: str, code: str, *, recoverable: bool = True,
+        suggestion: str = "", actions: list[str] | None = None,
+        automatic_retry: bool = False,
+    ):
         super().__init__(message)
         self.error_code = code
         self.recoverable = recoverable
-        self.available_actions = ["retry"] if recoverable else []
+        self.automatic_retry = automatic_retry
+        self.available_actions = actions if actions is not None else (
+            ["retry"] if recoverable else []
+        )
+        self.suggestion = suggestion or "请检查播放列表状态后重试"
 
 
 def _now() -> str:
@@ -73,14 +85,37 @@ def preview_playlist(url: str) -> dict[str, Any]:
         "skip_download": True,
         "quiet": True,
         "no_warnings": True,
-        "ignoreerrors": True,
+        "ignoreerrors": False,
         "noplaylist": False,
     }
+
+    def contains_permission_entries(result: dict) -> bool:
+        for raw in result.get("entries") or []:
+            entry = raw if isinstance(raw, dict) else {}
+            availability = str(entry.get("availability") or "").lower()
+            title = str(entry.get("title") or "").lower()
+            if availability in {"private", "premium_only", "subscriber_only", "needs_auth"}:
+                return True
+            if any(marker in title for marker in ("private video", "members-only", "members only")):
+                return True
+        return False
+
     try:
-        with yt_dlp.YoutubeDL(options) as ydl:
-            info = ydl.extract_info(value, download=False)
-    except yt_dlp.utils.DownloadError as exc:
-        raise PlaylistBatchError(f"播放列表解析失败：{str(exc)[:300]}", "PLAYLIST_PARSE_FAILED") from exc
+        info, attempt_details = extract_youtube_info(
+            value,
+            options=options,
+            task_id=f"playlist-preview-{uuid.uuid4().hex[:8]}",
+            stage="playlist_preview",
+            auth_if_result=contains_permission_entries,
+        )
+    except DownloadServiceError as exc:
+        raise PlaylistBatchError(
+            str(exc), exc.error_code,
+            recoverable=exc.recoverable,
+            suggestion=exc.suggestion,
+            actions=exc.available_actions,
+            automatic_retry=exc.automatic_retry,
+        ) from exc
     if not isinstance(info, dict) or info.get("_type") != "playlist" or not info.get("id"):
         raise PlaylistBatchError("链接未解析为 YouTube 播放列表", "PLAYLIST_NOT_FOUND", recoverable=False)
 
@@ -90,12 +125,30 @@ def preview_playlist(url: str) -> dict[str, Any]:
     for source_position, raw in enumerate(info.get("entries") or [], 1):
         entry = raw if isinstance(raw, dict) else {}
         video_id = str(entry.get("id") or "").strip()
-        available = bool(video_id)
+        raw_availability = str(entry.get("availability") or "").lower()
+        permission_required = raw_availability in {
+            "private", "premium_only", "subscriber_only", "needs_auth",
+        }
+        available = bool(video_id) and not permission_required
+        state = (
+            "active" if available
+            else "permission_required" if video_id and permission_required
+            else "unavailable"
+        )
+        error_code = None
+        suggestion = None
+        if permission_required:
+            error_code = (
+                "PRIVATE_VIDEO" if raw_availability == "private"
+                else "MEMBERSHIP_REQUIRED" if raw_availability in {"premium_only", "subscriber_only"}
+                else "AUTH_REQUIRED"
+            )
+            suggestion = "请在 Google Chrome 中切换到有权限的账号后重新预览"
         source_id = video_id or f"unavailable:{source_position}"
         if source_id in seen:
             continue
         seen.add(source_id)
-        if not available:
+        if state != "active":
             unavailable += 1
         entries.append({
             "source_id": source_id,
@@ -106,7 +159,9 @@ def preview_playlist(url: str) -> dict[str, Any]:
             "url": f"https://www.youtube.com/watch?v={video_id}" if available else None,
             "duration": float(entry.get("duration") or 0),
             "thumbnail_url": _entry_thumbnail(entry),
-            "availability": "active" if available else "unavailable",
+            "availability": state,
+            "error_code": error_code,
+            "suggestion": suggestion,
         })
     if not entries:
         raise PlaylistBatchError("播放列表中没有可处理的视频", "PLAYLIST_EMPTY", recoverable=False)
@@ -124,6 +179,7 @@ def preview_playlist(url: str) -> dict[str, Any]:
             "total_duration": round(sum(float(item["duration"]) for item in entries), 2),
         },
         "items": entries,
+        "download": attempt_details,
         "warnings": ([f"有 {unavailable} 个条目不可用，将保留状态但不会创建项目"] if unavailable else []),
     }
 
@@ -222,11 +278,16 @@ def create_or_sync_playlist(preview: dict[str, Any], configuration: dict[str, An
         for entry in preview["items"]:
             old = existing.get(entry["source_id"])
             if old:
+                source_error = (
+                    f"{entry.get('error_code')}：{entry.get('suggestion')}"
+                    if entry.get("error_code") else None
+                )
                 db.execute(
                     """UPDATE batch_items SET position=?,title=?,duration=?,thumbnail_url=?,source_url=?,
-                       source_state=?,updated_at=? WHERE id=?""",
+                       source_state=?,error=CASE WHEN ? IS NOT NULL THEN ? ELSE error END,
+                       updated_at=? WHERE id=?""",
                     (entry["position"], entry["title"], entry["duration"], entry["thumbnail_url"],
-                     entry["url"], entry["availability"], now, old["id"]),
+                     entry["url"], entry["availability"], source_error, source_error, now, old["id"]),
                 )
                 continue
             item_id = str(uuid.uuid4())
@@ -248,7 +309,12 @@ def create_or_sync_playlist(preview: dict[str, Any], configuration: dict[str, An
                     source_id,source_url,position,title,duration,thumbnail_url,source_state)
                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (item_id, batch_id, project_id, entry["url"] or playlist["url"],
-                 "pending" if available else "unavailable", None, now, now, entry["source_id"],
+                 "pending" if available else "unavailable",
+                 (
+                     f"{entry.get('error_code')}：{entry.get('suggestion')}"
+                     if entry.get("error_code") else None
+                 ),
+                 now, now, entry["source_id"],
                  entry["url"], entry["position"], entry["title"], entry["duration"],
                  entry["thumbnail_url"], entry["availability"]),
             )
@@ -317,7 +383,7 @@ def _queue_stage(item_id: str, stage: str) -> str | None:
         db.close()
     task_id = task_manager.create_task(
         context["project_id"], stage,
-        max_attempts=5 if stage == "download" else None,
+        max_attempts=3 if stage == "download" else None,
     )
     task_manager.update_task(task_id, details={
         "batch_id": context["batch_id"], "batch_item_id": item_id,
@@ -524,11 +590,15 @@ def _run_stage(task_id: str, item_id: str, stage: str) -> None:
         _dispatch_when_task_terminal(task_id, context["batch_id"])
         raise
     except Exception as exc:
+        suggestion = str(getattr(exc, "suggestion", "") or "")
+        display_error = str(exc)[:500]
+        if suggestion:
+            display_error = f"{display_error}｜建议：{suggestion}"[:500]
         db = get_db()
         try:
             db.execute(
                 "UPDATE batch_item_stages SET status='failed',error_code=?,error=?,updated_at=? WHERE item_id=? AND stage=?",
-                (str(getattr(exc, "error_code", "UNEXPECTED_ERROR")), str(exc)[:500], _now(), item_id, stage),
+                (str(getattr(exc, "error_code", "UNEXPECTED_ERROR")), display_error, _now(), item_id, stage),
             )
             db.commit()
         finally:
@@ -585,6 +655,8 @@ def _execute_stage(task_id: str, context, stage: str, configuration: dict[str, A
             container=configuration.get("download_container") or settings.get("download_container") or "mp4",
         )
         details = (task_manager.get_task(task_id) or {}).get("details", {})
+        candidate_thumbnail = details.get("thumbnail_path")
+        committed = False
         db = get_db()
         try:
             db.execute(
@@ -593,8 +665,31 @@ def _execute_stage(task_id: str, context, stage: str, configuration: dict[str, A
                  details.get("thumbnail_path"), _now(), project_id),
             )
             db.commit()
+            committed = True
+        except Exception:
+            db.rollback()
+            raise
         finally:
             db.close()
+            if not committed:
+                remove_managed_download_file(
+                    video_path, project_id=project_id,
+                    download_dir=settings.get("download_directory"),
+                )
+                remove_managed_download_file(
+                    candidate_thumbnail, project_id=project_id,
+                    download_dir=settings.get("download_directory"),
+                )
+        if project["video_path"] and project["video_path"] != video_path:
+            remove_managed_download_file(
+                project["video_path"], project_id=project_id,
+                download_dir=settings.get("download_directory"),
+            )
+        if project["thumbnail_path"] and project["thumbnail_path"] != candidate_thumbnail:
+            remove_managed_download_file(
+                project["thumbnail_path"], project_id=project_id,
+                download_dir=settings.get("download_directory"),
+            )
         return
     if stage == "extract_audio":
         if project["media_mode"] == "web" and project["audio_path"] and os.path.isfile(project["audio_path"]):
@@ -640,7 +735,7 @@ def _refresh_item(item_id: str) -> None:
         item = db.execute("SELECT * FROM batch_items WHERE id=?", (item_id,)).fetchone()
         if not item:
             return
-        if item["source_state"] == "unavailable":
+        if item["source_state"] != "active":
             status = "unavailable"
         else:
             states = [row[0] for row in db.execute("SELECT status FROM batch_item_stages WHERE item_id=?", (item_id,)).fetchall()]

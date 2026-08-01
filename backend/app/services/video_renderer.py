@@ -8,17 +8,94 @@
 import subprocess
 import os
 import logging
+import json
+from pathlib import Path
 
 from ..utils.config import EXPORTS_DIR
 from ..utils.task_manager import task_manager
-from .runtime_diagnostics import resolve_ffmpeg_path
+from .ffmpeg_encoding import select_h264_encoder_args
+from .runtime_diagnostics import resolve_ffmpeg_path, resolve_ffprobe_path
 
 logger = logging.getLogger(__name__)
 
 
+def _video_metadata(video_path: str) -> tuple[int, int, float] | None:
+    ffprobe = resolve_ffprobe_path()
+    if ffprobe is None:
+        return None
+    result = subprocess.run(
+        [
+            str(ffprobe.path), "-v", "error", "-select_streams", "v:0",
+            "-show_entries", "stream=width,height:format=duration", "-of", "json",
+            video_path,
+        ],
+        capture_output=True, text=True, timeout=60,
+    )
+    if result.returncode:
+        return None
+    try:
+        payload = json.loads(result.stdout)
+        stream = (payload.get("streams") or [])[0]
+        return int(stream["width"]), int(stream["height"]), float(
+            (payload.get("format") or {}).get("duration") or 0
+        )
+    except (IndexError, KeyError, TypeError, ValueError, json.JSONDecodeError):
+        return None
+
+
+def _burn_with_image_overlays(
+    *, task_id: str, ffmpeg_path: Path, video_path: str, output_path: str,
+    project_id: str, container: str, video_codec_args: list[str],
+    bilingual: bool, style_settings: dict | None,
+):
+    metadata = _video_metadata(video_path)
+    if not metadata:
+        return None
+    width, height, duration = metadata
+    if width <= 0 or height <= 0 or duration <= 0:
+        return None
+    from .clips import _filter_graph, _subtitle_overlay_paths
+
+    candidate = {
+        "id": f"video-export-{project_id}",
+        "start": 0.0,
+        "end": duration,
+    }
+    layout = {
+        "aspect_ratio": "source",
+        "composition": "passthrough",
+        "subtitle_mode": "bilingual" if bilingual else "original",
+        "style": style_settings or {},
+        "render_size": (width, height),
+    }
+    assets = _subtitle_overlay_paths(task_id, candidate, layout, project_id)
+    if not assets:
+        return None
+    try:
+        graph = _filter_graph(width, height, layout, None, assets)
+        command = [
+            str(ffmpeg_path), "-i", video_path,
+            "-filter_complex", graph, "-map", "[v]", "-map", "0:a?",
+            *video_codec_args, "-pix_fmt", "yuv420p",
+            "-c:a", "aac", "-b:a", "128k",
+        ]
+        if container == "mp4":
+            command.extend(["-movflags", "+faststart"])
+        command.extend(["-y", output_path])
+        task_manager.add_log(
+            task_id, "info", "rendering", "正在使用内建字幕绘制器压制硬字幕",
+            detail=f"画面: {width}×{height} · 字幕图层: {len(assets)}",
+        )
+        return subprocess.run(command, capture_output=True, text=True, timeout=7200)
+    finally:
+        for asset in assets:
+            Path(asset["path"]).unlink(missing_ok=True)
+
+
 def burn_subtitles(task_id: str, video_path: str, subtitle_path: str,
                    output_path: str = None, project_id: str = None,
-                   ffmpeg_path: str = None):
+                   ffmpeg_path: str = None, *, bilingual: bool = False,
+                   style_settings: dict | None = None):
     """
     使用 ffmpeg 将字幕硬编码到视频中。
     支持 ASS 和 SRT 字幕。
@@ -57,13 +134,13 @@ def burn_subtitles(task_id: str, video_path: str, subtitle_path: str,
     # 默认开启的内嵌字幕轨。这样 MP4/MKV 导出不会因为环境差异完全失效。
     escaped_path = subtitle_path.replace(":", "\\:").replace("'", "'\\''")
 
+    video_codec_args, video_codec_name = select_h264_encoder_args(ffmpeg.path)
     cmd = [
         str(ffmpeg.path),
         "-i", video_path,
         "-vf", f"subtitles=filename='{escaped_path}'",
-        "-c:v", "libx264",           # 视频编码
-        "-preset", "fast",
-        "-crf", "22",
+        *video_codec_args,
+        "-pix_fmt", "yuv420p",
         "-c:a", "aac",               # 音频编码
         "-b:a", "128k",
     ]
@@ -76,7 +153,7 @@ def burn_subtitles(task_id: str, video_path: str, subtitle_path: str,
         logger.info(f"[Renderer] 开始压制: {video_path}")
         task_manager.add_log(
             task_id, "info", "rendering", "正在编码视频",
-            detail=f"编码器: libx264, 音频: AAC, 字幕格式: {subtitle_ext}"
+            detail=f"编码器: {video_codec_name}, 音频: AAC, 字幕格式: {subtitle_ext}"
         )
         task_manager.update_task(task_id, step="rendering", progress=85, message="正在编码视频（这可能需要一些时间）...")
 
@@ -86,24 +163,39 @@ def burn_subtitles(task_id: str, video_path: str, subtitle_path: str,
 
         subtitle_mode = "burned"
         if result.returncode != 0 and ("No such filter: 'subtitles'" in result.stderr or "Error parsing" in result.stderr):
-            subtitle_codec = "mov_text" if container == "mp4" else "ass"
-            fallback = [
-                str(ffmpeg.path), "-i", video_path, "-i", subtitle_path,
-                "-map", "0:v:0", "-map", "0:a?", "-map", "1:0",
-                "-c:v", "copy", "-c:a", "copy", "-c:s", subtitle_codec,
-                "-disposition:s:0", "default",
-            ]
-            if container == "mp4":
-                fallback.extend(["-movflags", "+faststart"])
-            fallback.extend(["-y", output_path])
-            task_manager.add_log(
-                task_id, "warning", "rendering", "当前 ffmpeg 不支持硬字幕，已自动改用内嵌字幕轨",
-                detail=f"容器: {container.upper()} · 字幕编码: {subtitle_codec}",
-            )
-            task_manager.checkpoint(task_id)
-            result = subprocess.run(fallback, capture_output=True, text=True, timeout=7200)
-            task_manager.checkpoint(task_id)
-            subtitle_mode = "embedded"
+            image_result = _burn_with_image_overlays(
+                task_id=task_id,
+                ffmpeg_path=ffmpeg.path,
+                video_path=video_path,
+                output_path=output_path,
+                project_id=project_id,
+                container=container,
+                video_codec_args=video_codec_args,
+                bilingual=bilingual,
+                style_settings=style_settings,
+            ) if project_id else None
+            if image_result is not None and image_result.returncode == 0:
+                result = image_result
+                subtitle_mode = "burned_image"
+            else:
+                subtitle_codec = "mov_text" if container == "mp4" else "ass"
+                fallback = [
+                    str(ffmpeg.path), "-i", video_path, "-i", subtitle_path,
+                    "-map", "0:v:0", "-map", "0:a?", "-map", "1:0",
+                    "-c:v", "copy", "-c:a", "copy", "-c:s", subtitle_codec,
+                    "-disposition:s:0", "default",
+                ]
+                if container == "mp4":
+                    fallback.extend(["-movflags", "+faststart"])
+                fallback.extend(["-y", output_path])
+                task_manager.add_log(
+                    task_id, "warning", "rendering", "硬字幕绘制不可用，已改用内嵌字幕轨",
+                    detail=f"容器: {container.upper()} · 字幕编码: {subtitle_codec}",
+                )
+                task_manager.checkpoint(task_id)
+                result = subprocess.run(fallback, capture_output=True, text=True, timeout=7200)
+                task_manager.checkpoint(task_id)
+                subtitle_mode = "embedded"
 
         if result.returncode != 0:
             task_manager.add_log(task_id, "error", "rendering", "视频导出失败", detail=result.stderr[-1200:])
@@ -123,7 +215,7 @@ def burn_subtitles(task_id: str, video_path: str, subtitle_path: str,
                 "output_size": file_size,
                 "format": container,
                 "subtitle_mode": subtitle_mode,
-                "codec_info": "libx264 + AAC",
+                "codec_info": f"{video_codec_name} + AAC",
             }
         )
         task_manager.add_log(

@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Callable
 
 
-CURRENT_SCHEMA_VERSION = 8
+CURRENT_SCHEMA_VERSION = 12
 
 
 def _columns(conn: sqlite3.Connection, table: str) -> set[str]:
@@ -348,6 +348,216 @@ def _migration_v8(conn: sqlite3.Connection) -> None:
     )
 
 
+def _migration_v9(conn: sqlite3.Connection) -> None:
+    """Add a local full-text subtitle index and keep it transactionally synced."""
+    conn.executescript(
+        """
+        CREATE VIRTUAL TABLE IF NOT EXISTS segment_search USING fts5(
+            segment_id UNINDEXED,
+            project_id UNINDEXED,
+            project_title,
+            speaker_name,
+            raw_text,
+            clean_text,
+            translated_text,
+            tokenize='trigram'
+        );
+
+        CREATE TRIGGER IF NOT EXISTS segment_search_insert
+        AFTER INSERT ON segments BEGIN
+            INSERT INTO segment_search(
+                segment_id,project_id,project_title,speaker_name,
+                raw_text,clean_text,translated_text
+            ) VALUES (
+                new.id,new.project_id,
+                COALESCE((SELECT title FROM projects WHERE id=new.project_id),''),
+                COALESCE(new.speaker,''),
+                COALESCE(new.raw_text,''),COALESCE(new.clean_text,''),
+                COALESCE(new.translated_text,'')
+            );
+        END;
+
+        CREATE TRIGGER IF NOT EXISTS segment_search_update
+        AFTER UPDATE OF project_id,raw_text,clean_text,translated_text,speaker ON segments BEGIN
+            DELETE FROM segment_search WHERE segment_id=old.id;
+            INSERT INTO segment_search(
+                segment_id,project_id,project_title,speaker_name,
+                raw_text,clean_text,translated_text
+            ) VALUES (
+                new.id,new.project_id,
+                COALESCE((SELECT title FROM projects WHERE id=new.project_id),''),
+                COALESCE(new.speaker,''),
+                COALESCE(new.raw_text,''),COALESCE(new.clean_text,''),
+                COALESCE(new.translated_text,'')
+            );
+        END;
+
+        CREATE TRIGGER IF NOT EXISTS segment_search_delete
+        AFTER DELETE ON segments BEGIN
+            DELETE FROM segment_search WHERE segment_id=old.id;
+        END;
+
+        CREATE TRIGGER IF NOT EXISTS segment_search_project_title
+        AFTER UPDATE OF title ON projects BEGIN
+            UPDATE segment_search SET project_title=new.title
+            WHERE project_id=new.id;
+        END;
+
+        DELETE FROM segment_search;
+        INSERT INTO segment_search(
+            segment_id,project_id,project_title,speaker_name,
+            raw_text,clean_text,translated_text
+        )
+        SELECT s.id,s.project_id,p.title,COALESCE(s.speaker,''),
+               COALESCE(s.raw_text,''),COALESCE(s.clean_text,''),
+               COALESCE(s.translated_text,'')
+        FROM segments s JOIN projects p ON p.id=s.project_id;
+        """
+    )
+
+
+def _migration_v10(conn: sqlite3.Connection) -> None:
+    """Persist editable, source-revision-aware content publication packs."""
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS content_packs (
+            id TEXT PRIMARY KEY,
+            project_id TEXT NOT NULL,
+            name TEXT NOT NULL,
+            input_mode TEXT NOT NULL DEFAULT 'original',
+            output_language TEXT NOT NULL DEFAULT 'auto',
+            allow_translation_fallback INTEGER NOT NULL DEFAULT 0,
+            source_revision INTEGER NOT NULL DEFAULT 0,
+            source_fingerprint TEXT NOT NULL,
+            provider_id TEXT,
+            model TEXT,
+            status TEXT NOT NULL DEFAULT 'pending',
+            revision INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_content_packs_project
+            ON content_packs(project_id, updated_at DESC);
+
+        CREATE TABLE IF NOT EXISTS content_pack_sections (
+            id TEXT PRIMARY KEY,
+            pack_id TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            title TEXT NOT NULL,
+            content_json TEXT NOT NULL DEFAULT '{}',
+            status TEXT NOT NULL DEFAULT 'pending',
+            error TEXT,
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            revision INTEGER NOT NULL DEFAULT 0,
+            generated_at TEXT,
+            updated_at TEXT NOT NULL,
+            UNIQUE(pack_id,kind),
+            FOREIGN KEY (pack_id) REFERENCES content_packs(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_content_pack_sections_pack
+            ON content_pack_sections(pack_id, sort_order);
+        """
+    )
+
+
+def _migration_v11(conn: sqlite3.Connection) -> None:
+    """Persist short-clip recommendations, layouts and validated render outputs."""
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS clip_sets (
+            id TEXT PRIMARY KEY,
+            project_id TEXT NOT NULL,
+            name TEXT NOT NULL,
+            source_revision INTEGER NOT NULL DEFAULT 0,
+            source_fingerprint TEXT NOT NULL,
+            provider_id TEXT,
+            model TEXT,
+            desired_count INTEGER NOT NULL DEFAULT 5,
+            min_duration REAL NOT NULL DEFAULT 30,
+            max_duration REAL NOT NULL DEFAULT 90,
+            status TEXT NOT NULL DEFAULT 'pending',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_clip_sets_project
+            ON clip_sets(project_id, updated_at DESC);
+
+        CREATE TABLE IF NOT EXISTS clip_candidates (
+            id TEXT PRIMARY KEY,
+            clip_set_id TEXT NOT NULL,
+            title TEXT NOT NULL,
+            hook TEXT NOT NULL DEFAULT '',
+            reason TEXT NOT NULL DEFAULT '',
+            score REAL NOT NULL DEFAULT 0,
+            start REAL NOT NULL,
+            end REAL NOT NULL,
+            start_segment_index INTEGER NOT NULL,
+            end_segment_index INTEGER NOT NULL,
+            selected INTEGER NOT NULL DEFAULT 0,
+            revision INTEGER NOT NULL DEFAULT 0,
+            source_confirmed_revision INTEGER,
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY (clip_set_id) REFERENCES clip_sets(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_clip_candidates_set
+            ON clip_candidates(clip_set_id, sort_order);
+
+        CREATE TABLE IF NOT EXISTS clip_layouts (
+            candidate_id TEXT NOT NULL,
+            aspect_ratio TEXT NOT NULL,
+            enabled INTEGER NOT NULL DEFAULT 0,
+            composition TEXT NOT NULL DEFAULT 'blur',
+            focal_x REAL NOT NULL DEFAULT 0.5,
+            focal_y REAL NOT NULL DEFAULT 0.5,
+            subtitle_mode TEXT NOT NULL DEFAULT 'original',
+            style_json TEXT NOT NULL DEFAULT '{}',
+            revision INTEGER NOT NULL DEFAULT 0,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY(candidate_id,aspect_ratio),
+            FOREIGN KEY (candidate_id) REFERENCES clip_candidates(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS clip_renders (
+            id TEXT PRIMARY KEY,
+            project_id TEXT NOT NULL,
+            candidate_id TEXT NOT NULL,
+            aspect_ratio TEXT NOT NULL,
+            configuration_fingerprint TEXT NOT NULL,
+            task_id TEXT,
+            path TEXT,
+            status TEXT NOT NULL DEFAULT 'pending',
+            error TEXT,
+            width INTEGER,
+            height INTEGER,
+            duration REAL,
+            size INTEGER,
+            checksum TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+            FOREIGN KEY (candidate_id) REFERENCES clip_candidates(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_clip_renders_candidate
+            ON clip_renders(candidate_id, updated_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_clip_renders_fingerprint
+            ON clip_renders(configuration_fingerprint, status);
+        """
+    )
+
+
+def _migration_v12(conn: sqlite3.Connection) -> None:
+    """Remember explicit translation fallback consent for later regeneration."""
+    _add_column(
+        conn,
+        "content_packs",
+        "allow_translation_fallback INTEGER NOT NULL DEFAULT 0",
+    )
+
+
 MIGRATIONS: tuple[tuple[int, Callable[[sqlite3.Connection], None]], ...] = (
     (1, _migration_v1),
     (2, _migration_v2),
@@ -357,6 +567,10 @@ MIGRATIONS: tuple[tuple[int, Callable[[sqlite3.Connection], None]], ...] = (
     (6, _migration_v6),
     (7, _migration_v7),
     (8, _migration_v8),
+    (9, _migration_v9),
+    (10, _migration_v10),
+    (11, _migration_v11),
+    (12, _migration_v12),
 )
 
 

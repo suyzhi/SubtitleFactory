@@ -31,7 +31,7 @@ check_cmd() {
             node)    echo "  请安装 Node.js 18+: https://nodejs.org/" ;;
             npm)     echo "  请安装 npm (随 Node.js 一起安装)" ;;
             ffmpeg)  echo "  请安装 FFmpeg: brew install ffmpeg" ;;
-            yt-dlp)  echo "  请安装 yt-dlp: brew install yt-dlp 或 pip install yt-dlp" ;;
+            deno)    echo "  请安装 Deno: brew install deno" ;;
             rustc|cargo) echo "  请安装 Rust: curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh" ;;
         esac
         return 1
@@ -44,7 +44,7 @@ check_cmd python3 || MISSING=1
 check_cmd node    || MISSING=1
 check_cmd npm     || MISSING=1
 check_cmd ffmpeg  || MISSING=1
-check_cmd yt-dlp  || MISSING=1
+check_cmd deno    || MISSING=1
 check_cmd rustc   || echo -e "${YELLOW}⚠️  rustc 未安装，Tauri 桌面端将无法编译${NC}"
 check_cmd cargo   || echo -e "${YELLOW}⚠️  cargo 未安装，Tauri 桌面端将无法编译${NC}"
 
@@ -73,6 +73,8 @@ fi
 # even when the virtual environment already exists.
 echo -e "${YELLOW}📦 检查 Python 依赖...${NC}"
 pip install -q -r "$DIR/backend/requirements.txt"
+"$DIR/backend/.venv/bin/python" -c \
+    "import yt_dlp, yt_dlp.extractor.youtube.jsc; print('yt-dlp Python API', yt_dlp.version.__version__)"
 
 # ── 检查前端依赖 ──
 if [ ! -d "$DIR/frontend/node_modules" ]; then
