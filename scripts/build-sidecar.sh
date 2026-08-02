@@ -75,6 +75,17 @@ fi
 swiftc "$ROOT/backend/runtime/vision_ocr.swift" -O -o "$OUTPUT_DIR/bin/vision-ocr"
 chmod +x "$OUTPUT_DIR/bin/ffmpeg" "$OUTPUT_DIR/bin/ffprobe"
 chmod 755 "$OUTPUT_DIR/bin/deno"
+chmod 755 "$OUTPUT_DIR/bin/vision-ocr"
 "$ROOT/scripts/verify-release-runtime.sh" "$OUTPUT_DIR/bin"
+VISION_ARCHS="$(lipo -archs "$OUTPUT_DIR/bin/vision-ocr" 2>/dev/null || true)"
+if [ "$VISION_ARCHS" != "arm64" ]; then
+  echo "Vision OCR helper 架构错误：${VISION_ARCHS:-未知}（必须是纯 arm64）。" >&2
+  exit 1
+fi
+if ! "$OUTPUT_DIR/bin/vision-ocr" "$ROOT/frontend/src-tauri/icons/32x32.png" \
+  | "$PYTHON" -c 'import json,sys; value=json.load(sys.stdin); assert isinstance(value,list)'; then
+  echo "Vision OCR helper 无法读取测试图片并输出 JSON。" >&2
+  exit 1
+fi
 "$OUTPUT_DIR/bin/deno" --version
 echo "已生成快速启动后端: $OUTPUT_DIR"

@@ -14,6 +14,7 @@ os.environ.setdefault(
 )
 
 from app.services import downloader
+from app.services import ocr as vision_ocr
 from app.services import parakeet_transcriber as parakeet
 from app.services import runtime_diagnostics as runtime
 from app.services.transcriber import resolve_transcription_model
@@ -29,6 +30,22 @@ def _executable(folder: Path, name: str, output: str = "tool version 1") -> Path
 
 
 class DownloadRuntimeTests(unittest.TestCase):
+    def test_frozen_vision_ocr_prefers_helper_beside_sidecar(self):
+        with tempfile.TemporaryDirectory() as folder:
+            runtime_root = Path(folder)
+            bin_dir = runtime_root / "bin"
+            bin_dir.mkdir()
+            helper = _executable(bin_dir, "vision-ocr", "[]")
+            with patch.object(
+                vision_ocr, "is_frozen_app", return_value=True
+            ), patch.object(
+                vision_ocr.sys, "executable", str(runtime_root / "subtitle-backend")
+            ), patch.object(
+                vision_ocr.sys, "_MEIPASS", str(runtime_root / "_internal"), create=True
+            ):
+                selected = vision_ocr._helper()
+            self.assertEqual(selected, helper.resolve())
+
     def test_download_runtime_health_reports_deno_ejs_and_po_token_capability(self):
         status = runtime.get_download_runtime_status()
         self.assertIn("deno", status)

@@ -83,7 +83,15 @@ async function parseError(res: Response): Promise<BackendError> {
 
 async function authorizedFetch(url: string, options?: RequestInit, json = true): Promise<Response> {
   await initializeBackendSession();
-  return fetch(`${BASE_URL}${url}`, { ...options, headers: authorizedHeaders(options, json) });
+  const method = String(options?.method || 'GET').toUpperCase();
+  return fetch(`${BASE_URL}${url}`, {
+    ...options,
+    // Project state and task progress are dynamic local API responses. WebKit
+    // may otherwise reuse the first successful GET while a background task is
+    // advancing, leaving the UI permanently stuck at its initial progress.
+    ...(method === 'GET' ? { cache: 'no-store' as const } : {}),
+    headers: authorizedHeaders(options, json),
+  });
 }
 
 async function request<T>(url: string, options?: RequestInit): Promise<T> {

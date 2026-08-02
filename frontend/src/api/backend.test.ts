@@ -1,6 +1,27 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { materializeProjectVideo } from './backend';
+import { getTaskStatus, materializeProjectVideo } from './backend';
+
+describe('local API caching', () => {
+  it('disables WebKit caching for task polling GET requests', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      id: 'ocr-task',
+      project_id: 'project-id',
+      type: 'ocr',
+      status: 'success',
+      progress: 100,
+      details: { ocr_preview: [] },
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await getTaskStatus('ocr-task');
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('/api/tasks/ocr-task'),
+      expect.objectContaining({ cache: 'no-store' }),
+    );
+  });
+});
 
 describe('materializeProjectVideo', () => {
   it('waits for a concurrent audio task before retrying automatic player fallback', async () => {

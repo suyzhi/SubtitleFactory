@@ -84,6 +84,13 @@ fi
 
 PACKAGED_RUNTIME="$APP_PATH/Contents/Resources/backend-runtime/bin"
 "$ROOT/scripts/verify-release-runtime.sh" "$PACKAGED_RUNTIME"
+if [ ! -x "$PACKAGED_RUNTIME/vision-ocr" ] \
+  || [ "$(lipo -archs "$PACKAGED_RUNTIME/vision-ocr" 2>/dev/null || true)" != "arm64" ] \
+  || ! "$PACKAGED_RUNTIME/vision-ocr" "$ROOT/frontend/src-tauri/icons/32x32.png" \
+    | "$ROOT/backend/.venv/bin/python" -c 'import json,sys; value=json.load(sys.stdin); assert isinstance(value,list)'; then
+  echo "最终 App 的 Vision OCR helper 缺失、架构错误或无法运行。" >&2
+  exit 1
+fi
 codesign --verify --deep --strict "$APP_PATH"
 APP_EXECUTABLE="$APP_PATH/Contents/MacOS/app"
 if ! file "$APP_EXECUTABLE" | rg -F "arm64" >/dev/null; then

@@ -8,19 +8,47 @@ import platform
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 from difflib import SequenceMatcher
 from pathlib import Path
 
 from ..utils.task_manager import task_manager
+from ..utils.config import is_frozen_app
 from .runtime_diagnostics import resolve_ffmpeg_path
 
 
+def _bundled_helper_candidates() -> list[Path]:
+    """Return release and development locations for the native Vision helper."""
+    roots: list[Path] = []
+    if is_frozen_app():
+        # PyInstaller places the sidecar executable beside the bundle's bin/
+        # directory.  __file__ points inside _internal, so deriving the runtime
+        # root from the module path misses the helper in a packaged App.
+        roots.append(Path(sys.executable).resolve().parent)
+        frozen_root = getattr(sys, "_MEIPASS", None)
+        if frozen_root:
+            roots.append(Path(frozen_root).resolve())
+    else:
+        roots.append(Path(__file__).resolve().parents[2] / "runtime")
+
+    candidates: list[Path] = []
+    seen: set[Path] = set()
+    for root in roots:
+        for candidate in (root / "bin" / "vision-ocr", root / "vision-ocr"):
+            resolved = candidate.resolve()
+            if resolved not in seen:
+                seen.add(resolved)
+                candidates.append(resolved)
+    return candidates
+
+
 def _helper() -> Path:
-    root = Path(__file__).resolve().parents[2]
-    bundled = root / "runtime" / "bin" / "vision-ocr"
-    if bundled.is_file(): return bundled
+    for bundled in _bundled_helper_candidates():
+        if bundled.is_file() and os.access(bundled, os.X_OK):
+            return bundled
     if platform.system() != "Darwin": raise RuntimeError("Vision OCR 仅支持 macOS")
+    root = Path(__file__).resolve().parents[2]
     compiler = shutil.which("swiftc")
     source = root / "runtime" / "vision_ocr.swift"
     if not compiler or not source.is_file(): raise RuntimeError("当前运行包缺少 Vision OCR helper")
