@@ -24,6 +24,7 @@ from app.services.model_catalog import (
     CatalogFile,
     ModelDownloadError,
     ModelVariant,
+    QWEN_ASR_CATALOG_BY_ID,
     WHISPER_CATALOG_BY_ID,
 )
 from app.services.parakeet_transcriber import (
@@ -67,7 +68,7 @@ EXPECTED_REPOSITORIES = {
 
 
 class CatalogContractTests(unittest.TestCase):
-    def test_api_exposes_exactly_twenty_seven_grouped_release_models(self):
+    def test_api_exposes_exactly_twenty_nine_grouped_release_models(self):
         response = TestClient(app).get(
             "/api/transcription/models",
             headers={"Authorization": f"Bearer {API_TOKEN}"},
@@ -78,14 +79,14 @@ class CatalogContractTests(unittest.TestCase):
             item for item in payload["models"]
             if item.get("category_id") in payload["category_order"]
         ]
-        self.assertEqual(len(release_models), 27)
+        self.assertEqual(len(release_models), 29)
         self.assertEqual(payload["recommended_model"], "small")
         self.assertEqual(
             payload["category_order"],
             [
                 "lightweight", "balanced", "performance", "multilingual",
                 "chinese", "dialects", "english", "east_asian", "european",
-                "specialized", "parakeet",
+                "specialized", "parakeet", "cloud",
             ],
         )
         for item in release_models:
@@ -113,6 +114,22 @@ class CatalogContractTests(unittest.TestCase):
                 self.assertTrue(variant.files)
                 self.assertTrue(all(item.size > 0 for item in variant.files))
                 self.assertTrue(all(len(item.sha256) == 64 for item in variant.files))
+
+    def test_qwen_apple_gpu_variants_pin_official_revisions_and_files(self):
+        expected = {
+            "qwen3-asr-0.6b-int8-2026-03-25": (
+                "Qwen/Qwen3-ASR-0.6B", "5eb144179a02acc5e5ba31e748d22b0cf3e303b0", 8,
+            ),
+            "qwen3-asr-1.7b": (
+                "Qwen/Qwen3-ASR-1.7B", "7278e1e70fe206f11671096ffdd38061171dd6e5", 10,
+            ),
+        }
+        self.assertEqual(set(QWEN_ASR_CATALOG_BY_ID), set(expected))
+        for model_id, (repository, revision, file_count) in expected.items():
+            variant = QWEN_ASR_CATALOG_BY_ID[model_id].variants["mlx"]
+            self.assertEqual((variant.repository, variant.revision), (repository, revision))
+            self.assertEqual(len(variant.files), file_count)
+            self.assertTrue(all(item.size > 0 and len(item.sha256) == 64 for item in variant.files))
 
     def test_language_restrictions_fall_back_visibly_to_small(self):
         distil = resolve_transcription_model("distil-large-v3", "zh")

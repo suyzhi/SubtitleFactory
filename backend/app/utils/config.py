@@ -22,6 +22,7 @@ SUBTITLES_DIR = DATA_DIR / "subtitles"
 EXPORTS_DIR = DATA_DIR / "exports"
 MODELS_DIR = DATA_DIR / "models"
 MLX_MODELS_DIR = MODELS_DIR / "whisper-mlx"
+QWEN_MLX_MODELS_DIR = MODELS_DIR / "qwen3-asr-mlx"
 # Runtime-created files must never be written beside a frozen sidecar inside
 # the read-only App bundle.  Tauri supplies SUBTITLE_FACTORY_DATA_DIR in a
 # release build; development and tests retain the deterministic fallback above.
@@ -29,7 +30,7 @@ LOGS_DIR = DATA_DIR / "logs"
 DB_PATH = DATA_DIR / "subtitles.db"
 
 # 创建目录
-for d in [PROJECTS_DIR, DOWNLOADS_DIR, AUDIO_DIR, SUBTITLES_DIR, EXPORTS_DIR, MODELS_DIR, MLX_MODELS_DIR, LOGS_DIR]:
+for d in [PROJECTS_DIR, DOWNLOADS_DIR, AUDIO_DIR, SUBTITLES_DIR, EXPORTS_DIR, MODELS_DIR, MLX_MODELS_DIR, QWEN_MLX_MODELS_DIR, LOGS_DIR]:
     d.mkdir(parents=True, exist_ok=True)
 
 # LLM API

@@ -41,6 +41,7 @@ cd "$ROOT/backend"
   --collect-all ctranslate2 \
   --collect-all mlx \
   --collect-all mlx_whisper \
+  --collect-all mlx_qwen3_asr \
   --collect-all tiktoken \
   --collect-all sherpa_onnx \
   --collect-all av \

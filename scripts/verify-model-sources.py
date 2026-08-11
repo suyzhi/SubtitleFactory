@@ -13,7 +13,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "backend"))
 
-from app.services.model_catalog import WHISPER_MODEL_CATALOG  # noqa: E402
+from app.services.model_catalog import (  # noqa: E402
+    QWEN_ASR_MODEL_CATALOG,
+    WHISPER_MODEL_CATALOG,
+)
 from app.services.parakeet_transcriber import (  # noqa: E402
     PARAKEET_ARCHIVE_BYTES,
     PARAKEET_ARCHIVE_SHA256,
@@ -73,6 +76,25 @@ EXPECTED_SOURCE_OIDS = {
         "vocabulary.json": "0adcd01e7c237205d593b707e66dd5d7bc785d2d",
     },
     ("distil-large-v3", "mlx"): {"config.json": "9f26c8800f97a3fec6a86124d25db3e0a4c79a57"},
+    ("qwen3-asr-0.6b-int8-2026-03-25", "mlx"): {
+        "chat_template.json": "c44736493efd71ec96218cc626904698cdb13235",
+        "config.json": "8113d596dec2d1a2ef4552edfe005ee84d16d9ec",
+        "generation_config.json": "7382a4d347c0a865b76bb1b8277f66a5ac312854",
+        "merges.txt": "31349551d90c7606f325fe0f11bbb8bd5fa0d7c7",
+        "preprocessor_config.json": "8f7f07346466d5d494ec0d4969d1c3d0190eed72",
+        "tokenizer_config.json": "b93109843922a40c6654c5449d3bf95372267c66",
+        "vocab.json": "4783fe10ac3adce15ac8f358ef5462739852c569",
+    },
+    ("qwen3-asr-1.7b", "mlx"): {
+        "chat_template.json": "c44736493efd71ec96218cc626904698cdb13235",
+        "config.json": "2bc16c9d4ca08963715cfb94d879799b9adbd0e9",
+        "generation_config.json": "7382a4d347c0a865b76bb1b8277f66a5ac312854",
+        "merges.txt": "31349551d90c7606f325fe0f11bbb8bd5fa0d7c7",
+        "model.safetensors.index.json": "1048a4eb4f21fef9aea06d8568a784b2b5595689",
+        "preprocessor_config.json": "8f7f07346466d5d494ec0d4969d1c3d0190eed72",
+        "tokenizer_config.json": "b93109843922a40c6654c5449d3bf95372267c66",
+        "vocab.json": "4783fe10ac3adce15ac8f358ef5462739852c569",
+    },
 }
 
 
@@ -90,7 +112,7 @@ def get_json(url: str) -> dict | list:
 
 def verify_hugging_face() -> int:
     checked = 0
-    for definition in WHISPER_MODEL_CATALOG:
+    for definition in (*WHISPER_MODEL_CATALOG, *QWEN_ASR_MODEL_CATALOG):
         for runtime, variant in definition.variants.items():
             url = (
                 f"https://huggingface.co/api/models/{variant.repository}/tree/"

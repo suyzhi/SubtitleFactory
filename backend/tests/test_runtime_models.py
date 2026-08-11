@@ -157,6 +157,31 @@ class ModelIndependenceTests(unittest.TestCase):
         self.assertIn("engine", options[1])
         self.assertIn("available", options[1])
 
+    def test_qwen_and_sherpa_models_expose_apple_gpu_choices(self):
+        self.assertEqual(
+            [item["id"] for item in _runtime_options("qwen3-asr-0.6b-int8-2026-03-25")],
+            ["cpu", "mlx"],
+        )
+        self.assertEqual(
+            [item["id"] for item in _runtime_options("qwen3-asr-1.7b")],
+            ["mlx"],
+        )
+        self.assertEqual(
+            [item["id"] for item in _runtime_options("dolphin-base-ctc-multi-lang-int8-2025-04-02")],
+            ["cpu", "coreml"],
+        )
+
+    def test_fun_asr_cloud_runtime_is_never_available_without_explicit_status(self):
+        unavailable = {
+            "ready": False, "reason": "需要单独授权", "state": "authorization_required",
+        }
+        with patch("app.api.projects.fun_asr_status", return_value=unavailable):
+            option = _runtime_options("fun-asr-realtime")[0]
+        self.assertEqual(option["id"], "dashscope_cloud")
+        self.assertFalse(option["available"])
+        self.assertFalse(option["download_required"])
+        self.assertIn("授权", option["reason"])
+
     def test_runtime_must_be_explicit_or_remembered(self):
         with self.assertRaises(HTTPException) as raised:
             _select_runtime("small", None, {"transcription_runtime_by_model": {}})

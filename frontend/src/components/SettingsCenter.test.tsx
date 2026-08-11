@@ -13,7 +13,9 @@ vi.mock('../api/backend', async importOriginal => {
     ...actual,
     getAppSettings: vi.fn().mockResolvedValue({ settings: { default_model: 'small' }, warnings: [] }),
     getAISettings: vi.fn().mockResolvedValue({ settings: {}, presets: [] }),
-    getAIProviders: vi.fn().mockResolvedValue({ providers: [], assignments: { clean_provider_id: 'deepseek', translate_provider_id: 'deepseek' } }),
+    getAIProviders: vi.fn().mockResolvedValue({ providers: [], assignments: { clean_provider_id: 'deepseek', translate_provider_id: 'deepseek', content_provider_id: 'deepseek' } }),
+    getCloudAuthorizations: vi.fn().mockResolvedValue({ authorizations: [] }),
+    setCloudAuthorization: vi.fn().mockResolvedValue(undefined),
     prepareTranscriptionModel: vi.fn().mockResolvedValue({ task_id: 'download-task', model_id: 'tiny', runtime: 'cpu', message: '正在准备模型' }),
     getTaskStatus: vi.fn().mockResolvedValue({
       id: 'download-task', project_id: '', type: 'prepare_model', status: 'success',
@@ -38,6 +40,7 @@ const categoryNames: Record<string, string> = {
   dialects: '中文方言专用',
   east_asian: '日韩与俄语',
   specialized: '专业场景',
+  cloud: '云端转写（需授权）',
 };
 
 const legacyModels: api.TranscriptionModelStatus[] = [
@@ -137,7 +140,32 @@ const managedModels: api.TranscriptionModelStatus[] = managedModelIds.map((id, i
   };
 });
 
-const models = [...legacyModels, ...managedModels];
+const addedModels: api.TranscriptionModelStatus[] = [{
+  id: 'qwen3-asr-1.7b', name: 'Qwen3-ASR 1.7B', category_id: 'specialized',
+  category_name: categoryNames.specialized, purpose: '高精度多语言转写',
+  language_description: '30 种语言及中文方言', size_label: '下载约 4.38 GB',
+  publisher: 'Qwen / MLX Qwen3-ASR', tags: ['Apple GPU'], family: 'Qwen3-ASR',
+  scenarios: ['高精度'], strengths: ['Apple GPU'], limitations: ['片段级时间轴'],
+  speed_tier: '较慢', accuracy_tier: '很高', memory_tier: '很高',
+  timestamp_mode: 'segment', punctuation_mode: 'native', installed_bytes: 4_700_000_000,
+  license: 'Apache-2.0', removable: true, ready: false, download_required: true,
+  languages: ['*'], runtimes: [{ id: 'mlx', name: 'Apple GPU', engine: 'MLX', available: true,
+    model_ready: false, download_required: true, download_bytes: 4_700_000_000, source: 'huggingface' }],
+  selected_runtime: 'mlx',
+}, {
+  id: 'fun-asr-realtime', name: 'Fun-Realtime-ASR', category_id: 'cloud',
+  category_name: categoryNames.cloud, purpose: '阿里云百炼云端转写',
+  language_description: '多语言及中文方言', size_label: '无需下载 · 云端按量计费',
+  publisher: '阿里云百炼', tags: ['云端'], family: 'Fun-ASR', scenarios: ['方言'],
+  strengths: ['逐词时间戳'], limitations: ['会上传当前项目音频'], speed_tier: '取决于网络',
+  accuracy_tier: '高', memory_tier: '低（本机）', timestamp_mode: 'word', punctuation_mode: 'native',
+  installed_bytes: 0, license: '阿里云模型服务条款', removable: false, ready: false,
+  download_required: false, languages: ['*'], runtimes: [{ id: 'dashscope_cloud', name: '阿里云（云端）',
+    engine: 'Fun-Realtime-ASR · DashScope', available: false, reason: '需要授权',
+    model_ready: false, download_required: false, source: 'dashscope' }],
+}];
+
+const models = [...legacyModels, ...managedModels, ...addedModels];
 
 function settingsProps(overrides: Partial<ComponentProps<typeof SettingsCenter>> = {}): ComponentProps<typeof SettingsCenter> {
   return {
@@ -162,7 +190,7 @@ function settingsProps(overrides: Partial<ComponentProps<typeof SettingsCenter>>
       recommendation_reason: '没有已下载且匹配所选语言的专用模型，已回退 Whisper Small',
       category_order: [
         'lightweight','balanced','performance','multilingual','chinese',
-        'dialects','english','east_asian','specialized','parakeet',
+        'dialects','english','east_asian','specialized','parakeet','cloud',
       ],
       models,
     },
@@ -194,11 +222,11 @@ describe('SettingsCenter model catalog', () => {
     expect(screen.getByRole('button', { name: '保存更改' })).toBeEnabled();
   });
 
-  it('groups twenty-seven models and downloads the selected runtime', async () => {
+  it('groups twenty-nine models and downloads the selected runtime', async () => {
     render(<SettingsCenter {...settingsProps()}/>);
     fireEvent.click(screen.getByRole('button', { name: /转写/ }));
     await waitFor(() => expect(screen.getByText('轻量快速')).toBeInTheDocument());
-    expect(document.querySelectorAll('.model-catalog-row')).toHaveLength(27);
+    expect(document.querySelectorAll('.model-catalog-row')).toHaveLength(29);
     for (const category of Object.values(categoryNames)) {
       expect(screen.getByText(category)).toBeInTheDocument();
     }
@@ -207,6 +235,27 @@ describe('SettingsCenter model catalog', () => {
     expect(tinyRow).not.toBeNull();
     fireEvent.click(within(tinyRow as HTMLElement).getByRole('button', { name: '下载' }));
     await waitFor(() => expect(api.prepareTranscriptionModel).toHaveBeenCalledWith('tiny', 'cpu', false));
+  });
+
+  it('requires visible confirmation before authorizing Fun-Realtime-ASR audio upload', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValueOnce(true);
+    vi.mocked(api.getAIProviders).mockResolvedValueOnce({
+      providers: [{
+        provider_id: 'dashscope', name: '通义千问',
+        base_url: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+        api_key: '', model: 'qwen-plus', models: ['qwen-plus'], enabled: true,
+        has_api_key: true,
+      }],
+      assignments: { clean_provider_id: 'deepseek', translate_provider_id: 'deepseek', content_provider_id: 'deepseek' },
+    });
+    render(<SettingsCenter {...settingsProps()}/>);
+    fireEvent.click(screen.getByRole('button', { name: /转写/ }));
+    const row = (await screen.findByText('Fun-Realtime-ASR')).closest('article');
+    expect(row).not.toBeNull();
+    fireEvent.click(within(row as HTMLElement).getByRole('button', { name: '授权音频上传' }));
+    await waitFor(() => expect(api.setCloudAuthorization).toHaveBeenCalledWith(
+      'transcription', true, 'dashscope',
+    ));
   });
 
   it('searches professional metadata and removes only managed files after confirmation', async () => {

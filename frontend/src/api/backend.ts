@@ -45,7 +45,11 @@ export class BackendError extends Error {
 export function initializeBackendSession(): Promise<void> {
   if (sessionInitialization) return sessionInitialization;
   sessionInitialization = (async () => {
-    if (!(window as any).__TAURI_INTERNALS__) return;
+    if (!(window as any).__TAURI_INTERNALS__) {
+      // 纯浏览器开发模式：使用后端开发令牌，便于 vite 调试 UI
+      if (import.meta.env.DEV) API_TOKEN = 'subtitle-factory-local-development';
+      return;
+    }
     const session = await invoke<{ baseUrl: string; token: string }>('backend_session');
     BASE_URL = session.baseUrl;
     API_TOKEN = session.token;
@@ -571,10 +575,11 @@ export async function startOCR(projectId: string, input: {region: {x: number; y:
 export async function commitOCR(projectId: string, expectedRevision: number, cues: OCRCue[]): Promise<EditorOperationResponse> {
   return request(`/api/projects/${projectId}/ocr/commit`, { method: 'POST', body: JSON.stringify({ expected_revision: expectedRevision, cues }) });
 }
-export interface CloudAuthorization { capability: 'ocr' | 'speaker' | 'quality' | 'content'; provider_id: string | null; granted: boolean | number; disclosure_version: string; granted_at: string | null; revoked_at: string | null; }
+export interface CloudAuthorization { capability: 'ocr' | 'speaker' | 'quality' | 'content' | 'transcription'; provider_id: string | null; granted: boolean | number; disclosure_version: string; granted_at: string | null; revoked_at: string | null; }
 export async function getCloudAuthorizations(): Promise<{authorizations: CloudAuthorization[]}> { return request('/api/cloud-authorizations'); }
 export async function setCloudAuthorization(capability: CloudAuthorization['capability'], granted: boolean, providerId?: string): Promise<void> {
-  await request(`/api/cloud-authorizations/${capability}`, { method: 'PUT', body: JSON.stringify({ granted, provider_id: providerId || null, disclosure_version: '1.0' }) });
+  const disclosureVersion = capability === 'transcription' ? 'fun-asr-audio-v1' : '1.0';
+  await request(`/api/cloud-authorizations/${capability}`, { method: 'PUT', body: JSON.stringify({ granted, provider_id: providerId || null, disclosure_version: disclosureVersion }) });
 }
 
 export interface WatchFolder { id: string; path: string; enabled: boolean; workflow: Record<string, unknown>; last_scan_at?: string | null; }

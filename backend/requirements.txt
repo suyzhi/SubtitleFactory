@@ -4,6 +4,7 @@ pydantic>=2.13.4
 pydantic-settings>=2.13.1
 faster-whisper>=1.2.1
 mlx-whisper>=0.4.3; platform_system == "Darwin" and platform_machine == "arm64"
+mlx-qwen3-asr==0.3.5; platform_system == "Darwin" and platform_machine == "arm64"
 # 1.13.4 / ORT 1.27 regresses the official Korean Zipformer int8 model on arm64.
 sherpa-onnx==1.13.3
 srt>=3.5.3

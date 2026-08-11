@@ -38,10 +38,17 @@ from .parakeet_transcriber import (
     get_parakeet_model_status,
 )
 from .model_catalog import (
+    QWEN_ASR_CATALOG_BY_ID,
     WHISPER_CATALOG_BY_ID,
     prepare_whisper_model,
     resolve_local_model,
     runtime_model_status,
+)
+from .cloud_asr import (
+    FUN_ASR_MODEL_ID,
+    FUN_ASR_RUNTIME,
+    create_fun_asr_session,
+    fun_asr_status,
 )
 from .managed_sherpa import (
     create_managed_session,
@@ -53,10 +60,15 @@ from .sherpa_catalog import MANAGED_SHERPA_BY_ID
 logger = logging.getLogger(__name__)
 
 WHISPER_MODEL_IDS = frozenset(WHISPER_CATALOG_BY_ID)
+QWEN_ASR_MODEL_IDS = frozenset(QWEN_ASR_CATALOG_BY_ID)
 PARAKEET_MODEL_IDS = frozenset({PARAKEET_MODEL_ID, PARAKEET_ONNX_MODEL_ID})
 MANAGED_SHERPA_MODEL_IDS = frozenset(MANAGED_SHERPA_BY_ID)
 SUPPORTED_TRANSCRIPTION_MODELS = (
-    WHISPER_MODEL_IDS | PARAKEET_MODEL_IDS | MANAGED_SHERPA_MODEL_IDS | {"custom"}
+    WHISPER_MODEL_IDS
+    | QWEN_ASR_MODEL_IDS
+    | PARAKEET_MODEL_IDS
+    | MANAGED_SHERPA_MODEL_IDS
+    | {FUN_ASR_MODEL_ID, "custom"}
 )
 SAFE_TRANSCRIPTION_MODEL = "small"
 _WHISPER_REQUIRED_FILES = frozenset({"model.bin", "config.json", "tokenizer.json"})
@@ -145,8 +157,21 @@ def get_transcription_model_status(
     coreml_cli_path: str | Path | None = None,
 ) -> dict:
     """Return model state with explicit source categories for the settings UI."""
+    if model_id == FUN_ASR_MODEL_ID:
+        return fun_asr_status()
     if model_id in MANAGED_SHERPA_MODEL_IDS:
         return managed_model_status(model_id)
+    if model_id in QWEN_ASR_MODEL_IDS:
+        status = runtime_model_status(model_id, "mlx")
+        return {
+            "model_id": model_id,
+            "ready": bool(status["model_ready"]),
+            "source": status["source"],
+            "state": status["status"],
+            "download_required": status["download_required"],
+            "download_bytes": status["download_bytes"],
+            "error": "" if status["model_ready"] else "首次使用时将下载到 App 模型目录",
+        }
     if model_id in PARAKEET_MODEL_IDS:
         return get_parakeet_model_status(
             model_id,
@@ -257,6 +282,12 @@ def resolve_transcription_model(
             "app_download",
         )
 
+    if candidate in QWEN_ASR_MODEL_IDS:
+        return ModelResolution(requested, candidate, candidate, "huggingface")
+
+    if candidate == FUN_ASR_MODEL_ID:
+        return ModelResolution(requested, candidate, candidate, "dashscope_cloud")
+
     if candidate == PARAKEET_MODEL_ID:
         status = get_parakeet_model_status(
             candidate,
@@ -323,7 +354,15 @@ def transcribe_audio(task_id: str, audio_path: str, project_id: str, language: s
     )
     model_id = resolution.model_id
     runtime = runtime or (app_settings.get("transcription_runtime_by_model") or {}).get(model_id)
-    runtime = runtime or ("external_coreml" if model_id == PARAKEET_MODEL_ID else "cpu")
+    if not runtime:
+        if model_id == PARAKEET_MODEL_ID:
+            runtime = "external_coreml"
+        elif model_id == FUN_ASR_MODEL_ID:
+            runtime = FUN_ASR_RUNTIME
+        elif model_id in QWEN_ASR_MODEL_IDS and model_id not in MANAGED_SHERPA_MODEL_IDS:
+            runtime = "mlx"
+        else:
+            runtime = "cpu"
     if resolution.fell_back:
         task_manager.update_task(
             task_id,
@@ -367,7 +406,27 @@ def transcribe_audio(task_id: str, audio_path: str, project_id: str, language: s
         if not imported["ready"]:
             raise TranscriptionError("导入模型路径失效，需要重新定位", "MODEL_NEEDS_RELINK")
 
-    if model_id in MANAGED_SHERPA_MODEL_IDS:
+    if model_id == FUN_ASR_MODEL_ID:
+        session = create_fun_asr_session(task_id, audio_path, language)
+        segments_gen = session.segments
+        detected_lang = session.detected_language
+        audio_duration = session.audio_duration
+        device = session.device
+        compute_type = session.compute_type
+        runtime_model_name = session.model_label
+        progress_start = session.progress_start
+    elif model_id in QWEN_ASR_MODEL_IDS and runtime == "mlx":
+        from .qwen_mlx import create_qwen_mlx_session
+
+        session = create_qwen_mlx_session(task_id, audio_path, language, model_id)
+        segments_gen = session.segments
+        detected_lang = session.detected_language
+        audio_duration = session.audio_duration
+        device = session.device
+        compute_type = session.compute_type
+        runtime_model_name = session.model_label
+        progress_start = session.progress_start
+    elif model_id in MANAGED_SHERPA_MODEL_IDS:
         session = create_managed_session(
             task_id,
             audio_path,

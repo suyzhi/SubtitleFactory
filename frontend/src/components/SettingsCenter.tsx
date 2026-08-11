@@ -86,6 +86,7 @@ export default function SettingsCenter(props: Props) {
   const [validatingModel, setValidatingModel] = useState('');
   const [favoriteLanguage, setFavoriteLanguage] = useState('fr');
   const [providerCards,setProviderCards]=useState<api.AIProviderCard[]>([]);
+  const [cloudAuthorizations,setCloudAuthorizations]=useState<api.CloudAuthorization[]>([]);
   const [assignments,setAssignments]=useState<api.AIAssignments>({
     clean_provider_id:'deepseek',
     translate_provider_id:'deepseek',
@@ -114,14 +115,16 @@ export default function SettingsCenter(props: Props) {
       api.getAppSettings(),
       api.getAISettings().catch(() => null),
       api.getAIProviders().catch(() => null),
+      api.getCloudAuthorizations().catch(() => ({ authorizations: [] })),
     ])
-      .then(([app, ai, providers]) => {
+      .then(([app, ai, providers, authorizations]) => {
         setDraft(app.settings || {});
         setWarnings(app.warnings || []);
         if (providers) {
           setProviderCards(providers.providers);
           setAssignments(providers.assignments);
         }
+        setCloudAuthorizations(authorizations.authorizations);
         if (!ai || !providers) setError('AI 凭据暂时无法读取；本地转写和其他设置仍可使用。');
       })
       .catch(reason => setError(reason.message));
@@ -150,7 +153,16 @@ export default function SettingsCenter(props: Props) {
 
   const scanModelFolder=async()=>{ try { const {open}=await import('@tauri-apps/plugin-dialog'); const path=await open({directory:true,multiple:false,title:'选择模型根目录'}); if(typeof path!=='string')return; setBusy(true); const result=await api.scanLocalModels(path); setScannedModels(result.models); setMessage(`发现 ${result.models.length} 个模型候选`); } catch(reason){setError(reason instanceof Error?reason.message:String(reason));} finally{setBusy(false);} };
   const updateProvider=(id:string,patch:Partial<api.AIProviderCard>)=>setProviderCards(items=>items.map(item=>item.provider_id===id?{...item,...patch}:item));
-  const saveProvider=async(card:api.AIProviderCard)=>{setBusy(true);try{const saved=await api.saveAIProvider(card.provider_id,card);updateProvider(card.provider_id,saved);setMessage(`${card.name} 已保存`);}catch(reason){setError(reason instanceof Error?reason.message:String(reason));}finally{setBusy(false);}};
+  const saveProvider=async(card:api.AIProviderCard)=>{setBusy(true);try{const saved=await api.saveAIProvider(card.provider_id,card);updateProvider(card.provider_id,saved);setMessage(`${card.name} 已保存`);onRefreshModels();}catch(reason){setError(reason instanceof Error?reason.message:String(reason));}finally{setBusy(false);}};
+  const updateTranscriptionCloudAuthorization=async(granted:boolean)=>{
+    const dashscope=providerCards.find(card=>card.provider_id==='dashscope');
+    if(granted&&!dashscope?.has_api_key){setCategory('ai');setError('请先在 AI 服务中保存通义千问（百炼）API Key。');return;}
+    if(granted&&!window.confirm('Fun-Realtime-ASR 会把每次使用时所在项目的转写音频分段上传到阿里云百炼，可能产生费用；不会上传视频、文件路径或其他项目。此授权会保留到您主动撤销。确认授权吗？'))return;
+    setBusy(true);setError('');setMessage('');
+    try{await api.setCloudAuthorization('transcription',granted,'dashscope');const latest=await api.getCloudAuthorizations();setCloudAuthorizations(latest.authorizations);setMessage(granted?'已授权 Fun-Realtime-ASR 上传转写音频':'已撤销 Fun-Realtime-ASR 音频上传授权');onRefreshModels();}
+    catch(reason){setError(reason instanceof Error?reason.message:String(reason));}
+    finally{setBusy(false);}
+  };
 
   useEffect(() => {
     if (!open) return;
@@ -229,6 +241,7 @@ export default function SettingsCenter(props: Props) {
     environment: '环境变量', unavailable: '不可用', huggingface: 'Hugging Face',
     github: 'GitHub', legacy_cache: '已有缓存', custom_path: '本地目录',
     local_selection: '本地目录',
+    dashscope: '阿里云百炼',
   } as Record<string, string>), []);
 
   if (!open) return null;
@@ -432,7 +445,7 @@ export default function SettingsCenter(props: Props) {
                     {value:'all',label:'全部家族'}, ...catalogFamilies.map(family => ({value:family,label:family})),
                   ]}/>
                   <AppSelect value={modelDevice} onChange={setModelDevice} label="按设备筛选" options={[
-                    {value:'all',label:'全部设备'}, {value:'cpu',label:'CPU'}, {value:'coreml',label:'Core ML'}, {value:'mlx',label:'Apple GPU'},
+                    {value:'all',label:'全部设备'}, {value:'cpu',label:'CPU'}, {value:'coreml',label:'Core ML'}, {value:'mlx',label:'Apple GPU'}, {value:'dashscope_cloud',label:'云端'},
                   ]}/>
                   <AppSelect value={modelReadyFilter} onChange={setModelReadyFilter} label="按状态筛选" options={[
                     {value:'all',label:'全部状态'}, {value:'ready',label:'已下载'}, {value:'download',label:'可下载'},
@@ -462,6 +475,9 @@ export default function SettingsCenter(props: Props) {
                         const modelReady = Boolean(model.ready || model.runtimes?.some(runtime => runtime.model_ready));
                         const hasDownloadableRuntime = Boolean(model.runtimes?.some(runtime => runtime.download_required));
                         const isExternalCoreML = model.id === 'parakeet-tdt-0.6b-v3-coreml';
+                        const isFunCloud = model.id === 'fun-asr-realtime';
+                        const dashscopeConfigured = Boolean(providerCards.find(card => card.provider_id === 'dashscope')?.has_api_key);
+                        const funCloudGranted = Boolean(cloudAuthorizations.find(item => item.capability === 'transcription' && item.provider_id === 'dashscope')?.granted);
                         const taskKey = `${model.id}:${selectedRuntime}`;
                         const task = modelTasks[taskKey];
                         const progress = task?.details?.model_download as Record<string, unknown> | undefined;
@@ -506,10 +522,14 @@ export default function SettingsCenter(props: Props) {
                           />}
                           <span className="model-row-actions">
                             <button className="button secondary model-action" disabled={!!validatingModel} onClick={() => void validateModel(model.id)}>{validatingModel === model.id ? '校验中…' : '校验'}</button>
-                            {isExternalCoreML
+                            {isFunCloud
+                              ? dashscopeConfigured
+                                ? <button className={`button secondary model-action${funCloudGranted?' danger':''}`} disabled={busy} onClick={() => void updateTranscriptionCloudAuthorization(!funCloudGranted)}>{funCloudGranted?'撤销上传授权':'授权音频上传'}</button>
+                                : <button className="button secondary model-action" onClick={() => { setCategory('ai'); setError('请先保存通义千问（百炼）API Key。'); }}>配置百炼</button>
+                              : isExternalCoreML
                               ? <button className="button secondary model-action" onClick={() => void choosePath('coreml_model_path', 'coreml_model', true)}>重新选择目录</button>
                               : selectedRuntime && (ready || canDownload) && <button className="button secondary model-action" disabled={!!preparingModel} onClick={() => void prepareModel(model.id, selectedRuntime, ready)}>{preparingModel === taskKey ? '处理中…' : ready ? '修复' : '下载'}</button>}
-                            {!isExternalCoreML && !selectedRuntime && (modelReady || hasDownloadableRuntime) && <small className="model-runtime-required">先选择运行设备</small>}
+                            {!isFunCloud && !isExternalCoreML && !selectedRuntime && (modelReady || hasDownloadableRuntime) && <small className="model-runtime-required">先选择运行设备</small>}
                             {modelReady && model.removable && <button className="button secondary model-action danger" disabled={busy || !!preparingModel} onClick={() => void removeModel(model)}>移除</button>}
                             {preparingModel === taskKey && task && <button className="button secondary model-action danger" onClick={() => void api.cancelTask(task.id)}>取消</button>}
                           </span>

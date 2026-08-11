@@ -270,6 +270,7 @@ huggingface-hub==1.23.0 \
     --hash=sha256:c04997fb8bbdace1e57b7703d30ed7678af51f70d00d241819ff411b92ae9a88
     # via
     #   faster-whisper
+    #   mlx-qwen3-asr
     #   mlx-whisper
     #   tokenizers
 idna==3.18 \
@@ -460,12 +461,18 @@ mlx==0.32.0 \
     --hash=sha256:ea5a594355c89c0095eaba413fd39d4caa8642fa13432dfb0c9354d141046467 \
     --hash=sha256:f67557bd9ce31cbb519b39e9455b19cca698eb153ab6f4deef5b4d5509d94df3 \
     --hash=sha256:fea003b4e471976f55b40b7bb7943c7b054e1edb011d5b15b1b964905ab7785a
-    # via mlx-whisper
+    # via
+    #   mlx-qwen3-asr
+    #   mlx-whisper
 mlx-metal==0.32.0 \
     --hash=sha256:1bd94a1ce5b03a0c898771a3e759f0124300c6ab5155127906a1d50b1f3fcf19 \
     --hash=sha256:3af76a498d84804f66119800499f9d143d7dffb0878a0dd0d7c2846e58565fd7 \
     --hash=sha256:5b64b20ac24b0c401f489de01e8209edc4d372125201f19314e6f39e385322aa
     # via mlx
+mlx-qwen3-asr==0.3.5 ; platform_system == "Darwin" and platform_machine == "arm64" \
+    --hash=sha256:3b2932a6cc5e162d8a686434ee0ea63e86a294c845451496729a6f0f6a0df050 \
+    --hash=sha256:5c7169392a8d06f38ccc791b768cdc9e7fd6038a34130576c2af8b3afa28d06b
+    # via -r backend/requirements.txt
 mlx-whisper==0.4.3 ; platform_system == "Darwin" and platform_machine == "arm64" \
     --hash=sha256:6b82b6597a994643a3e5496c7bc229a672e5ca308458455bfe276e76ae024489
     # via -r backend/requirements.txt
@@ -586,6 +593,7 @@ numpy==2.4.6 \
     --hash=sha256:f74a575920ab21fe304421a3fc28793d82e299cae9eccb37084e9fc7f3617c20
     # via
     #   ctranslate2
+    #   mlx-qwen3-asr
     #   mlx-whisper
     #   numba
     #   onnxruntime
@@ -1080,7 +1088,9 @@ regex==2026.7.10 \
     --hash=sha256:f988a1cec68058f71a38471813fba9e87dffe855582682e8a10e40ece12567a2 \
     --hash=sha256:fadb07dbe36a541283ff454b1a268afd54b077d917043f2e1e5615372cb5f200 \
     --hash=sha256:fe7ff456c22725c9d9017f7a2a7df2b51af6df77314176760b22e2d05278e181
-    # via tiktoken
+    # via
+    #   mlx-qwen3-asr
+    #   tiktoken
 requests==2.34.2 \
     --hash=sha256:2a0d60c172f83ac6ab31e4554906c0f3b3588d37b5cb939b1c061f4907e278e0 \
     --hash=sha256:f288924cae4e29463698d6d60bc6a4da69c89185ad1e0bcc4104f584e960b9ed

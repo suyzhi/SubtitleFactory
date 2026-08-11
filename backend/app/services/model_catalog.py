@@ -20,7 +20,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
-from ..utils.config import MLX_MODELS_DIR, WHISPER_MODELS_DIR
+from ..models.database import get_db
+from ..utils.config import MLX_MODELS_DIR, QWEN_MLX_MODELS_DIR, WHISPER_MODELS_DIR
 from ..utils.task_manager import TaskCancelled, task_manager
 
 
@@ -244,7 +245,56 @@ WHISPER_MODEL_CATALOG: tuple[ModelDefinition, ...] = (
 )
 
 WHISPER_CATALOG_BY_ID = {item.id: item for item in WHISPER_MODEL_CATALOG}
-MODEL_CATEGORY_ORDER = ("lightweight", "balanced", "performance", "english", "parakeet")
+
+
+QWEN_ASR_MODEL_CATALOG: tuple[ModelDefinition, ...] = (
+    ModelDefinition(
+        "qwen3-asr-0.6b-int8-2026-03-25", "Qwen3-ASR 0.6B", "specialized", "专业场景",
+        "多语言、中文方言、歌词和快速语流", "30 种语言及 22 种中文方言", ("*",),
+        "Apple GPU 下载约 1.76 GB", "Qwen / MLX Qwen3-ASR",
+        ("多语言", "方言", "Apple GPU", "MLX"),
+        {
+            "mlx": _variant(
+                "mlx", "Qwen/Qwen3-ASR-0.6B",
+                "5eb144179a02acc5e5ba31e748d22b0cf3e303b0",
+                _f("chat_template.json", 1_161, "75a8cfca24f00de72d796fbfed6858fc9614ef3dabd8696684cc3bc03a9c58ff"),
+                _f("config.json", 6_193, "76d3ae4601ce939830b2517f4a6cadb86cc51316c3900af6b020b051c21a478c"),
+                _f("generation_config.json", 142, "1da527824d81e07118facff437e03f2e24a23311e3bdeb2368973fe77e5f275c"),
+                _f("merges.txt", 1_671_853, "8831e4f1a044471340f7c0a83d7bd71306a5b867e95fd870f74d0c5308a904d5"),
+                _f("model.safetensors", 1_876_091_704, "79d6cbd4c98c7bbffe9db2edac07f56cd6637d0d5944b27f6c2b8353840323ea"),
+                _f("preprocessor_config.json", 330, "45e120a4eda2c20c5d7f2ea9354e63536bf35e27aa573fb7cdf78017b378770d"),
+                _f("tokenizer_config.json", 12_487, "4942d005604266809309cabc9f4e9cb89ce855d59b14681fdc0e1cc62ea26c4c"),
+                _f("vocab.json", 2_776_833, "ca10d7e9fb3ed18575dd1e277a2579c16d108e32f27439684afa0e10b1440910"),
+            ),
+        },
+    ),
+    ModelDefinition(
+        "qwen3-asr-1.7b", "Qwen3-ASR 1.7B", "specialized", "专业场景",
+        "Apple Silicon 上的高精度多语言与中文方言转写",
+        "30 种语言及 22 种中文方言", ("*",), "下载约 4.38 GB", "Qwen / MLX Qwen3-ASR",
+        ("高精度", "多语言", "方言", "Apple GPU", "MLX"),
+        {
+            "mlx": _variant(
+                "mlx", "Qwen/Qwen3-ASR-1.7B",
+                "7278e1e70fe206f11671096ffdd38061171dd6e5",
+                _f("chat_template.json", 1_161, "75a8cfca24f00de72d796fbfed6858fc9614ef3dabd8696684cc3bc03a9c58ff"),
+                _f("config.json", 6_194, "2e74a751548b8ad7d7526d29365ad8144c345d8b412b1152d25dc6698452712f"),
+                _f("generation_config.json", 142, "1da527824d81e07118facff437e03f2e24a23311e3bdeb2368973fe77e5f275c"),
+                _f("merges.txt", 1_671_853, "8831e4f1a044471340f7c0a83d7bd71306a5b867e95fd870f74d0c5308a904d5"),
+                _f("model-00001-of-00002.safetensors", 4_220_320_824, "a4cd1f1a04d90b757dc7f7dd26254e69a013b19e80efe590a83c6a3bde8608d6"),
+                _f("model-00002-of-00002.safetensors", 478_200_688, "6e0b9d9e09e2e0238e7ef3cc8a484ab387e91b90f1900bedf88bc92d7929ccfc"),
+                _f("model.safetensors.index.json", 64_821, "f994739fe38e5210b9e3e8ce6c6307315e2ceac3cb630e7b7414d69dce520f60"),
+                _f("preprocessor_config.json", 330, "45e120a4eda2c20c5d7f2ea9354e63536bf35e27aa573fb7cdf78017b378770d"),
+                _f("tokenizer_config.json", 12_487, "4942d005604266809309cabc9f4e9cb89ce855d59b14681fdc0e1cc62ea26c4c"),
+                _f("vocab.json", 2_776_833, "ca10d7e9fb3ed18575dd1e277a2579c16d108e32f27439684afa0e10b1440910"),
+            ),
+        },
+    ),
+)
+
+QWEN_ASR_CATALOG_BY_ID = {item.id: item for item in QWEN_ASR_MODEL_CATALOG}
+MODEL_CATALOG_BY_ID = {**WHISPER_CATALOG_BY_ID, **QWEN_ASR_CATALOG_BY_ID}
+MODEL_CATEGORY_ORDER = ("lightweight", "balanced", "performance", "english", "parakeet", "cloud")
 _MANIFEST_NAME = ".subtitle-factory-manifest.json"
 _DOWNLOAD_LOCK = threading.Lock()
 
@@ -266,7 +316,7 @@ class ModelDownloadError(RuntimeError):
 
 
 def model_definition(model_id: str) -> ModelDefinition | None:
-    return WHISPER_CATALOG_BY_ID.get(model_id)
+    return MODEL_CATALOG_BY_ID.get(model_id)
 
 
 def variant_for(model_id: str, runtime: str) -> ModelVariant:
@@ -282,7 +332,10 @@ def variant_for(model_id: str, runtime: str) -> ModelVariant:
 
 
 def managed_model_dir(model_id: str, runtime: str) -> Path:
-    root = MLX_MODELS_DIR if runtime == "mlx" else WHISPER_MODELS_DIR
+    if model_id in QWEN_ASR_CATALOG_BY_ID:
+        root = QWEN_MLX_MODELS_DIR
+    else:
+        root = MLX_MODELS_DIR if runtime == "mlx" else WHISPER_MODELS_DIR
     return root / model_id
 
 
@@ -324,10 +377,23 @@ def managed_model_ready(model_id: str, runtime: str) -> bool:
 
 def find_legacy_model(model_id: str, runtime: str) -> Path | None:
     """Locate an existing compatible cache without moving or deleting it."""
-    root = MLX_MODELS_DIR if runtime == "mlx" else WHISPER_MODELS_DIR
+    if model_id in QWEN_ASR_CATALOG_BY_ID:
+        root = QWEN_MLX_MODELS_DIR
+    else:
+        root = MLX_MODELS_DIR if runtime == "mlx" else WHISPER_MODELS_DIR
     if not root.is_dir():
         return None
-    weight_names = ("weights.npz", "weights.safetensors") if runtime == "mlx" else ("model.bin",)
+    if model_id in QWEN_ASR_CATALOG_BY_ID:
+        weight_names = (
+            "model.safetensors",
+            "model-00001-of-00002.safetensors",
+        )
+    else:
+        weight_names = (
+            ("weights.npz", "weights.safetensors")
+            if runtime == "mlx"
+            else ("model.bin",)
+        )
     for weight_name in weight_names:
         for weight in root.rglob(weight_name):
             parent = weight.parent
@@ -493,7 +559,7 @@ def _write_manifest(path: Path, variant: ModelVariant) -> None:
     os.replace(temporary, path / _MANIFEST_NAME)
 
 
-def prepare_whisper_model(
+def prepare_catalog_model(
     task_id: str,
     model_id: str,
     runtime: str,
@@ -628,3 +694,69 @@ def prepare_whisper_model(
             }, "model_status": status},
         )
         return status
+
+
+def prepare_whisper_model(
+    task_id: str,
+    model_id: str,
+    runtime: str,
+    *,
+    repair: bool = False,
+) -> dict:
+    """Backward-compatible wrapper for callers that prepare Whisper models."""
+    return prepare_catalog_model(task_id, model_id, runtime, repair=repair)
+
+
+def remove_catalog_model(model_id: str) -> dict:
+    """Remove only App-managed catalog files, never a discovered legacy cache."""
+    definition = model_definition(model_id)
+    if not definition:
+        raise ModelDownloadError(
+            "不支持移除此模型",
+            "MODEL_REMOVE_UNSUPPORTED",
+            suggestion="请重新选择模型",
+            recoverable=False,
+        )
+    db = get_db()
+    try:
+        rows = db.execute(
+            """SELECT details FROM tasks
+               WHERE status IN ('pending','running','paused')
+                 AND type IN ('transcribe','workflow','prepare_model')"""
+        ).fetchall()
+    finally:
+        db.close()
+    for row in rows:
+        try:
+            details = json.loads(row["details"] or "{}")
+        except (TypeError, ValueError):
+            details = {}
+        resolution = details.get("model_resolution") or {}
+        if details.get("model_id") == model_id or resolution.get("model_id") == model_id:
+            raise ModelDownloadError(
+                "有转写或模型任务正在运行，暂时不能移除模型",
+                "MODEL_IN_USE",
+                suggestion="任务完成或终止后再试",
+            )
+
+    targets: set[Path] = set()
+    for runtime in definition.variants:
+        final = managed_model_dir(model_id, runtime)
+        targets.add(final)
+        targets.add(final.with_name(f".{model_id}.{runtime}.downloading"))
+    removed_bytes = 0
+    for target in targets:
+        if target.is_symlink() or target.is_file():
+            removed_bytes += target.stat().st_size
+            target.unlink()
+        elif target.is_dir():
+            removed_bytes += sum(
+                path.stat().st_size for path in target.rglob("*") if path.is_file()
+            )
+            shutil.rmtree(target, ignore_errors=False)
+    return {
+        "model_id": model_id,
+        "removed": True,
+        "removed_bytes": removed_bytes,
+        "message": "模型文件已移除，可随时重新下载",
+    }

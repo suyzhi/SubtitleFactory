@@ -36,12 +36,12 @@ from app.utils.task_manager import TaskCancelled
 
 
 class ManagedCatalogTests(unittest.TestCase):
-    def test_catalog_has_eighteen_unique_pinned_models_and_twenty_seven_total(self):
+    def test_catalog_has_eighteen_unique_pinned_models_and_twenty_nine_total(self):
         self.assertEqual(len(MANAGED_SHERPA_MODELS), 18)
         self.assertEqual(len(MANAGED_SHERPA_BY_ID), 18)
         self.assertEqual(
             len([item for item in SUPPORTED_TRANSCRIPTION_MODELS if item != "custom"]),
-            27,
+            29,
         )
         for definition in MANAGED_SHERPA_MODELS:
             self.assertEqual(definition.id, definition.id.lower())
@@ -55,6 +55,11 @@ class ManagedCatalogTests(unittest.TestCase):
             self.assertTrue(all(len(item.sha256) == 64 for item in definition.files))
             self.assertIn(definition.timestamp_mode, {"token", "segment"})
             self.assertTrue(definition.license)
+
+    def test_every_managed_model_exposes_its_verified_apple_gpu_runtime(self):
+        for definition in MANAGED_SHERPA_MODELS:
+            expected = "mlx" if definition.adapter == "qwen3" else "coreml"
+            self.assertIn(expected, definition.runtimes, definition.id)
 
     def test_professional_models_are_never_automatic(self):
         manual_only = {

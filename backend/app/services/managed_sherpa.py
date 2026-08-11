@@ -786,15 +786,14 @@ def _timings_from_result(
     return tuple(timings)
 
 
-def _iter_vad_segments(
+def iter_vad_audio_segments(
     task_id: str,
     audio_path: str,
-    recognizer: Any,
     vad_path: Path,
     audio_duration: float,
     max_speech_seconds: float,
-    timestamp_mode: str,
-) -> Iterator[ManagedSegment]:
+) -> Iterator[tuple[float, float, Any]]:
+    """Yield copied 16 kHz float32 speech spans from the shared Silero VAD."""
     import numpy as np
     import sherpa_onnx
 
@@ -831,27 +830,40 @@ def _iter_vad_segments(
                 start = float(speech.start) / 16000.0
                 speech_samples = np.asarray(speech.samples, dtype=np.float32).copy()
                 vad.pop()
-                stream = recognizer.create_stream()
-                stream.accept_waveform(16000, speech_samples)
-                recognizer.decode_stream(stream)
-                result = stream.result
-                text = re.sub(
-                    r"\s+", " ", str(result.text or "").replace("▁", " ")
-                ).strip()
-                if not text or _PUNCTUATION_ONLY.fullmatch(text):
-                    continue
                 end = min(audio_duration, start + speech_samples.size / 16000.0)
                 if end > start:
-                    yield ManagedSegment(
-                        start=start,
-                        end=end,
-                        text=text,
-                        timings=_timings_from_result(
-                            result, start, end, timestamp_mode,
-                        ),
-                    )
+                    yield start, end, speech_samples
             if eof:
                 break
+
+
+def _iter_vad_segments(
+    task_id: str,
+    audio_path: str,
+    recognizer: Any,
+    vad_path: Path,
+    audio_duration: float,
+    max_speech_seconds: float,
+    timestamp_mode: str,
+) -> Iterator[ManagedSegment]:
+    for start, end, speech_samples in iter_vad_audio_segments(
+        task_id, audio_path, vad_path, audio_duration, max_speech_seconds,
+    ):
+        stream = recognizer.create_stream()
+        stream.accept_waveform(16000, speech_samples)
+        recognizer.decode_stream(stream)
+        result = stream.result
+        text = re.sub(
+            r"\s+", " ", str(result.text or "").replace("▁", " ")
+        ).strip()
+        if not text or _PUNCTUATION_ONLY.fullmatch(text):
+            continue
+        yield ManagedSegment(
+            start=start,
+            end=end,
+            text=text,
+            timings=_timings_from_result(result, start, end, timestamp_mode),
+        )
 
 
 def create_managed_session(

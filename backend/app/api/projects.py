@@ -43,6 +43,7 @@ from ..services.audio_preview import generate_track_preview
 from ..services.transcriber import (
     MANAGED_SHERPA_MODEL_IDS,
     PARAKEET_MODEL_IDS,
+    QWEN_ASR_MODEL_IDS,
     SUPPORTED_TRANSCRIPTION_MODELS,
     get_transcription_model_status,
     resolve_transcription_model,
@@ -55,10 +56,19 @@ from ..services.parakeet_transcriber import (
 )
 from ..services.model_catalog import (
     MODEL_CATEGORY_ORDER,
+    QWEN_ASR_CATALOG_BY_ID,
+    QWEN_ASR_MODEL_CATALOG,
     WHISPER_MODEL_CATALOG,
     WHISPER_CATALOG_BY_ID,
+    prepare_catalog_model,
     prepare_whisper_model,
+    remove_catalog_model,
     runtime_model_status,
+)
+from ..services.cloud_asr import (
+    FUN_ASR_MODEL_ID,
+    FUN_ASR_RUNTIME,
+    fun_asr_status,
 )
 from ..services.managed_sherpa import (
     managed_model_status,
@@ -94,8 +104,9 @@ TRANSCRIPTION_LOCK = threading.Lock()
 RUNTIME_LABELS = {
     "cpu": ("CPU", "faster-whisper / sherpa-onnx"),
     "mlx": ("Apple GPU", "MLX Whisper · Metal"),
-    "coreml": ("Apple Neural Engine / GPU", "sherpa-onnx · Core ML"),
+    "coreml": ("Apple GPU / Neural Engine", "sherpa-onnx · Core ML"),
     "external_coreml": ("外部 Core ML", "Memo Parakeet CLI"),
+    FUN_ASR_RUNTIME: ("阿里云（云端）", "Fun-Realtime-ASR · DashScope"),
 }
 
 def _runtime_ids(model_id: str, imported: dict | None = None) -> list[str]:
@@ -103,14 +114,18 @@ def _runtime_ids(model_id: str, imported: dict | None = None) -> list[str]:
     if model_id in WHISPER_CATALOG_BY_ID: return ["cpu", "mlx"]
     if model_id in MANAGED_SHERPA_BY_ID:
         return list(MANAGED_SHERPA_BY_ID[model_id].runtimes)
+    if model_id in QWEN_ASR_CATALOG_BY_ID: return ["mlx"]
+    if model_id == FUN_ASR_MODEL_ID: return [FUN_ASR_RUNTIME]
     if model_id == PARAKEET_MODEL_ID: return ["external_coreml"]
     if model_id == PARAKEET_ONNX_MODEL_ID: return ["cpu", "coreml"]
     return ["cpu"]
 
-def _runtime_available(runtime_id: str) -> tuple[bool, str]:
+def _runtime_available(runtime_id: str, model_id: str = "") -> tuple[bool, str]:
     if runtime_id == "mlx":
-        ok = importlib.util.find_spec("mlx_whisper") is not None
-        return ok, "MLX Whisper 已随 App 提供" if ok else "当前运行包缺少 MLX Whisper"
+        module = "mlx_qwen3_asr" if model_id in QWEN_ASR_MODEL_IDS else "mlx_whisper"
+        ok = importlib.util.find_spec(module) is not None
+        label = "MLX Qwen3-ASR" if module == "mlx_qwen3_asr" else "MLX Whisper"
+        return ok, f"{label} 已随 App 提供" if ok else f"当前运行包缺少 {label}"
     if runtime_id == "coreml":
         try:
             import onnxruntime
@@ -118,31 +133,54 @@ def _runtime_available(runtime_id: str) -> tuple[bool, str]:
         except Exception:
             ok = False
         return ok, "Core ML Execution Provider 可用" if ok else "当前 ONNX Runtime 不支持 Core ML"
+    if runtime_id == FUN_ASR_RUNTIME:
+        status = fun_asr_status()
+        return bool(status["ready"]), str(status["reason"])
     return True, "可用"
 
 def _runtime_options(model_id: str, imported: dict | None = None, model_ready: bool = True) -> list[dict]:
     result=[]
     for runtime_id in _runtime_ids(model_id, imported):
-        available, reason = _runtime_available(runtime_id)
+        available, reason = _runtime_available(runtime_id, model_id)
         if (runtime_id == "external_coreml" or imported) and not model_ready:
             available, reason = False, "外部模型路径或配套 CLI 需要重新校验"
         label, engine = RUNTIME_LABELS.get(runtime_id, (runtime_id, runtime_id))
+        if runtime_id == "mlx" and model_id in QWEN_ASR_MODEL_IDS:
+            engine = "Qwen3-ASR · MLX · Metal"
         item={"id":runtime_id,"name":label,"engine":engine,"available":available,"reason":reason}
         if model_id in WHISPER_CATALOG_BY_ID:
             item.update(runtime_model_status(model_id, runtime_id))
         elif model_id in MANAGED_SHERPA_BY_ID:
             definition = MANAGED_SHERPA_BY_ID[model_id]
-            status = managed_model_status(model_id)
+            status = (
+                runtime_model_status(model_id, "mlx")
+                if runtime_id == "mlx" and model_id in QWEN_ASR_CATALOG_BY_ID
+                else managed_model_status(model_id)
+            )
             item.update({
-                "model_ready": bool(status.get("ready")),
-                "download_required": not bool(status.get("ready")),
+                "model_ready": bool(status.get("model_ready", status.get("ready"))),
+                "download_required": bool(status.get("download_required", not status.get("ready"))),
                 "download_bytes": status.get("download_bytes", definition.archive_size),
                 "installed_bytes": definition.installed_bytes,
-                "repository": "k2-fsa/sherpa-onnx",
-                "revision": "asr-models",
-                "source_url": definition.source_url,
+                "repository": status.get("repository", "k2-fsa/sherpa-onnx"),
+                "revision": status.get("revision", "asr-models"),
+                "source_url": status.get("source_url", definition.source_url),
                 "source": status.get("source", "github"),
-                "status": status.get("state"),
+                "status": status.get("status", status.get("state")),
+            })
+        elif model_id in QWEN_ASR_CATALOG_BY_ID:
+            item.update(runtime_model_status(model_id, runtime_id))
+        elif model_id == FUN_ASR_MODEL_ID:
+            status = fun_asr_status()
+            item.update({
+                "model_ready": bool(status["ready"]),
+                "download_required": False,
+                "download_bytes": 0,
+                "repository": "Alibaba Cloud Model Studio",
+                "revision": FUN_ASR_MODEL_ID,
+                "source_url": "https://help.aliyun.com/en/model-studio/non-real-time-speech-recognition-for-fun-asr-realtime",
+                "source": "dashscope",
+                "status": status["state"],
             })
         elif model_id == PARAKEET_ONNX_MODEL_ID:
             status = get_transcription_model_status(model_id)
@@ -389,6 +427,32 @@ def _whisper_presentation(model_id: str) -> dict:
     }
 
 
+def _qwen_presentation(model_id: str) -> dict:
+    definition = QWEN_ASR_CATALOG_BY_ID[model_id]
+    return {
+        "family": "Qwen3-ASR",
+        "scenarios": ["高精度", "方言", "歌词与说唱", "复杂语音"],
+        "strengths": [
+            "30 种语言和 22 种中文方言",
+            "Apple Silicon 上使用 MLX Metal GPU 推理",
+            "复杂语音、歌词和快速语流表现好",
+        ],
+        "limitations": [
+            "只提供本地 VAD 片段级时间轴",
+            "模型较大且不会参与自动下载",
+            "仅支持 Apple Silicon 的 MLX 运行时",
+        ],
+        "speed_tier": "较慢",
+        "accuracy_tier": "很高" if model_id.endswith("1.7b") else "高",
+        "memory_tier": "很高" if model_id.endswith("1.7b") else "高",
+        "timestamp_mode": "segment",
+        "punctuation_mode": "native",
+        "installed_bytes": definition.variants["mlx"].download_bytes,
+        "license": "Apache-2.0",
+        "removable": True,
+    }
+
+
 @router.get("/transcription/models")
 def transcription_models(project_id: Optional[str] = None, language: str = "auto"):
     try:
@@ -440,17 +504,46 @@ def transcription_models(project_id: Optional[str] = None, language: str = "auto
             "category_name": item.category_name,
             "purpose": item.purpose,
             "language_description": item.language_description,
+            "size_label": item.size_label,
+            "publisher": item.publisher,
+            "tags": list(item.tags),
+            "source_site": "Hugging Face 官方模型库",
+            **_qwen_presentation(item.id),
+        }
+        for item in QWEN_ASR_MODEL_CATALOG
+        if item.id not in MANAGED_SHERPA_BY_ID
+    ] + [
+        {
+            "id": item.id,
+            "name": item.name,
+            "languages": list(item.languages),
+            "category_id": item.category_id,
+            "category_name": item.category_name,
+            "purpose": item.purpose,
+            "language_description": item.language_description,
             "size_label": (
                 f"下载约 {item.archive_size / 1024 ** 2:.0f} MiB，"
                 f"安装约 {item.installed_bytes / 1024 ** 2:.0f} MiB"
             ),
             "publisher": "官方 sherpa-onnx 模型",
-            "tags": list(item.tags),
+            "tags": list(dict.fromkeys((
+                *item.tags,
+                *(("Apple GPU", "Core ML") if "coreml" in item.runtimes else ()),
+                *(("Apple GPU", "MLX") if "mlx" in item.runtimes else ()),
+            ))),
             "source_site": "GitHub 官方发布页",
             "family": item.family,
             "scenarios": list(item.scenarios),
-            "strengths": list(item.strengths),
-            "limitations": list(item.limitations),
+            "strengths": list(item.strengths) + (
+                ["支持 CPU 与 Apple Core ML（GPU / Neural Engine）"]
+                if "coreml" in item.runtimes else
+                ["支持 CPU 与 Apple MLX Metal GPU"]
+                if "mlx" in item.runtimes else []
+            ),
+            "limitations": list(item.limitations) + (
+                ["Core ML 会按算子兼容性调度 GPU / Neural Engine，部分算子可能使用 CPU"]
+                if "coreml" in item.runtimes else []
+            ),
             "speed_tier": item.speed_tier,
             "accuracy_tier": item.accuracy_tier,
             "memory_tier": item.memory_tier,
@@ -503,6 +596,36 @@ def transcription_models(project_id: Optional[str] = None, language: str = "auto
             "timestamp_mode": "token", "punctuation_mode": "native",
             "installed_bytes": 0,
             "license": "以上游 NVIDIA Parakeet 模型许可为准",
+        },
+        {
+            "id": FUN_ASR_MODEL_ID,
+            "name": "Fun-Realtime-ASR",
+            "languages": ["*"],
+            "category_id": "cloud",
+            "category_name": "云端转写（需授权）",
+            "purpose": "阿里云百炼的多语言、方言和复杂语音转写",
+            "language_description": "多语言及中文方言",
+            "size_label": "无需下载 · 云端按量计费",
+            "publisher": "阿里云百炼",
+            "tags": ["云端", "多语言", "方言", "逐词时间戳"],
+            "source_site": "Alibaba Cloud Model Studio",
+            "family": "Fun-ASR",
+            "scenarios": ["方言", "复杂语音", "联网转写"],
+            "strengths": ["原生逐词时间戳", "支持多语言和中文方言", "无需下载本地权重"],
+            "limitations": [
+                "会把当前项目的转写音频上传到阿里云百炼",
+                "需要北京地域百炼 API Key、网络和单独授权，可能产生费用",
+                "授权会保留到用户主动撤销，但每次只上传当时项目的音频",
+                "App 会在本地切成不超过 150 秒的 WAV 请求，不会上传视频、路径或其他项目",
+            ],
+            "speed_tier": "取决于网络",
+            "accuracy_tier": "高",
+            "memory_tier": "低（本机）",
+            "timestamp_mode": "word",
+            "punctuation_mode": "native",
+            "installed_bytes": 0,
+            "license": "阿里云模型服务条款",
+            "removable": False,
         },
     ]
     model_items = []
@@ -606,10 +729,24 @@ def validate_transcription_model(model_id: str):
         coreml_cli_path=settings.get("coreml_cli_path"),
     )
     if model_id in MANAGED_SHERPA_BY_ID:
-        status = managed_model_status(model_id, deep=True)
+        managed_status = managed_model_status(model_id, deep=True)
+        if model_id in QWEN_ASR_CATALOG_BY_ID:
+            mlx_status = runtime_model_status(model_id, "mlx")
+            ready = bool(managed_status.get("ready") or mlx_status.get("model_ready"))
+            status = {
+                **managed_status,
+                "ready": ready,
+                "state": "ready" if ready else managed_status.get("state"),
+                "download_required": not ready,
+                "error": "" if ready else managed_status.get("error", "模型尚未下载"),
+            }
+        else:
+            status = managed_status
     names = {
         **{item.id: item.name for item in WHISPER_MODEL_CATALOG},
+        **{item.id: item.name for item in QWEN_ASR_MODEL_CATALOG},
         **{item.id: item.name for item in MANAGED_SHERPA_MODELS},
+        FUN_ASR_MODEL_ID: "Fun-Realtime-ASR",
         "custom": "自定义 Whisper",
         PARAKEET_MODEL_ID: "Parakeet V3 Core ML",
         PARAKEET_ONNX_MODEL_ID: "Parakeet V3 ONNX",
@@ -634,7 +771,9 @@ def validate_transcription_model(model_id: str):
 def _do_prepare_transcription_model(
     task_id: str, model_id: str, runtime: str, repair: bool, settings: dict,
 ):
-    if model_id in WHISPER_CATALOG_BY_ID:
+    if model_id in QWEN_ASR_CATALOG_BY_ID and runtime == "mlx":
+        prepare_catalog_model(task_id, model_id, runtime, repair=repair)
+    elif model_id in WHISPER_CATALOG_BY_ID:
         prepare_whisper_model(task_id, model_id, runtime, repair=repair)
     elif model_id in MANAGED_SHERPA_BY_ID:
         prepare_managed_model(task_id, model_id, repair=repair)
@@ -653,6 +792,7 @@ def prepare_transcription_model(model_id: str, request: ModelPrepareRequest):
     if (
         model_id not in PARAKEET_MODEL_IDS
         and model_id not in WHISPER_CATALOG_BY_ID
+        and model_id not in QWEN_ASR_CATALOG_BY_ID
         and model_id not in MANAGED_SHERPA_BY_ID
     ):
         raise HTTPException(
@@ -688,6 +828,16 @@ def prepare_transcription_model(model_id: str, request: ModelPrepareRequest):
                     "message": "所选运行设备不支持当前模型",
                 },
             )
+    elif model_id in QWEN_ASR_CATALOG_BY_ID:
+        runtime = runtime or "mlx"
+        if runtime != "mlx":
+            raise HTTPException(
+                400,
+                detail={
+                    "code": "RUNTIME_NOT_SUPPORTED",
+                    "message": "Qwen3-ASR 1.7B 只能选择 Apple GPU（MLX）",
+                },
+            )
     elif model_id == PARAKEET_ONNX_MODEL_ID:
         runtime = runtime or "cpu"
         if runtime not in {"cpu", "coreml"}:
@@ -720,6 +870,13 @@ def prepare_transcription_model(model_id: str, request: ModelPrepareRequest):
 @router.delete("/transcription/models/{model_id}/files")
 def delete_transcription_model_files(model_id: str):
     try:
+        if model_id in QWEN_ASR_CATALOG_BY_ID:
+            removed_bytes = 0
+            if model_id in MANAGED_SHERPA_BY_ID:
+                removed_bytes += int(remove_managed_model(model_id)["removed_bytes"])
+            catalog_result = remove_catalog_model(model_id)
+            removed_bytes += int(catalog_result["removed_bytes"])
+            return {**catalog_result, "removed_bytes": removed_bytes}
         return remove_managed_model(model_id)
     except Exception as exc:
         status_code = 409 if getattr(exc, "error_code", "") == "MODEL_IN_USE" else 400
@@ -1646,7 +1803,9 @@ def _do_transcribe(task_id: str, project_id: str, audio_path: str, language: str
         try:
             transcribe_audio(task_id, audio_path, project_id, language, model, runtime)
         except Exception as exc:
-            transient = any(token in str(exc).lower() for token in (
+            # A cloud timeout can occur after the provider has already processed
+            # a billable chunk. Never submit it again without a new user action.
+            transient = model != FUN_ASR_MODEL_ID and any(token in str(exc).lower() for token in (
                 "timeout", "timed out", "temporarily", "connection", "连接", "503",
             ))
             if not transient:

@@ -108,7 +108,7 @@ def list_cloud_authorizations():
 
 @router.put("/cloud-authorizations/{capability}")
 def set_cloud_authorization(capability: str, request: CloudAuthorizationRequest):
-    if capability not in {"ocr", "speaker", "quality", "content"}: raise HTTPException(422, "未知云端能力")
+    if capability not in {"ocr", "speaker", "quality", "content", "transcription"}: raise HTTPException(422, "未知云端能力")
     now = time.strftime("%Y-%m-%d %H:%M:%S"); db = get_db()
     try:
         db.execute("""INSERT INTO cloud_authorizations(capability,provider_id,granted,disclosure_version,granted_at,revoked_at)
