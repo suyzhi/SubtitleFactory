@@ -73,6 +73,9 @@ export default function SettingsCenter(props: Props) {
     motionEnabled, onMotionEnabledChange, density, onDensityChange, health, onRefreshHealth,
     modelStatus, onRefreshModels, onOpenLogs,
   } = props;
+  const youtubeEnabled = api.youtubeFeaturesEnabled();
+  const externalPathsEnabled = api.externalRuntimePathsEnabled();
+  const distributionChannel = api.getDistributionChannel();
   const [category, setCategory] = useState<Category>('general');
   const [draft, setDraft] = useState<AppSettings>(appSettings);
   const [warnings, setWarnings] = useState<AppSettingWarning[]>([]);
@@ -428,7 +431,7 @@ export default function SettingsCenter(props: Props) {
                   <LanguagePicker value={resolvedSourceLanguage} onChange={source_language => updateDraft({ source_language })}/>
                 </label>
               </SettingsSection>
-              <SettingsSection title="模型管理" description="下载对应运行设备的固定版本；本地导入和已有缓存保持原位。" action={<div className="inline-actions"><button className="button secondary" onClick={scanModelFolder}>导入本地模型</button><button className="button secondary" onClick={onRefreshModels}>刷新状态</button></div>}>
+              <SettingsSection title="模型管理" description="下载对应运行设备的固定版本；本地导入和已有缓存保持原位。" action={<div className="inline-actions">{externalPathsEnabled && <button className="button secondary" onClick={scanModelFolder}>导入本地模型</button>}<button className="button secondary" onClick={onRefreshModels}>刷新状态</button></div>}>
                 <div className="model-catalog-filters" aria-label="模型筛选">
                   <label className="model-search"><span>搜索模型</span><input value={modelSearch} onChange={event => setModelSearch(event.target.value)} placeholder="名称、语言、场景或特点"/></label>
                   <AppSelect value={modelLanguage} onChange={setModelLanguage} label="按语言筛选" options={[
@@ -526,7 +529,7 @@ export default function SettingsCenter(props: Props) {
                               ? dashscopeConfigured
                                 ? <button className={`button secondary model-action${funCloudGranted?' danger':''}`} disabled={busy} onClick={() => void updateTranscriptionCloudAuthorization(!funCloudGranted)}>{funCloudGranted?'撤销上传授权':'授权音频上传'}</button>
                                 : <button className="button secondary model-action" onClick={() => { setCategory('ai'); setError('请先保存通义千问（百炼）API Key。'); }}>配置百炼</button>
-                              : isExternalCoreML
+                              : isExternalCoreML && externalPathsEnabled
                               ? <button className="button secondary model-action" onClick={() => void choosePath('coreml_model_path', 'coreml_model', true)}>重新选择目录</button>
                               : selectedRuntime && (ready || canDownload) && <button className="button secondary model-action" disabled={!!preparingModel} onClick={() => void prepareModel(model.id, selectedRuntime, ready)}>{preparingModel === taskKey ? '处理中…' : ready ? '修复' : '下载'}</button>}
                             {!isFunCloud && !isExternalCoreML && !selectedRuntime && (modelReady || hasDownloadableRuntime) && <small className="model-runtime-required">先选择运行设备</small>}
@@ -538,13 +541,13 @@ export default function SettingsCenter(props: Props) {
                     </section>;
                   })}
                 </div>
-                {!!scannedModels.length&&<div className="scanned-models">{scannedModels.map(model=><div className="model-row" key={model.path}><span className={`status-orb ${model.supported?'ok':'warning'}`}/><div><strong>{model.display_name}</strong><small>{model.format} · {model.version||'未标版本'} · {model.supported?(model.reason||'可原地引用'):model.reason}</small></div>{model.supported&&<button className="button secondary model-action" disabled={busy||Boolean(model.reason)} onClick={()=>void api.importLocalModel(model.path,model.cli_path).then(()=>{setMessage(`${model.display_name} 已登记`);onRefreshModels();}).catch(reason=>setError(reason.message))}>登记</button>}</div>)}</div>}
+                {externalPathsEnabled&&!!scannedModels.length&&<div className="scanned-models">{scannedModels.map(model=><div className="model-row" key={model.path}><span className={`status-orb ${model.supported?'ok':'warning'}`}/><div><strong>{model.display_name}</strong><small>{model.format} · {model.version||'未标版本'} · {model.supported?(model.reason||'可原地引用'):model.reason}</small></div>{model.supported&&<button className="button secondary model-action" disabled={busy||Boolean(model.reason)} onClick={()=>void api.importLocalModel(model.path,model.cli_path).then(()=>{setMessage(`${model.display_name} 已登记`);onRefreshModels();}).catch(reason=>setError(reason.message))}>登记</button>}</div>)}</div>}
               </SettingsSection>
-              <SettingsSection title="自定义运行时" description="路径只保存在本机，不会写入项目、日志或发布包。">
+              {externalPathsEnabled && <SettingsSection title="自定义运行时" description="路径只保存在本机，不会写入项目、日志或发布包。">
                 {renderPath('自定义模型目录', 'custom_model_path', 'model', '选择包含模型文件的目录', true)}
                 {renderPath('外部 Core ML 目录', 'coreml_model_path', 'coreml_model', '可选；检测到后才参与自动选择', true)}
                 {renderPath('转写 CLI', 'coreml_cli_path', 'cli', '可选可执行文件')}
-              </SettingsSection>
+              </SettingsSection>}
             </>}
 
             {category === 'ai' && <>
@@ -573,7 +576,7 @@ export default function SettingsCenter(props: Props) {
             </>}
 
             {category === 'storage' && <>
-              <SettingsSection title="YouTube 媒体模式" description="决定新建 YouTube 项目的默认处理方式；已有项目可在“处理 → 下载”中单独切换。">
+              {youtubeEnabled && <SettingsSection title="YouTube 媒体模式" description="决定新建 YouTube 项目的默认处理方式；已有项目可在“处理 → 下载”中单独切换。">
                 <Segmented value={String(draft.youtube_media_mode || 'local')} onChange={youtube_media_mode => updateDraft({ youtube_media_mode: youtube_media_mode as 'local' | 'web' })} options={[['web', '网页播放'], ['local', '下载至本地']]}/>
                 <div className="settings-mode-explainer">
                   <strong>{draft.youtube_media_mode === 'web' ? '网页播放：更快开始' : '下载至本地：完整离线素材'}</strong>
@@ -582,24 +585,24 @@ export default function SettingsCenter(props: Props) {
                     : '创建项目后下载完整视频，适合离线播放、多音轨选择和频繁导出成片，但首次等待时间和磁盘占用更高。'}</p>
                 </div>
                 <p className="settings-help">网页播放依赖网络、视频可嵌入状态和平台可用性。请只处理你有权使用的内容；本功能不会绕过地区、年龄、登录或版权限制。</p>
-              </SettingsSection>
-              <SettingsSection title="下载偏好" description="下载时会移除播放定位参数，并获取完整视频。">
+              </SettingsSection>}
+              {youtubeEnabled && <SettingsSection title="下载偏好" description="下载时会移除播放定位参数，并获取完整视频。">
                 <label className="settings-field horizontal"><span><strong>画质</strong><small>高清画面与音频需要 FFmpeg 合并</small></span><AppSelect value={String(draft.download_quality||'best')} onChange={download_quality=>updateDraft({download_quality})} label="下载画质" options={[{value:'best',label:'最佳可用'},{value:'1080p',label:'最高 1080p'},{value:'720p',label:'最高 720p'}]}/></label>
                 <label className="settings-field horizontal"><span><strong>容器</strong></span><AppSelect value={draft.download_container||'mp4'} onChange={download_container=>updateDraft({download_container:download_container as AppSettings['download_container']})} label="下载容器" options={[{value:'mp4',label:'MP4'},{value:'mkv',label:'MKV'},{value:'webm',label:'WebM'}]}/></label>
-              </SettingsSection>
-              <SettingsSection title="运行状态" description="下载前请确保所有关键项目均为可用。" action={<button className="button secondary" onClick={onRefreshHealth}>重新检查</button>}>
+              </SettingsSection>}
+              <SettingsSection title="运行状态" description="处理前请确保本地媒体引擎与存储均可用。" action={<button className="button secondary" onClick={onRefreshHealth}>重新检查</button>}>
                 <RuntimeRow label="FFmpeg" value={runtimeCopy(runtime?.ffmpeg as any)}/>
                 <RuntimeRow label="FFprobe" value={runtimeCopy(runtime?.ffprobe as any)}/>
-                <RuntimeRow label="yt-dlp" value={runtimeCopy(runtime?.yt_dlp as any)}/>
-                <RuntimeRow label="Deno" value={runtimeCopy(runtime?.deno as any)}/>
-                <RuntimeRow label="EJS 挑战组件" value={runtimeCopy(runtime?.ejs as any)}/>
+                {youtubeEnabled && <RuntimeRow label="yt-dlp" value={runtimeCopy(runtime?.yt_dlp as any)}/>}
+                {youtubeEnabled && <RuntimeRow label="Deno" value={runtimeCopy(runtime?.deno as any)}/>}
+                {youtubeEnabled && <RuntimeRow label="EJS 挑战组件" value={runtimeCopy(runtime?.ejs as any)}/>}
                 <RuntimeRow label="输出目录" value={runtimeCopy(runtime?.output_directory as any)}/>
                 <RuntimeRow label="磁盘空间" value={{ ...runtimeCopy(runtime?.disk as any), detail: runtime?.disk?.free_bytes ? `${bytes(runtime.disk.free_bytes)} 可用` : runtimeCopy(runtime?.disk as any).detail }}/>
               </SettingsSection>
-              <SettingsSection title="路径" description="下载器固定使用 App 内置的 yt-dlp Python API；旧版 yt_dlp_path 设置会继续保留但不再参与下载。">
+              {externalPathsEnabled && <SettingsSection title="路径" description="下载器固定使用 App 内置的 yt-dlp Python API；旧版 yt_dlp_path 设置会继续保留但不再参与下载。">
                 {renderPath('下载目录', 'download_directory', 'download_directory', 'App 默认数据目录', true)}
                 {renderPath('FFmpeg 自定义路径', 'ffmpeg_path', 'ffmpeg', '通常无需设置')}
-              </SettingsSection>
+              </SettingsSection>}
               <SettingsSection title="数据库备份" description="默认保留 7 份每日备份和 4 份每周备份；恢复前会再创建安全备份。" action={<button className="button secondary" disabled={busy} onClick={() => void backupNow()}>立即备份</button>}>
                 <div className="backup-list">
                   {!backupState.backups.length && <span className="settings-empty">尚无备份</span>}
@@ -624,10 +627,18 @@ export default function SettingsCenter(props: Props) {
                 <div className="shortcut-grid"><span>播放 / 暂停</span><kbd>Space</kbd><span>剧院模式</span><kbd>T</kbd><span>关闭弹窗或检查器</span><kbd>Esc</kbd><span>保存字幕编辑</span><kbd>Return</kbd></div>
               </SettingsSection>
               <SettingsSection title="关于字幕工厂" description="本地优先的专业字幕工作台。">
-                <div className="about-card"><strong>字幕工厂 {health?.version || '0.3.2'}</strong><span>Apple Silicon · 本地运行</span><small>服务状态：{health?.status || '正在连接'}</small></div>
+                <div className="about-card"><strong>字幕工厂 {health?.version || '0.4.1'}</strong><span>Apple Silicon · {distributionChannel === 'app_store' ? 'Mac App Store 版' : '直装版'}</span><small>服务状态：{health?.status || '正在连接'}</small></div>
                 <div className="about-data-row"><span><strong>数据目录</strong><small>{health?.runtime?.data_directory || 'App 本地数据目录'}</small></span></div>
                 <div className="inline-actions"><button className="button secondary" onClick={() => void copyDiagnostics()}>复制诊断信息</button><button className="button secondary" onClick={() => void api.downloadDiagnostics().catch(reason => setError(reason.message))}>导出脱敏诊断包</button><button className="button secondary" onClick={() => { onClose(); onOpenLogs(); }}>查看处理日志</button></div>
                 <p className="settings-help">复制的诊断信息不包含本机路径或 API Key。自定义路径和密钥不会进入 Git、默认配置、日志或 Release。</p>
+              </SettingsSection>
+              <SettingsSection title="隐私与数据" description="默认本地处理；任何云端发送都需要用户主动配置并明确执行。">
+                <div className="about-data-row"><span><strong>本地项目</strong><small>媒体、字幕、编辑历史、数据库和模型保存在这台 Mac；不会自动同步。</small></span></div>
+                <div className="about-data-row"><span><strong>云端 AI</strong><small>翻译、整理和内容生成只发送当前操作所需的文本。Fun-Realtime-ASR 只在单独授权后分段上传当前项目音频，授权可随时撤销。</small></span></div>
+                {youtubeEnabled
+                  ? <div className="about-data-row"><span><strong>第三方媒体</strong><small>直装版可按用户指令连接 YouTube；仅应处理拥有明确权利的内容，Chrome 登录状态最多在权限挑战时读取一次。</small></span></div>
+                  : <div className="about-data-row"><span><strong>App Store 保护</strong><small>此发行版不提供第三方网站媒体读取、Cookie 访问、持久监听文件夹或外部运行时路径。</small></span></div>}
+                <p className="settings-help">API Key 保存在 macOS 钥匙串。诊断包不包含密钥、媒体、字幕正文或完整用户目录路径。</p>
               </SettingsSection>
             </>}
           </div>

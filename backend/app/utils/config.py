@@ -50,6 +50,10 @@ def environment_path_overrides_enabled() -> bool:
     enables the advanced escape hatch.  The dedicated bundled-runtime variables
     remain available to the Tauri launcher and are handled separately.
     """
+    if os.getenv(
+        "SUBTITLE_FACTORY_DISTRIBUTION_CHANNEL", "direct"
+    ).strip().lower() == "app_store":
+        return False
     return not is_frozen_app() or os.getenv(
         "SUBTITLE_FACTORY_ALLOW_ENV_PATHS", ""
     ).strip().lower() in {"1", "true", "yes", "on"}

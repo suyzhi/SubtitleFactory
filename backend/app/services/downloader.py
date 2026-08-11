@@ -1,5 +1,7 @@
 """YouTube download service using the bundled yt-dlp Python API."""
 
+from __future__ import annotations
+
 import logging
 import os
 import re
@@ -15,10 +17,10 @@ from typing import Any, Optional, TypeVar
 from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
-import yt_dlp
-
 from ..utils.config import DOWNLOADS_DIR
 from ..utils.task_manager import TaskCancelled, task_manager
+from .download_errors import DownloadServiceError
+from .distribution import require_youtube_feature
 from .runtime_diagnostics import (
     resolve_deno_path,
     resolve_ffmpeg_path,
@@ -66,29 +68,22 @@ _COOKIE_READ_LOCK = threading.Lock()
 _T = TypeVar("_T")
 
 
-class DownloadServiceError(RuntimeError):
-    """A stable, user-actionable failure raised by the download runtime."""
+class _LazyYtDlp:
+    """Keep yt-dlp out of the App Store module graph until a direct-build call."""
 
-    def __init__(
-        self,
-        message: str,
-        error_code: str,
-        *,
-        recoverable: bool = True,
-        automatic_retry: bool = False,
-        auth_retry_eligible: bool = False,
-        actions: list[str] | None = None,
-        suggestion: str = "请检查下载设置后重试",
-        details: dict[str, Any] | None = None,
-    ):
-        super().__init__(message)
-        self.error_code = error_code
-        self.recoverable = recoverable
-        self.automatic_retry = automatic_retry
-        self.auth_retry_eligible = auth_retry_eligible
-        self.available_actions = actions or (["retry"] if recoverable else [])
-        self.suggestion = suggestion
-        self.details = details or {}
+    _module: Any = None
+
+    def __getattr__(self, name: str) -> Any:
+        require_youtube_feature()
+        if self._module is None:
+            # The split literal is deliberate: the direct PyInstaller build
+            # adds yt-dlp explicitly, while the App Store build excludes it.
+            self._module = import_module("yt" + "_dlp")
+        return getattr(self._module, name)
+
+
+# Preserve the public test/adapter seam without importing the optional package.
+yt_dlp = _LazyYtDlp()
 
 
 def normalize_youtube_url(url: str) -> str:
@@ -408,6 +403,7 @@ def _execute_youtube_operation(
     auth_if_result: Callable[[dict], bool] | None = None,
 ) -> tuple[dict, _T, dict[str, Any]]:
     """Run one anonymous attempt and, only when eligible, one Chrome attempt."""
+    require_youtube_feature()
     normalized_url = normalize_youtube_url(url)
     attempts: list[dict[str, Any]] = []
 
@@ -627,7 +623,7 @@ def _download_options(
             },
         )
     try:
-        import_module("yt_dlp.extractor.youtube.jsc")
+        import_module("yt" + "_dlp.extractor.youtube.jsc")
     except Exception as exc:
         raise DownloadServiceError(
             "下载运行环境缺少 YouTube EJS 挑战组件",

@@ -31,7 +31,8 @@
     "active": true,
     "targets": ["app", "dmg"],
     "resources": [
-      "backend-runtime"
+      "backend-runtime",
+      "PrivacyInfo.xcprivacy"
     ],
     "macOS": {
       "hardenedRuntime": true,

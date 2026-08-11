@@ -98,6 +98,8 @@ const STEP_TASK_MAP: Record<string, string> = {
 };
 
 function App() {
+  const youtubeEnabled = api.youtubeFeaturesEnabled();
+  const filesystemAutomationEnabled = api.filesystemAutomationEnabled();
   // ── Core State ──
   const [projects, setProjects] = useState<Project[]>([]);
   const [trashProjects, setTrashProjects] = useState<Project[]>([]);
@@ -383,10 +385,14 @@ function App() {
   }, []);
 
   const refreshPlaylistBatches = useCallback(async () => {
+    if (!youtubeEnabled) {
+      setPlaylistBatches([]);
+      return;
+    }
     if (backendStatus !== 'connected') return;
     const result = await api.getPlaylistBatches();
     setPlaylistBatches(result.batches);
-  }, [backendStatus]);
+  }, [backendStatus, youtubeEnabled]);
 
   useEffect(() => {
     if (backendStatus !== 'connected' || libraryView !== 'projects') return;
@@ -439,11 +445,11 @@ function App() {
   }, [backendStatus, librarySearch, librarySearchFilters, librarySearchPage, libraryView]);
 
   useEffect(() => {
-    if (backendStatus !== 'connected' || libraryView !== 'projects') return;
+    if (!youtubeEnabled || backendStatus !== 'connected' || libraryView !== 'projects') return;
     void refreshPlaylistBatches().catch(() => undefined);
     const timer = window.setInterval(() => void refreshPlaylistBatches().catch(() => undefined), 2000);
     return () => window.clearInterval(timer);
-  }, [backendStatus, libraryView, refreshPlaylistBatches]);
+  }, [backendStatus, libraryView, refreshPlaylistBatches, youtubeEnabled]);
 
   const refreshModels = useCallback(() => {
     if (backendStatus !== 'connected') return;
@@ -1689,13 +1695,13 @@ function App() {
       return failed || running || { ...(values.at(-1) || emptyProcess()[0]), status: allDone ? 'success' : 'waiting', progress: allDone ? 100 : 0 };
     };
     return [
-      { id: 'download', label: '下载', icon: '⇩', state: combine('download', 'extract_audio') },
+      { id: 'download', label: youtubeEnabled ? '下载' : '媒体', icon: '⇩', state: combine('download', 'extract_audio') },
       { id: 'transcribe', label: '转写', icon: '⌁', state: combine('transcribe') },
       { id: 'clean', label: '整理', icon: '✦', state: combine('clean') },
       { id: 'translate', label: '翻译', icon: '文', state: combine('translate') },
       { id: 'export', label: '导出', icon: '↗', state: combine('export', 'render') },
     ];
-  }, [processSteps]);
+  }, [processSteps, youtubeEnabled]);
   const inspectorModelId=config.model==='auto'?(modelStatus?.recommended_model||'small'):config.model;
   const inspectorModel=modelStatus?.models.find(item=>item.id===inspectorModelId);
   const inspectorRuntime=inspectorModel?.runtimes?.find(item=>item.id===runtimeForModel(inspectorModelId));
@@ -1714,12 +1720,16 @@ function App() {
         : !hasSegments ? '生成字幕' : '继续';
 
   const runPrimaryAction = useCallback(() => {
-    if (!activeProject) { setShowLinkPopover(true); return; }
+    if (!activeProject) {
+      if (youtubeEnabled) setShowLinkPopover(true);
+      else handleImportLocal();
+      return;
+    }
     if (currentTask?.status === 'paused') { void toggleTaskPause(); return; }
     if (currentTask?.status === 'failed' && currentTask.recoverable) { retryCurrentFailure(); return; }
     if (!hasSegments || currentTask?.status === 'failed') { doGenerateSubtitles(); return; }
     openWorkflowStep(config.target_language === 'none' ? 'clean' : 'translate');
-  }, [activeProject, config.target_language, currentTask, doGenerateSubtitles, hasSegments, openWorkflowStep, retryCurrentFailure, toggleTaskPause]);
+  }, [activeProject, config.target_language, currentTask, doGenerateSubtitles, handleImportLocal, hasSegments, openWorkflowStep, retryCurrentFailure, toggleTaskPause, youtubeEnabled]);
 
   // 总进度计算
   const totalProgress = Math.round(
@@ -1744,8 +1754,8 @@ function App() {
   </section>;
   const renderMediaInspector = () => <section className="inspector-section media-mode-inspector">
     <h3>播放与音频来源</h3>
-    <label>项目链接<input value={activeProject?.source_url || youtubeUrl} placeholder="YouTube URL" onChange={event => setYoutubeUrl(event.target.value)}/></label>
-    {activeProject?.source_type === 'youtube' && <div className="project-media-mode">
+    {youtubeEnabled && <label>项目链接<input value={activeProject?.source_url || youtubeUrl} placeholder="YouTube URL" onChange={event => setYoutubeUrl(event.target.value)}/></label>}
+    {youtubeEnabled && activeProject?.source_type === 'youtube' && <div className="project-media-mode">
       <span><strong>此项目使用</strong><small>只影响当前项目，可随时切换</small></span>
       <div className="segmented-control" role="group" aria-label="当前项目媒体模式">
         <button className={activeProject.media_mode === 'web' ? 'active' : ''} disabled={isProcessing} onClick={() => void changeProjectMediaMode('web')}>网页播放</button>
@@ -1754,18 +1764,18 @@ function App() {
     </div>}
     <div className="runtime-mini">
       <span className={health?.runtime?.ffmpeg?.ok ? 'ok' : 'error'}>FFmpeg {health?.runtime?.ffmpeg?.ok ? '可用' : '需检查'}</span>
-      <span className={health?.runtime?.yt_dlp?.ok ? 'ok' : 'error'}>yt-dlp {health?.runtime?.yt_dlp?.ok ? '可用' : '需检查'}</span>
-      <span className={health?.runtime?.deno?.ok && health?.runtime?.ejs?.ok ? 'ok' : 'error'}>YouTube 挑战组件 {health?.runtime?.deno?.ok && health?.runtime?.ejs?.ok ? '可用' : '需检查'}</span>
+      {youtubeEnabled && <span className={health?.runtime?.yt_dlp?.ok ? 'ok' : 'error'}>yt-dlp {health?.runtime?.yt_dlp?.ok ? '可用' : '需检查'}</span>}
+      {youtubeEnabled && <span className={health?.runtime?.deno?.ok && health?.runtime?.ejs?.ok ? 'ok' : 'error'}>YouTube 挑战组件 {health?.runtime?.deno?.ok && health?.runtime?.ejs?.ok ? '可用' : '需检查'}</span>}
     </div>
-    {activeProject?.media_mode === 'web'
+    {youtubeEnabled && activeProject?.media_mode === 'web'
       ? <p>视频由网页播放器呈现，字幕、时间轴、倍速、循环和样式预览保持一致；本机只准备转写音频。网页受限或导出成片时会按需下载视频。</p>
       : <p>完整视频保存在本机，可离线播放并选择音轨或截取范围。</p>}
     {activeProject?.video_path && activeProject.media_mode !== 'web' && <MediaSelectionPanel projectId={activeProject.id} onChanged={() => { setActiveProject(current => current ? { ...current, audio_path: null, audio_available: false } : current); setToast('音轨或范围已更新，请重新提取音频'); }}/>}
     <div className="media-mode-actions">
-      <button className="button primary" disabled={!activeProject?.source_url || isProcessing} onClick={retryDownload}>
+      {youtubeEnabled && <button className="button primary" disabled={!activeProject?.source_url || isProcessing} onClick={retryDownload}>
         {activeProject?.media_mode === 'web' ? '重新准备音频' : '重新下载视频'}
-      </button>
-      {activeProject?.media_mode === 'web' && !hasLocalVideo && <button className="button secondary" disabled={isProcessing} onClick={downloadLocalCopy}>下载本地副本</button>}
+      </button>}
+      {youtubeEnabled && activeProject?.media_mode === 'web' && !hasLocalVideo && <button className="button secondary" disabled={isProcessing} onClick={downloadLocalCopy}>下载本地副本</button>}
       {activeProject?.video_path && activeProject.media_mode !== 'web' && <button className="button secondary" disabled={isProcessing} onClick={doExtractAudio}>重新提取音频</button>}
     </div>
   </section>;
@@ -1775,7 +1785,7 @@ function App() {
     {activeProcessStep === 'clean' && <section className="inspector-section"><h3>AI 忠实整理</h3><div className="ai-summary-row"><span className="ai-logo">✦</span><div><strong>{activeAIPreset?.name || aiSettings?.provider || '未配置 AI'}</strong><small>{aiSettings?.model || '请先打开设置中心'}</small></div></div><label>参考单句长度 <span>{config.clean_target_length} 字</span><input type="range" min={16} max={100} step={2} value={config.clean_target_length} onChange={event => setConfig({ ...config, clean_target_length: Number(event.target.value) })}/></label><p>只修正明显错词、标点和断句，不改变原意。</p><button className="button primary" disabled={!hasSegments || isProcessing || !aiSettings?.has_api_key} onClick={doClean}>确认并开始整理</button><button className="button secondary" disabled={!hasSegments || isProcessing} onClick={undoClean}>撤销上次整理</button></section>}
     {activeProcessStep === 'clean' && renderFailedBatchRecovery()}
     {activeProcessStep === 'translate' && <section className="inspector-section"><h3>AI 翻译</h3><label>目标语言<LanguagePicker mode="target" allowCustom allowNone value={config.target_language} onChange={target_language => setConfig({ ...config, target_language })}/></label><label className="check-row"><input type="checkbox" checked={config.bilingual} onChange={event => setConfig({ ...config, bilingual: event.target.checked })}/> 导出时包含原文与译文</label><p>翻译结果会单独保存，可继续逐句校对。</p><button className="button primary" disabled={!hasSegments || isProcessing || !aiSettings?.has_api_key || config.target_language === 'none'} onClick={doTranslate}>确认并开始翻译</button></section>}
-    {activeProcessStep === 'export' && <section className="inspector-section"><h3>快速导出</h3><p>字幕文件立即生成；带字幕视频会在后台压制。网页模式首次导出成片时会先下载并保留本地视频。</p><button className="button primary" onClick={() => setProjectWorkspace('export')}>前往导出工作区</button></section>}
+    {activeProcessStep === 'export' && <section className="inspector-section"><h3>快速导出</h3><p>{youtubeEnabled ? '字幕文件立即生成；带字幕视频会在后台压制。网页模式首次导出成片时会先下载并保留本地视频。' : '字幕文件立即生成；带字幕视频只在本机后台压制，不上传媒体。'}</p><button className="button primary" onClick={() => setProjectWorkspace('export')}>前往导出工作区</button></section>}
     {currentTask?.status === 'failed' && <section className="recovery-card"><strong>{currentTask.error_code || '任务失败'}</strong><span>{currentTask.error || currentTask.message}</span>{currentTask.suggestion && <small>{currentTask.suggestion}</small>}<small>尝试次数：{currentTask.attempt || 1}</small>{currentTask.recoverable && <button onClick={retryCurrentFailure}>{recoveryActionLabel}</button>}{currentTask.available_actions?.includes('open_settings') && <button onClick={() => setShowAISettings(true)}>打开下载与存储设置</button>}</section>}
   </div>;
 
@@ -1796,14 +1806,14 @@ function App() {
         </div>
         <div className="topbar-actions">
           <button className="topbar-button" disabled={backendStatus !== 'connected'} onClick={handleImportLocal}><span>＋</span>导入</button>
-          <button className={`topbar-button ${showLinkPopover ? 'active' : ''}`} disabled={backendStatus !== 'connected'} onClick={() => setShowLinkPopover(value => !value)}><span>⌁</span>链接</button>
+          {youtubeEnabled && <button className={`topbar-button ${showLinkPopover ? 'active' : ''}`} disabled={backendStatus !== 'connected'} onClick={() => setShowLinkPopover(value => !value)}><span>⌁</span>链接</button>}
           <button className={`task-status-pill ${backendStatus}`} onClick={() => setShowTaskDrawer(value => !value)} aria-expanded={showTaskDrawer}>
             <i className={`backend-dot ${backendStatus}`}/><span>{isProcessing ? `${currentTask?.message || '正在处理'} · ${Math.round(currentTask?.progress || 0)}%` : backendStatus === 'connected' ? '引擎就绪' : backendStatus === 'connecting' ? '正在启动' : '引擎异常'}</span>
           </button>
           <button className="icon-action" aria-label={theme === 'dark' ? '切换浅色模式' : '切换深色模式'} onClick={() => setTheme(value => value === 'dark' ? 'light' : 'dark')}>{theme === 'dark' ? '☀︎' : '◐'}</button>
           <button className="icon-action" aria-label="打开设置" onClick={() => setShowAISettings(true)}><img className="topbar-control-icon" src={settingsIcon} alt=""/></button>
         </div>
-        {showLinkPopover && <div className="link-popover">
+        {youtubeEnabled && showLinkPopover && <div className="link-popover">
           <div><strong>从 YouTube 链接创建</strong><button aria-label="关闭" onClick={() => setShowLinkPopover(false)}>×</button></div>
           <input autoFocus type="url" value={youtubeUrl} placeholder="https://www.youtube.com/watch?v=…" onChange={event => setYoutubeUrl(event.target.value)}/>
           <p>{isPlaylistUrl(youtubeUrl) ? '将先读取播放列表，确认批量转写与 AI 流水线后创建归组。' : '播放定位参数会自动移除并下载完整视频。'}</p>
@@ -1819,12 +1829,12 @@ function App() {
         if (project) void selectProject(project); else void api.getProject(projectId).then(selectProject).catch(() => undefined);
         setShowTaskDrawer(false);
       }} onOpenSettings={() => { setShowTaskDrawer(false); setShowAISettings(true); }}/>
-      {playlistDialogUrl && <PlaylistBatchDialog
+      {youtubeEnabled && playlistDialogUrl && <PlaylistBatchDialog
         url={playlistDialogUrl} workflow={playlistWorkflow} appSettings={appSettings} health={health}
         aiReady={!!aiSettings?.has_api_key} onClose={() => setPlaylistDialogUrl(null)}
         onCreated={message => { setPlaylistDialogUrl(null); showToast(message, 4200); void refreshPlaylistBatches(); }}
       />}
-      {showProductionCenter && (() => { const batchModel = compatibleModel() || config.model; return <ProductionCenter workflow={{ model: batchModel, language: config.language, target_language: config.target_language, runtime: runtimeForModel(batchModel) }} onClose={() => setShowProductionCenter(false)} onProjectsCreated={() => void api.listProjects({ search: librarySearch, sort: librarySort }).then(result => setProjects(result.projects))} onShowTasks={() => setShowTaskDrawer(true)}/>; })()}
+      {filesystemAutomationEnabled && showProductionCenter && (() => { const batchModel = compatibleModel() || config.model; return <ProductionCenter workflow={{ model: batchModel, language: config.language, target_language: config.target_language, runtime: runtimeForModel(batchModel) }} onClose={() => setShowProductionCenter(false)} onProjectsCreated={() => void api.listProjects({ search: librarySearch, sort: librarySort }).then(result => setProjects(result.projects))} onShowTasks={() => setShowTaskDrawer(true)}/>; })()}
       {showFirstRunPreflight && backendStatus === 'connected' && modelStatus && (() => {
         const configuredModel = String(appSettings.default_model || 'auto');
         const modelId = configuredModel === 'auto'
@@ -1835,18 +1845,20 @@ function App() {
         return <div className="preflight-overlay" role="dialog" aria-modal="true" aria-label="首次运行预检"><section className="preflight-card"><header><small>首次运行</small><h2>本机准备就绪</h2><p>基础转写在本机完成；AI、OCR 和说话人模型只在首次使用对应功能时准备。</p></header><div className="preflight-checks"><span className={health?.runtime?.ffmpeg?.ok ? 'ok' : 'warning'}><i>{health?.runtime?.ffmpeg?.ok ? '✓' : '!'}</i><strong>FFmpeg</strong><small>{health?.runtime?.ffmpeg?.ok ? '可用' : '需要在设置中检查'}</small></span><span className={health?.runtime?.disk?.ok ? 'ok' : 'warning'}><i>{health?.runtime?.disk?.ok ? '✓' : '!'}</i><strong>磁盘</strong><small>{health?.runtime?.disk?.message || '已检查可用空间'}</small></span><span className={model?.ready ? 'ok' : 'warning'}><i>{model?.ready ? '✓' : '↓'}</i><strong>{model?.name || '默认模型'}</strong><small>{model?.ready ? '已就绪' : '首次转写时按需下载'}</small></span></div><div className="preflight-device"><strong>推荐运行设备</strong><span>{recommended?.name || 'CPU'}<small>{recommended?.engine || '本地运行'}</small></span></div><footer><button className="button primary" disabled={!recommended} onClick={() => { if (model && recommended) chooseRuntime(model.id, recommended.id); localStorage.setItem('subtitle_factory_preflight_v1', 'done'); setShowFirstRunPreflight(false); }}>确认并开始使用</button></footer></section></div>;
       })()}
 
-      {backendStatus === 'error' && <div className="engine-error-banner"><strong>本地引擎未能启动</strong><span>打开设置查看 FFmpeg、yt-dlp、模型与存储诊断。</span><button onClick={refreshHealth}>重新检查</button></div>}
+      {backendStatus === 'error' && <div className="engine-error-banner"><strong>本地引擎未能启动</strong><span>打开设置查看 FFmpeg、模型与存储诊断。</span><button onClick={refreshHealth}>重新检查</button></div>}
       {uploadProgress !== null && <div className="upload-progress-banner" role="status"><span>正在导入视频</span><progress value={uploadProgress} max={100}/><strong>{uploadProgress}%</strong></div>}
 
       <div className={`studio-shell v05-shell ${showProjectWorkspace && activeProject ? `app-project project-view-${projectWorkspace}` : 'app-library'} ${inspectorMode ? 'inspector-open' : ''}`} style={{
         '--left-panel-width': `${leftPanelWidth}px`, '--right-panel-width': `${rightPanelWidth}px`,
       } as React.CSSProperties}>
         <aside className="project-sidebar">
-          <header className="library-page-header"><div><small>字幕工厂</small><h1>你的项目</h1><p>选择一个项目继续工作，或从视频和链接开始新的字幕任务。</p></div><div><button className="button secondary" disabled={backendStatus !== 'connected'} onClick={() => setShowLinkPopover(true)}>添加链接</button><button className="button primary" disabled={backendStatus !== 'connected'} onClick={handleImportLocal}>导入视频</button></div></header>
+          <header className="library-page-header"><div><small>字幕工厂</small><h1>你的项目</h1><p>{youtubeEnabled ? '选择一个项目继续工作，或从视频和链接开始新的字幕任务。' : '选择一个项目继续工作，或导入您有权处理的视频。'}</p></div><div>{youtubeEnabled && <button className="button secondary" disabled={backendStatus !== 'connected'} onClick={() => setShowLinkPopover(true)}>添加链接</button>}<button className="button primary" disabled={backendStatus !== 'connected'} onClick={handleImportLocal}>导入视频</button></div></header>
           <section className="library-overview" aria-label="项目库概览">
             <div><span>项目</span><strong>{projects.length}</strong><small>{trashProjects.length ? `${trashProjects.length} 个在回收站` : '全部保存在本机'}</small></div>
             <div><span>字幕</span><strong>{projects.reduce((total, project) => total + Number(project.segments_count || 0), 0)}</strong><small>可在项目库中全文搜索</small></div>
-            <div><span>批量任务</span><strong>{playlistBatches.filter(item => ['running', 'pending', 'paused', 'partial', 'failed'].includes(item.batch.status)).length}</strong><small>{playlistBatches.length ? `${playlistBatches.length} 个播放列表` : '暂无进行中的队列'}</small></div>
+            {youtubeEnabled
+              ? <div><span>批量任务</span><strong>{playlistBatches.filter(item => ['running', 'pending', 'paused', 'partial', 'failed'].includes(item.batch.status)).length}</strong><small>{playlistBatches.length ? `${playlistBatches.length} 个播放列表` : '暂无进行中的队列'}</small></div>
+              : <div><span>隐私模式</span><strong>本地优先</strong><small>第三方媒体读取已关闭</small></div>}
             <div className={`library-runtime-card ${backendStatus}`}><span>本地引擎</span><strong>{backendStatus === 'connected' ? '就绪' : backendStatus === 'connecting' ? '启动中' : '需检查'}</strong><small>{backendStatus === 'connected' ? '媒体与转写工具可用' : backendStatus === 'connecting' ? '正在载入本机运行时' : '本地功能受限，AI 设置不应影响此状态'}</small></div>
           </section>
           <div className="library-switcher" role="tablist" aria-label="项目库视图">
@@ -1898,7 +1910,7 @@ function App() {
                   <header className="search-result-heading project-hits-heading"><strong>项目命中</strong><span>{projects.length}</span></header>
                 </>}
             </section>}
-            {libraryView === 'projects' && <PlaylistBatchGroups
+            {youtubeEnabled && libraryView === 'projects' && <PlaylistBatchGroups
               batches={playlistBatches} search={librarySearch} collapsed={collapsedPlaylistBatches}
               workflow={playlistWorkflow} onToggle={togglePlaylistBatch}
               onOpenProject={project => void selectProject(project)}
@@ -1923,14 +1935,14 @@ function App() {
               </section>;
             })}
             {libraryView === 'projects' && backendStatus === 'connecting' && !projects.length && !playlistBatches.length && <div className="library-skeleton" aria-label="正在载入项目"><i/><i/><i/></div>}
-            {libraryView === 'projects' && backendStatus !== 'connecting' && !projects.length && !playlistBatches.length && <div className="project-empty"><span>▱</span><strong>还没有项目</strong><small>导入视频、拖放文件或粘贴链接开始。</small></div>}
+            {libraryView === 'projects' && backendStatus !== 'connecting' && !projects.length && !playlistBatches.length && <div className="project-empty"><span>▱</span><strong>还没有项目</strong><small>{youtubeEnabled ? '导入视频、拖放文件或粘贴链接开始。' : '导入或拖放本地视频开始。'}</small></div>}
             {libraryView === 'trash' && trashProjects.map(project => <button className={`project-card trash-card ${removingProjectIds.has(project.id) ? 'removing' : ''}`} key={project.id} onContextMenu={event => openProjectMenu(event, project, true)} onClick={event => openProjectMenu(event, project, true)}>
               <span className="project-thumb"><span className="project-thumb-fallback">♲</span></span><span className="project-card-copy"><strong>{project.title}</strong><small>{project.deleted_at?.slice(0, 10) || '已删除'} · 媒体仍保留</small></span><span className="project-more">•••</span>
             </button>)}
             {libraryView === 'trash' && !trashProjects.length && <div className="project-empty"><span>♲</span><strong>回收站为空</strong><small>移入回收站的项目会保留媒体与字幕。</small></div>}
           </div>
           <div className="sidebar-footer">
-            {libraryView === 'trash' ? <button className="sidebar-action danger" disabled={!trashProjects.length} onClick={clearTrash}>清空回收站</button> : <><button className="sidebar-action" onClick={handleImportLocal}>＋ 导入视频</button><button className="sidebar-action" onClick={() => setShowProductionCenter(true)}>▦ 批量与监听</button><button className="sidebar-action" onClick={importProjectPackage}>⇧ 导入项目包</button><button className="sidebar-action" onClick={() => setShowLinkPopover(true)}>⌁ 添加链接</button></>}
+            {libraryView === 'trash' ? <button className="sidebar-action danger" disabled={!trashProjects.length} onClick={clearTrash}>清空回收站</button> : <><button className="sidebar-action" onClick={handleImportLocal}>＋ 导入视频</button>{filesystemAutomationEnabled && <button className="sidebar-action" onClick={() => setShowProductionCenter(true)}>▦ 批量与监听</button>}<button className="sidebar-action" onClick={importProjectPackage}>⇧ 导入项目包</button>{youtubeEnabled && <button className="sidebar-action" onClick={() => setShowLinkPopover(true)}>⌁ 添加链接</button>}</>}
           </div>
         </aside>
 
@@ -1948,7 +1960,7 @@ function App() {
           <section className="media-workspace">
           <section className="fixed-viewer">
             {activeProject && canPlayMedia && (useWebPlayback || activeProject.video_url) ? <SubtitlePlayer ref={videoPlayerRef} projectId={activeProject.id} videoUrl={useWebPlayback ? undefined : api.getBackendMediaUrl(activeProject.video_url) || ''} youtubeVideoId={useWebPlayback ? activeProject.youtube_video_id || undefined : undefined} onWebPlayerError={handleWebPlayerError} segments={segments} style={subtitleStyle} activeIdx={activeSegmentIdx} onTimeUpdate={handleTimeUpdate} onDurationChange={setVideoDuration} onStyleChange={handleStyleChange} presentationMode={presentationMode} onPresentationModeChange={setPresentationMode}/>
-              : <div className="viewer-welcome"><span>▶</span><h2>开始创作字幕</h2><p>导入视频或粘贴 YouTube 链接</p><div><button className="button primary" onClick={handleImportLocal}>导入视频</button><button className="button secondary" onClick={() => setShowLinkPopover(true)}>添加链接</button></div></div>}
+              : <div className="viewer-welcome"><span>▶</span><h2>开始创作字幕</h2><p>{youtubeEnabled ? '导入视频或粘贴 YouTube 链接' : '导入您有权处理的本地视频'}</p><div><button className="button primary" onClick={handleImportLocal}>导入视频</button>{youtubeEnabled && <button className="button secondary" onClick={() => setShowLinkPopover(true)}>添加链接</button>}</div></div>}
           </section>
           {activeProject && <SubtitleTimeline projectId={activeProject.id} segments={segments} currentTime={currentTime} duration={videoDuration} onSeek={handleSeek} onUpdateTime={(index, update) => void handleUpdateSegment(index, update)}/>}
           <div className="viewer-resizer" role="separator" aria-label="调整播放器高度" tabIndex={0} onPointerDown={event => beginResize('viewer', event)} onKeyDown={event => { if (event.key === 'ArrowUp') setViewerHeight(value => Math.max(260, value - 20)); if (event.key === 'ArrowDown') setViewerHeight(value => Math.min(window.innerHeight - 250, value + 20)); }}><span/></div>
@@ -2001,7 +2013,7 @@ function App() {
             <aside className="style-controls-page"><header><small>字幕检查器</small><h2>字体与排版</h2></header><SubtitleStylePanel style={subtitleStyle} onChange={handleStyleChange}/></aside>
           </section>}
           {projectWorkspace === 'export' && <section className="task-page export-task-page">
-            <header className="export-page-hero"><div><small>最后一步</small><h2>选择交付格式</h2><p>字幕文件立即下载；MP4 与 MKV 会在本机后台压制，不上传媒体。网页模式首次导出成片时会先下载并保留本地视频。</p></div><label className="bilingual-switch"><input type="checkbox" checked={config.bilingual} onChange={event => setConfig({ ...config, bilingual: event.target.checked })}/><span>包含双语字幕</span></label></header>
+            <header className="export-page-hero"><div><small>最后一步</small><h2>选择交付格式</h2><p>{youtubeEnabled ? '字幕文件立即下载；MP4 与 MKV 会在本机后台压制，不上传媒体。网页模式首次导出成片时会先下载并保留本地视频。' : '字幕文件立即下载；MP4 与 MKV 只在本机后台压制，不上传媒体。'}</p></div><label className="bilingual-switch"><input type="checkbox" checked={config.bilingual} onChange={event => setConfig({ ...config, bilingual: event.target.checked })}/><span>包含双语字幕</span></label></header>
             <div className="export-format-groups"><section><header><h3>字幕文件</h3><p>适合剪辑软件、平台上传与继续协作</p></header><div className="export-large-cards">{(['srt', 'vtt', 'ass', 'srt-bilingual'] as ExportFormat[]).map(format => <button key={format} disabled={!hasSegments || isProcessing} onClick={() => void doExport(format)}><i>TXT</i><span><strong>{format === 'srt-bilingual' ? '双语 SRT' : format.toUpperCase()}</strong><small>{format === 'ass' ? '保留完整字幕样式' : format === 'vtt' ? '网页与流媒体字幕' : '通用时间轴字幕'}</small></span><em>导出 ↗</em></button>)}</div></section><section><header><h3>带字幕视频</h3><p>直接获得可以发布的最终成片</p></header><div className="export-large-cards">{(['mp4', 'mkv'] as ExportFormat[]).map(format => <button key={format} disabled={!hasSegments || isProcessing} onClick={() => void doExport(format)}><i>▶</i><span><strong>{format.toUpperCase()}</strong><small>{format === 'mp4' ? '兼容社交平台与移动设备' : '高质量封装与多音轨'}</small></span><em>开始压制 →</em></button>)}</div></section><section><header><h3>项目包</h3><p>迁移字幕、历史、说话人、术语与项目设置</p></header><div className="export-large-cards"><button onClick={() => void exportProjectPackage(false)}><i>ZIP</i><span><strong>精简项目包</strong><small>不包含原始媒体，适合快速迁移</small></span><em>导出 ↗</em></button><button onClick={() => void exportProjectPackage(true)}><i>ZIP</i><span><strong>完整项目包</strong><small>包含视频与音频，文件可能很大</small></span><em>导出 ↗</em></button></div></section></div>
             {currentTask && <div className={`export-task-card ${currentTask.status}`}><div><strong>{currentTask.message || '导出任务'}</strong><small>{currentTask.status === 'success' ? '文件已准备完成' : '可离开此页面，任务会继续运行'}</small></div><progress max={100} value={currentTask.progress || 0}/><span>{Math.round(currentTask.progress || 0)}%</span></div>}
           </section>}

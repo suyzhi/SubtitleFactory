@@ -5,6 +5,12 @@ import { invoke } from '@tauri-apps/api/core';
 let BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000';
 let API_TOKEN = import.meta.env.VITE_API_TOKEN || '';
 let sessionInitialization: Promise<void> | null = null;
+export type DistributionChannel = 'direct' | 'app_store';
+let DISTRIBUTION_CHANNEL: DistributionChannel =
+  import.meta.env.VITE_DISTRIBUTION_CHANNEL === 'app_store' ? 'app_store' : 'direct';
+let YOUTUBE_ENABLED = DISTRIBUTION_CHANNEL !== 'app_store';
+let FILESYSTEM_AUTOMATION_ENABLED = DISTRIBUTION_CHANNEL !== 'app_store';
+let EXTERNAL_RUNTIME_PATHS_ENABLED = DISTRIBUTION_CHANNEL !== 'app_store';
 
 import type {
   Project, SubtitleSegment, TaskStatus,
@@ -42,6 +48,22 @@ export class BackendError extends Error {
   }
 }
 
+export function getDistributionChannel(): DistributionChannel {
+  return DISTRIBUTION_CHANNEL;
+}
+
+export function youtubeFeaturesEnabled(): boolean {
+  return YOUTUBE_ENABLED;
+}
+
+export function filesystemAutomationEnabled(): boolean {
+  return FILESYSTEM_AUTOMATION_ENABLED;
+}
+
+export function externalRuntimePathsEnabled(): boolean {
+  return EXTERNAL_RUNTIME_PATHS_ENABLED;
+}
+
 export function initializeBackendSession(): Promise<void> {
   if (sessionInitialization) return sessionInitialization;
   sessionInitialization = (async () => {
@@ -50,9 +72,20 @@ export function initializeBackendSession(): Promise<void> {
       if (import.meta.env.DEV) API_TOKEN = 'subtitle-factory-local-development';
       return;
     }
-    const session = await invoke<{ baseUrl: string; token: string }>('backend_session');
+    const session = await invoke<{
+      baseUrl: string;
+      token: string;
+      distributionChannel: DistributionChannel;
+      youtubeEnabled: boolean;
+      filesystemAutomationEnabled: boolean;
+      externalRuntimePathsEnabled: boolean;
+    }>('backend_session');
     BASE_URL = session.baseUrl;
     API_TOKEN = session.token;
+    DISTRIBUTION_CHANNEL = session.distributionChannel;
+    YOUTUBE_ENABLED = session.youtubeEnabled;
+    FILESYSTEM_AUTOMATION_ENABLED = session.filesystemAutomationEnabled;
+    EXTERNAL_RUNTIME_PATHS_ENABLED = session.externalRuntimePathsEnabled;
   })();
   return sessionInitialization;
 }

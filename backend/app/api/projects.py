@@ -12,6 +12,7 @@ import wave
 import threading
 import importlib.util
 import re
+from importlib import import_module
 from pathlib import Path
 from typing import Optional
 
@@ -33,10 +34,12 @@ from ..utils.config import (
 )
 from ..utils.task_manager import task_manager
 from ..security import signed_media_url
-from ..services.app_settings import get_app_settings
-from ..services.downloader import (
-    download_audio_source, download_video, get_video_info, normalize_youtube_url,
-    remove_managed_download_file,
+from ..services.app_settings import get_effective_app_settings as get_app_settings
+from ..services.distribution import (
+    distribution_capabilities,
+    is_external_model_reference,
+    require_external_runtime_paths,
+    require_youtube_feature,
 )
 from ..services.audio_extractor import extract_audio
 from ..services.audio_preview import generate_track_preview
@@ -100,6 +103,31 @@ _PLAYER_CHANNEL = re.compile(r"^[A-Za-z0-9_-]{8,80}$")
 VIDEO_EXTENSIONS = {".mp4", ".mkv", ".mov", ".webm", ".avi"}
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
 TRANSCRIPTION_LOCK = threading.Lock()
+
+
+def _download_service():
+    require_youtube_feature()
+    return import_module("..services." + "downloader", __package__)
+
+
+def download_audio_source(*args, **kwargs):
+    return _download_service().download_audio_source(*args, **kwargs)
+
+
+def download_video(*args, **kwargs):
+    return _download_service().download_video(*args, **kwargs)
+
+
+def get_video_info(*args, **kwargs):
+    return _download_service().get_video_info(*args, **kwargs)
+
+
+def normalize_youtube_url(*args, **kwargs):
+    return _download_service().normalize_youtube_url(*args, **kwargs)
+
+
+def remove_managed_download_file(*args, **kwargs):
+    return _download_service().remove_managed_download_file(*args, **kwargs)
 
 RUNTIME_LABELS = {
     "cpu": ("CPU", "faster-whisper / sherpa-onnx"),
@@ -217,6 +245,8 @@ def _runtime_options(model_id: str, imported: dict | None = None, model_ready: b
     return result
 
 def _select_runtime(model_id: str, requested: str | None, settings: dict, imported: dict | None = None) -> str:
+    if imported or is_external_model_reference(model_id):
+        require_external_runtime_paths()
     remembered=(settings.get("transcription_runtime_by_model") or {}).get(model_id)
     selected=requested or remembered
     model_ready=True
@@ -629,8 +659,11 @@ def transcription_models(project_id: Optional[str] = None, language: str = "auto
         },
     ]
     model_items = []
+    external_paths_enabled = distribution_capabilities().external_runtime_paths
     for definition in model_definitions:
         model_id = definition["id"]
+        if not external_paths_enabled and is_external_model_reference(model_id):
+            continue
         status = get_transcription_model_status(
             model_id,
             custom_model_path=settings.get("custom_model_path"),
@@ -666,7 +699,7 @@ def transcription_models(project_id: Optional[str] = None, language: str = "auto
             "runtimes": _runtime_options("custom", model_ready=bool(status.get("ready"))),
             "selected_runtime": (settings.get("transcription_runtime_by_model") or {}).get("custom"),
         })
-    for imported in get_imported():
+    for imported in get_imported() if external_paths_enabled else []:
         checked = validate_imported(imported["id"])
         model_items.append({"id": imported["id"], "name": imported["display_name"], "languages": ["*"],
                             "category_id": "local", "category_name": "本地与自定义",
@@ -689,6 +722,7 @@ def transcription_models(project_id: Optional[str] = None, language: str = "auto
 
 @router.post("/transcription/models/scan")
 def scan_local_models(request: ModelScanRequest):
+    require_external_runtime_paths()
     try:
         models=scan_models(request.root_path)
         return {"models":models,"candidates":models}
@@ -697,27 +731,34 @@ def scan_local_models(request: ModelScanRequest):
 
 @router.post("/transcription/models/import")
 def import_local_model(request: ModelImportRequest):
+    require_external_runtime_paths()
     try: return {"model": register_model(request.path, request.cli_path, request.display_name)}
     except ValueError as exc: raise HTTPException(400, str(exc)) from exc
 
 
 @router.get("/transcription/models/imported")
-def imported_models(): return {"models": get_imported()}
+def imported_models():
+    require_external_runtime_paths()
+    return {"models": get_imported()}
 
 
 @router.post("/transcription/models/imported/{model_id:path}/validate")
 def validate_imported_model(model_id: str):
+    require_external_runtime_paths()
     try: return validate_imported(model_id)
     except ValueError as exc: raise HTTPException(404, str(exc)) from exc
 
 
 @router.delete("/transcription/models/imported/{model_id:path}")
 def delete_imported_model(model_id: str):
+    require_external_runtime_paths()
     remove_imported(model_id); return {"message": "已从字幕工厂移除登记，源模型未被删除"}
 
 
 @router.get("/transcription/models/{model_id}/validate")
 def validate_transcription_model(model_id: str):
+    if is_external_model_reference(model_id):
+        require_external_runtime_paths()
     try:
         settings = get_app_settings()
     except Exception:
@@ -789,6 +830,8 @@ def _do_prepare_transcription_model(
 
 @router.post("/transcription/models/{model_id}/prepare")
 def prepare_transcription_model(model_id: str, request: ModelPrepareRequest):
+    if is_external_model_reference(model_id):
+        require_external_runtime_paths()
     if (
         model_id not in PARAKEET_MODEL_IDS
         and model_id not in WHISPER_CATALOG_BY_ID
@@ -905,6 +948,10 @@ def list_projects(
     page = max(1, int(page)); page_size = max(1, min(200, int(page_size)))
     conditions = [f"p.deleted_at IS {'NOT ' if deleted else ''}NULL"]
     values: list = []
+    if not distribution_capabilities().youtube:
+        if source_type == "youtube":
+            require_youtube_feature()
+        conditions.append("p.source_type<>'youtube'")
     if not deleted and not include_playlist_items:
         conditions.append(
             "NOT EXISTS (SELECT 1 FROM batch_items bi JOIN batches b ON b.id=bi.batch_id "
@@ -958,8 +1005,13 @@ def empty_project_trash(confirm: bool = Query(False)):
             detail={"code": "CONFIRMATION_REQUIRED", "message": "清空回收站需要显式确认"},
         )
     db = get_db()
+    project_scope = (
+        " AND source_type<>'youtube'"
+        if not distribution_capabilities().youtube else ""
+    )
     rows = db.execute(
-        "SELECT * FROM projects WHERE deleted_at IS NOT NULL ORDER BY deleted_at"
+        "SELECT * FROM projects WHERE deleted_at IS NOT NULL"
+        f"{project_scope} ORDER BY deleted_at"
     ).fetchall()
     db.close()
 
@@ -1003,7 +1055,9 @@ def empty_project_trash(confirm: bool = Query(False)):
             db.execute("DELETE FROM segment_revisions WHERE project_id=?", (project_id,))
             db.execute("DELETE FROM segments WHERE project_id=?", (project_id,))
             db.execute("DELETE FROM tasks WHERE project_id=?", (project_id,))
-        db.execute("DELETE FROM projects WHERE deleted_at IS NOT NULL")
+        db.execute(
+            "DELETE FROM projects WHERE deleted_at IS NOT NULL" + project_scope
+        )
         db.commit()
     except Exception:
         db.rollback()
@@ -1020,6 +1074,8 @@ def empty_project_trash(confirm: bool = Query(False)):
 @router.post("/projects", status_code=201)
 def create_project(req: ProjectCreate):
     """创建新项目"""
+    if req.source_type == "youtube":
+        require_youtube_feature()
     init_db()
     project_id = str(uuid.uuid4())
     now = time.strftime("%Y-%m-%d %H:%M:%S")
@@ -1223,6 +1279,7 @@ def update_project_media_mode(project_id: str, update: ProjectMediaModeUpdate):
     row = _project_row(project_id)
     if not row:
         raise HTTPException(404, "项目不存在")
+    require_youtube_feature()
     if row["source_type"] != "youtube":
         raise HTTPException(400, "本地导入项目只能使用本地模式")
     if update.media_mode == row["media_mode"]:
@@ -1278,6 +1335,7 @@ def materialize_project_video(
     project_id: str,
     reason: str = Query("manual", pattern="^(manual|player_fallback|offline)$"),
 ):
+    require_youtube_feature()
     row = _project_row(project_id)
     if not row:
         raise HTTPException(404, "项目不存在")
@@ -1310,6 +1368,7 @@ def materialize_project_video(
 @router.post("/projects/{project_id}/download")
 def start_download(project_id: str, url: str = Form(...)):
     """开始下载 YouTube 视频（后台任务）"""
+    require_youtube_feature()
     db = get_db()
     row = db.execute("SELECT * FROM projects WHERE id = ?", (project_id,)).fetchone()
     if not row:
@@ -1672,6 +1731,7 @@ def start_extract_audio(project_id: str):
 
 @router.post("/projects/{project_id}/prepare-audio")
 def start_prepare_audio(project_id: str):
+    require_youtube_feature()
     row = _project_row(project_id)
     if not row:
         raise HTTPException(404, "项目不存在")
@@ -1827,6 +1887,8 @@ def start_workflow(project_id: str, request: WorkflowRequest):
     db.close()
     if not row:
         raise HTTPException(404, "项目不存在")
+    if row["source_type"] == "youtube":
+        require_youtube_feature()
     source_url = request.source_url or row["source_url"]
     video_ready = bool(row["video_path"] and os.path.isfile(row["video_path"]))
     audio_ready = _audio_preflight(row["audio_path"])["ok"]
@@ -2237,6 +2299,11 @@ def export_subtitles(project_id: str, req: ExportRequest):
         export_srt(segments, out, bilingual=True, primary_lang=req.primary_language)
         media_type = "text/plain"
     elif fmt in {"mp4", "mkv"}:
+        if (
+            row["source_type"] == "youtube"
+            and (not row["video_path"] or not os.path.isfile(row["video_path"]))
+        ):
+            require_youtube_feature()
         if _active_task_conflict(project_id):
             raise HTTPException(
                 409,
@@ -2290,6 +2357,7 @@ def download_export(project_id: str, fmt: str = Query("srt", pattern="^(srt|vtt|
 
 @router.get("/player/youtube/{video_id}/session")
 def youtube_player_session(video_id: str, channel: str = Query(...)):
+    require_youtube_feature()
     if not _YOUTUBE_PLAYER_ID.fullmatch(video_id):
         raise HTTPException(400, "无效的 YouTube 视频 ID")
     if not _PLAYER_CHANNEL.fullmatch(channel):
@@ -2302,6 +2370,7 @@ def youtube_player_session(video_id: str, channel: str = Query(...)):
 @router.get("/player/youtube/{video_id}", response_class=HTMLResponse)
 def youtube_player_bridge(video_id: str, channel: str = Query(...)):
     """Serve a localhost-origin YouTube IFrame API bridge for the Tauri UI."""
+    require_youtube_feature()
     if not _YOUTUBE_PLAYER_ID.fullmatch(video_id):
         raise HTTPException(400, "无效的 YouTube 视频 ID")
     if not _PLAYER_CHANNEL.fullmatch(channel):

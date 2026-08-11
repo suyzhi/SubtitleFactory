@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from ..models.database import get_db
+from .distribution import distribution_capabilities
 
 
 def rebuild_search_index() -> dict[str, int]:
@@ -104,6 +105,9 @@ def search_segments(
         "JOIN projects p ON p.id=s.project_id",
     ]
     where = ["p.deleted_at IS NULL", "COALESCE(s.is_draft,0)=0"]
+    youtube_enabled = distribution_capabilities().youtube
+    if not youtube_enabled:
+        where.append("p.source_type<>'youtube'")
     values: list[Any] = []
     use_fts = len(query) >= 3
     if use_fts:
@@ -170,13 +174,15 @@ def search_segments(
             row.pop("raw_text", None)
             row.pop("clean_text", None)
             row.pop("translated_text", None)
+        project_scope = "" if youtube_enabled else " AND source_type<>'youtube'"
+        speaker_scope = "" if youtube_enabled else " AND p.source_type<>'youtube'"
         facets = {
             "projects": [
                 dict(row)
                 for row in db.execute(
                     """SELECT id,title,group_name,language source_language,target_language
-                         FROM projects WHERE deleted_at IS NULL
-                        ORDER BY updated_at DESC"""
+                         FROM projects WHERE deleted_at IS NULL"""
+                    + project_scope + " ORDER BY updated_at DESC"
                 ).fetchall()
             ],
             "speakers": [
@@ -184,15 +190,16 @@ def search_segments(
                 for row in db.execute(
                     """SELECT sp.id,sp.name,sp.project_id,p.title project_title
                          FROM speakers sp JOIN projects p ON p.id=sp.project_id
-                        WHERE p.deleted_at IS NULL ORDER BY sp.name"""
+                        WHERE p.deleted_at IS NULL"""
+                    + speaker_scope + " ORDER BY sp.name"
                 ).fetchall()
             ],
             "groups": [
                 row[0]
                 for row in db.execute(
                     """SELECT DISTINCT group_name FROM projects
-                        WHERE deleted_at IS NULL AND COALESCE(group_name,'')<>''
-                        ORDER BY group_name"""
+                        WHERE deleted_at IS NULL AND COALESCE(group_name,'')<>''"""
+                    + project_scope + " ORDER BY group_name"
                 ).fetchall()
             ],
         }

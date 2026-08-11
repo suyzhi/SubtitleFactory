@@ -20,6 +20,7 @@ from ..services.playlist_batches import (
     preview_playlist, resume_batch, retry_failed,
     sync_playlist_batch,
 )
+from ..services.distribution import require_filesystem_automation, require_youtube_feature
 
 
 router = APIRouter(prefix="/api")
@@ -46,6 +47,7 @@ class PlaylistStageRun(BaseModel):
 
 
 def _playlist_call(function, *args):
+    require_youtube_feature()
     try:
         return function(*args)
     except PlaylistBatchError as exc:
@@ -75,7 +77,9 @@ def create_playlist_batch(request: PlaylistBatchCreate):
 @router.get("/batches")
 def list_batches(kind: str = ""):
     if kind == "youtube_playlist":
+        require_youtube_feature()
         return list_playlist_batches()
+    require_filesystem_automation()
     db = get_db()
     try:
         rows = db.execute("SELECT * FROM batches ORDER BY updated_at DESC").fetchall()
@@ -86,6 +90,7 @@ def list_batches(kind: str = ""):
 
 @router.post("/batches", status_code=201)
 def create_batch(request: BatchCreate):
+    require_filesystem_automation()
     sources = [Path(value).expanduser().resolve() for value in request.paths]
     invalid = [str(path) for path in sources if not path.is_file() or path.suffix.lower() not in VIDEO_EXTENSIONS]
     if invalid:
@@ -123,8 +128,10 @@ def get_batch(batch_id: str):
         batch = db.execute("SELECT * FROM batches WHERE id=?", (batch_id,)).fetchone()
         if not batch: raise HTTPException(404, "批次不存在")
         if "kind" in batch.keys() and batch["kind"] == "youtube_playlist":
+            require_youtube_feature()
             db.close()
             return _playlist_call(get_batch_detail, batch_id)
+        require_filesystem_automation()
         items = db.execute("SELECT * FROM batch_items WHERE batch_id=? ORDER BY created_at", (batch_id,)).fetchall()
         return {"batch": {**dict(batch), "configuration": json.loads(batch["configuration_json"])}, "items": [dict(row) for row in items]}
     finally:
@@ -139,6 +146,7 @@ def delete_playlist_batch(
     terminate: bool = Query(False),
 ):
     """Permanently remove a playlist batch, its child projects and managed files."""
+    require_youtube_feature()
     if not confirm:
         raise HTTPException(
             400,
@@ -255,7 +263,8 @@ def cancel_pending_batch_items(batch_id: str):
     kind_row = db.execute("SELECT kind FROM batches WHERE id=?", (batch_id,)).fetchone()
     db.close()
     if kind_row and kind_row["kind"] == "youtube_playlist":
-        return cancel_pending_batch(batch_id)
+        return _playlist_call(cancel_pending_batch, batch_id)
+    require_filesystem_automation()
     db = get_db()
     try:
         cursor = db.execute("UPDATE batch_items SET status='cancelled',updated_at=datetime('now','localtime') WHERE batch_id=? AND status IN ('pending','ready')", (batch_id,)); db.execute("UPDATE batches SET status='cancelled',updated_at=datetime('now','localtime') WHERE id=?", (batch_id,)); db.commit()

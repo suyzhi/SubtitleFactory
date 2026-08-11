@@ -15,9 +15,7 @@ import sys
 from importlib import import_module
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Iterable, Sequence
-
-import yt_dlp
+from typing import Any, Iterable, Sequence
 
 from ..utils.config import (
     BASE_DIR,
@@ -25,6 +23,14 @@ from ..utils.config import (
     environment_path_overrides_enabled,
     is_frozen_app,
 )
+
+
+def _yt_dlp_module() -> Any:
+    """Load the direct-distribution dependency only when YouTube is enabled."""
+    from .distribution import require_youtube_feature
+
+    require_youtube_feature()
+    return import_module("yt" + "_dlp")
 
 
 @dataclass(frozen=True)
@@ -150,9 +156,15 @@ def validate_runtime_executable(
 
 def _bundled_candidates(name: str) -> Iterable[tuple[Path, str]]:
     env_name = f"SUBTITLE_FACTORY_BUNDLED_{name.upper().replace('-', '_')}"
-    injected = _candidate_path(os.getenv(env_name), name)
-    if injected:
-        yield injected, "bundled"
+    from .distribution import distribution_capabilities
+
+    # The packaged launcher provides these variables itself. A standalone
+    # App Store sidecar must not let ambient process state relabel an arbitrary
+    # external executable as bundled; its relative bundle roots are sufficient.
+    if distribution_capabilities().external_runtime_paths:
+        injected = _candidate_path(os.getenv(env_name), name)
+        if injected:
+            yield injected, "bundled"
 
     roots: list[Path] = []
     if is_frozen_app():
@@ -184,16 +196,19 @@ def _resolve_executable(
     version_args: Sequence[str],
 ) -> RuntimeExecutable | None:
     candidates: list[tuple[Path, str]] = list(_bundled_candidates(name))
-    custom = _candidate_path(user_path, name)
-    if custom:
-        candidates.append((custom, "user"))
-    if environment_path_overrides_enabled():
-        environment = _candidate_path(os.getenv(environment_variable), name)
-        if environment:
-            candidates.append((environment, "environment"))
-    system = shutil.which(name)
-    if system:
-        candidates.append((Path(system).resolve(), "path"))
+    from .distribution import distribution_capabilities
+
+    if distribution_capabilities().external_runtime_paths:
+        custom = _candidate_path(user_path, name)
+        if custom:
+            candidates.append((custom, "user"))
+        if environment_path_overrides_enabled():
+            environment = _candidate_path(os.getenv(environment_variable), name)
+            if environment:
+                candidates.append((environment, "environment"))
+        system = shutil.which(name)
+        if system:
+            candidates.append((Path(system).resolve(), "path"))
 
     seen: set[Path] = set()
     for path, source in candidates:
@@ -250,7 +265,7 @@ def resolve_deno_path(
 def _ejs_status() -> dict:
     """Report whether yt-dlp's EJS challenge implementation is importable."""
     try:
-        module = import_module("yt_dlp.extractor.youtube.jsc")
+        module = import_module("yt" + "_dlp.extractor.youtube.jsc")
     except Exception as exc:
         return {
             "available": False,
@@ -261,7 +276,7 @@ def _ejs_status() -> dict:
     return {
         "available": bool(module),
         "source": "yt_dlp_python_package",
-        "version": getattr(getattr(yt_dlp, "version", None), "__version__", ""),
+        "version": getattr(getattr(_yt_dlp_module(), "version", None), "__version__", ""),
         "error": "",
     }
 
@@ -296,7 +311,7 @@ def get_download_runtime_status(
     deno = resolve_deno_path(None)
     cli = resolve_yt_dlp_path(user_yt_dlp_path)
     ejs = _ejs_status()
-    version = getattr(getattr(yt_dlp, "version", None), "__version__", "")
+    version = getattr(getattr(_yt_dlp_module(), "version", None), "__version__", "")
     yt_dlp_status = {
         "available": bool(version),
         "source": "python_package",

@@ -7,6 +7,7 @@ import time
 from typing import Any, Mapping
 
 from ..models.database import get_db
+from .distribution import distribution_capabilities, is_external_model_reference
 
 
 APP_SETTINGS_DEFAULTS: dict[str, Any] = {
@@ -33,6 +34,11 @@ APP_SETTINGS_DEFAULTS: dict[str, Any] = {
     "translate_provider_id": "deepseek",
     "content_provider_id": "deepseek",
     "transcription_runtime_by_model": {},
+}
+
+_EXTERNAL_PATH_FIELDS = {
+    "custom_model_path", "coreml_model_path", "coreml_cli_path",
+    "ffmpeg_path", "yt_dlp_path", "download_directory",
 }
 
 
@@ -65,13 +71,64 @@ def get_app_settings() -> dict[str, Any]:
     return settings
 
 
+def effective_app_settings(settings: Mapping[str, Any]) -> dict[str, Any]:
+    """Project persisted preferences onto capabilities of this distribution."""
+    effective = dict(settings)
+    if distribution_capabilities().external_runtime_paths:
+        return effective
+    for field in _EXTERNAL_PATH_FIELDS:
+        effective[field] = None
+    if is_external_model_reference(effective.get("default_model")):
+        effective["default_model"] = "auto"
+    runtimes = effective.get("transcription_runtime_by_model")
+    if isinstance(runtimes, dict):
+        effective["transcription_runtime_by_model"] = {
+            model_id: runtime
+            for model_id, runtime in runtimes.items()
+            if not is_external_model_reference(model_id)
+            and runtime != "external_coreml"
+        }
+    return effective
+
+
+def get_effective_app_settings() -> dict[str, Any]:
+    return effective_app_settings(get_app_settings())
+
+
 def save_app_settings(updates: Mapping[str, Any]) -> dict[str, Any]:
     """Merge and persist already-validated updates."""
     unknown = set(updates) - set(APP_SETTINGS_DEFAULTS)
     if unknown:
         raise ValueError(f"不支持的设置字段: {', '.join(sorted(unknown))}")
     settings = get_app_settings()
-    settings.update(updates)
+    effective_updates = dict(updates)
+    if not distribution_capabilities().external_runtime_paths:
+        for field in _EXTERNAL_PATH_FIELDS:
+            effective_updates.pop(field, None)
+        if is_external_model_reference(effective_updates.get("default_model")):
+            effective_updates.pop("default_model", None)
+        requested_runtimes = effective_updates.get("transcription_runtime_by_model")
+        if isinstance(requested_runtimes, dict):
+            existing_runtimes = settings.get("transcription_runtime_by_model")
+            preserved = {
+                model_id: runtime
+                for model_id, runtime in (
+                    existing_runtimes.items()
+                    if isinstance(existing_runtimes, dict) else []
+                )
+                if is_external_model_reference(model_id)
+                or runtime == "external_coreml"
+            }
+            allowed = {
+                model_id: runtime
+                for model_id, runtime in requested_runtimes.items()
+                if not is_external_model_reference(model_id)
+                and runtime != "external_coreml"
+            }
+            effective_updates["transcription_runtime_by_model"] = {
+                **preserved, **allowed,
+            }
+    settings.update(effective_updates)
     now = time.strftime("%Y-%m-%d %H:%M:%S")
     db = get_db()
     try:

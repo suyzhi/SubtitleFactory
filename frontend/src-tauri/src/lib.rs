@@ -15,6 +15,8 @@ use uuid::Uuid;
 
 const PROFESSIONAL_UI_MARKER: &str = "subtitle-factory-ui:professional-v2";
 const LIBRARY_WORKSPACE_UI_MARKER: &str = "subtitle-factory-ui:library-workspace-v2";
+const DIRECT_DISTRIBUTION_CHANNEL: &str = "direct";
+const APP_STORE_DISTRIBUTION_CHANNEL: &str = "app_store";
 
 #[cfg(unix)]
 use std::os::unix::process::CommandExt;
@@ -31,6 +33,17 @@ struct BackendSession {
     base_url: String,
     token: String,
     port: u16,
+    distribution_channel: String,
+    youtube_enabled: bool,
+    filesystem_automation_enabled: bool,
+    external_runtime_paths_enabled: bool,
+}
+
+fn distribution_channel() -> &'static str {
+    match option_env!("SUBTITLE_FACTORY_DISTRIBUTION_CHANNEL") {
+        Some(APP_STORE_DISTRIBUTION_CHANNEL) => APP_STORE_DISTRIBUTION_CHANNEL,
+        _ => DIRECT_DISTRIBUTION_CHANNEL,
+    }
 }
 
 impl BackendProcess {
@@ -64,10 +77,16 @@ fn create_backend_session() -> Result<BackendSession, String> {
         .map_err(|error| error.to_string())?
         .port();
     drop(listener);
+    let channel = distribution_channel();
+    let app_store = channel == APP_STORE_DISTRIBUTION_CHANNEL;
     Ok(BackendSession {
         base_url: format!("http://127.0.0.1:{port}"),
         token: format!("{}{}", Uuid::new_v4().simple(), Uuid::new_v4().simple()),
         port,
+        distribution_channel: channel.to_string(),
+        youtube_enabled: !app_store,
+        filesystem_automation_enabled: !app_store,
+        external_runtime_paths_enabled: !app_store,
     })
 }
 
@@ -126,12 +145,15 @@ fn start_backend(app: &tauri::App, session: &BackendSession) -> Result<BackendPr
         .path()
         .app_data_dir()
         .map_err(|error| error.to_string())?;
-    // Keep the normal packaged location by default, but honor an explicit
-    // override for isolated QA, portable deployments, and support diagnostics.
-    // The backend already validates and creates the selected directory.
-    let backend_data = std::env::var_os("SUBTITLE_FACTORY_DATA_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| app_data.join("data"));
+    // App Store builds always use their sandbox container. Direct builds retain
+    // the explicit override used by isolated QA and portable support workflows.
+    let backend_data = if session.distribution_channel == APP_STORE_DISTRIBUTION_CHANNEL {
+        app_data.join("data")
+    } else {
+        std::env::var_os("SUBTITLE_FACTORY_DATA_DIR")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| app_data.join("data"))
+    };
     fs::create_dir_all(&app_data).map_err(|error| error.to_string())?;
     let pid_file = app_data.join("backend.pid");
     stop_stale_process_group(&pid_file);
@@ -189,14 +211,20 @@ fn start_backend(app: &tauri::App, session: &BackendSession) -> Result<BackendPr
         let ffmpeg = runtime_dir.join("bin/ffmpeg");
         let ffprobe = runtime_dir.join("bin/ffprobe");
         let deno = runtime_dir.join("bin/deno");
-        if !ffmpeg.is_file() || !ffprobe.is_file() || !deno.is_file() {
-            return Err("App 内置 FFmpeg/FFprobe/Deno 缺失，发布包不完整".into());
+        if !ffmpeg.is_file() || !ffprobe.is_file() || (session.youtube_enabled && !deno.is_file()) {
+            return Err(if session.youtube_enabled {
+                "App 内置 FFmpeg/FFprobe/Deno 缺失，发布包不完整".into()
+            } else {
+                "App 内置 FFmpeg/FFprobe 缺失，发布包不完整".into()
+            });
         }
         command
             .env("SUBTITLE_FACTORY_BUNDLED_FFMPEG", &ffmpeg)
             .env("SUBTITLE_FACTORY_BUNDLED_FFPROBE", &ffprobe)
-            .env("SUBTITLE_FACTORY_BUNDLED_DENO", &deno)
             .env("SUBTITLE_FACTORY_RESOURCE_DIR", runtime_dir);
+        if session.youtube_enabled {
+            command.env("SUBTITLE_FACTORY_BUNDLED_DENO", &deno);
+        }
     }
 
     let log_path = app_data.join("backend.log");
@@ -211,6 +239,10 @@ fn start_backend(app: &tauri::App, session: &BackendSession) -> Result<BackendPr
     command
         .env("SUBTITLE_FACTORY_DATA_DIR", backend_data)
         .env("SUBTITLE_FACTORY_APP_VERSION", env!("CARGO_PKG_VERSION"))
+        .env(
+            "SUBTITLE_FACTORY_DISTRIBUTION_CHANNEL",
+            &session.distribution_channel,
+        )
         .env("SUBTITLE_FACTORY_PORT", session.port.to_string())
         .env("SUBTITLE_FACTORY_API_TOKEN", &session.token)
         .env(

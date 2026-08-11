@@ -106,7 +106,7 @@ def burn_subtitles(task_id: str, video_path: str, subtitle_path: str,
 
     if ffmpeg_path is None:
         try:
-            from .app_settings import get_app_settings
+            from .app_settings import get_effective_app_settings as get_app_settings
             ffmpeg_path = get_app_settings().get("ffmpeg_path")
         except Exception:
             # Database initialization is intentionally not a prerequisite for

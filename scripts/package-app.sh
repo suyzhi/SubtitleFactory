@@ -7,6 +7,11 @@ UI_MARKER="subtitle-factory-ui:professional-v2"
 UI_LAYOUT_MARKER="subtitle-factory-ui:library-workspace-v2"
 OLD_UI_MARKER="ai-settings-dialog"
 
+# A direct release must not inherit an App Store channel from the caller's
+# shell; both the Rust launcher and initial WebView render use these values.
+export SUBTITLE_FACTORY_DISTRIBUTION_CHANNEL="direct"
+export VITE_DISTRIBUTION_CHANNEL="direct"
+
 cleanup_build_outputs() {
   for generated_dir in \
     "$ROOT/frontend/dist" \

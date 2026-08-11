@@ -9,7 +9,7 @@ import threading
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi import HTTPException, Request
 from fastapi.exception_handlers import http_exception_handler
 from fastapi.exceptions import RequestValidationError
@@ -27,6 +27,11 @@ from .services.secret_store import migrate_database_secrets
 from .services.backups import scheduled_backup
 from .services.watch_runtime import resume_interrupted_workflows, watch_loop
 from .services.playlist_batches import recover_playlist_batches
+from .services.distribution import (
+    DistributionPolicyError,
+    distribution_capabilities,
+    require_project_distribution,
+)
 from .version import VERSION
 
 # ── 日志配置 ──
@@ -61,17 +66,28 @@ except Exception:
 @asynccontextmanager
 async def lifespan(application: FastAPI):
     resume_interrupted_workflows(interrupted_tasks)
-    recover_playlist_batches(interrupted_tasks)
-    stop_event = threading.Event()
-    worker = threading.Thread(target=watch_loop, args=(stop_event,), name="watch-folders", daemon=True)
-    worker.start()
-    application.state.watch_stop_event = stop_event
-    application.state.watch_worker = worker
+    capabilities = distribution_capabilities()
+    if capabilities.youtube:
+        recover_playlist_batches(interrupted_tasks)
+    stop_event = None
+    worker = None
+    if capabilities.filesystem_automation:
+        stop_event = threading.Event()
+        worker = threading.Thread(
+            target=watch_loop,
+            args=(stop_event,),
+            name="watch-folders",
+            daemon=True,
+        )
+        worker.start()
+        application.state.watch_stop_event = stop_event
+        application.state.watch_worker = worker
     try:
         yield
     finally:
-        stop_event.set()
-        worker.join(timeout=2)
+        if stop_event is not None and worker is not None:
+            stop_event.set()
+            worker.join(timeout=2)
 
 
 # ── 创建 FastAPI 应用 ──
@@ -134,6 +150,20 @@ async def structured_validation_error(request: Request, exc: RequestValidationEr
     }})
 
 
+@app.exception_handler(DistributionPolicyError)
+async def distribution_policy_error(
+    request: Request, exc: DistributionPolicyError,
+):
+    return JSONResponse(status_code=403, content={"error": {
+        "code": exc.error_code,
+        "message": str(exc),
+        "suggestion": exc.suggestion,
+        "details": {"feature": exc.feature},
+        "recoverable": exc.recoverable,
+        "available_actions": exc.available_actions,
+    }})
+
+
 @app.exception_handler(Exception)
 async def structured_unexpected_error(request: Request, exc: Exception):
     logger.exception("未处理的 API 错误: %s", request.url.path, exc_info=exc)
@@ -146,23 +176,24 @@ async def structured_unexpected_error(request: Request, exc: Exception):
     raise exc
 
 # ── 注册路由 ──
-app.include_router(projects.router)
-app.include_router(tasks.router)
+project_distribution_dependency = [Depends(require_project_distribution)]
+app.include_router(projects.router, dependencies=project_distribution_dependency)
+app.include_router(tasks.router, dependencies=project_distribution_dependency)
 app.include_router(settings.router)
-app.include_router(editor.router)
-app.include_router(media.router)
-app.include_router(quality.router)
+app.include_router(editor.router, dependencies=project_distribution_dependency)
+app.include_router(media.router, dependencies=project_distribution_dependency)
+app.include_router(quality.router, dependencies=project_distribution_dependency)
 app.include_router(terminology.router)
 app.include_router(maintenance.router)
-app.include_router(packages.router)
-app.include_router(templates.router)
+app.include_router(packages.router, dependencies=project_distribution_dependency)
+app.include_router(templates.router, dependencies=project_distribution_dependency)
 app.include_router(watch_folders.router)
 app.include_router(batches.router)
-app.include_router(speakers.router)
-app.include_router(ocr.router)
-app.include_router(search.router)
-app.include_router(content.router)
-app.include_router(clips.router)
+app.include_router(speakers.router, dependencies=project_distribution_dependency)
+app.include_router(ocr.router, dependencies=project_distribution_dependency)
+app.include_router(search.router, dependencies=project_distribution_dependency)
+app.include_router(content.router, dependencies=project_distribution_dependency)
+app.include_router(clips.router, dependencies=project_distribution_dependency)
 
 
 # ── 根路径 / 健康检查 ──
@@ -172,6 +203,7 @@ def root():
         "name": "字幕工厂 API",
         "version": VERSION,
         "docs": "/docs",
+        "distribution": distribution_capabilities().as_dict(),
     }
 
 @app.get("/api/health")
@@ -181,6 +213,7 @@ def health_check():
         "status": "ok",
         "service": "subtitle-factory-backend",
         "version": VERSION,
+        "distribution": distribution_capabilities().as_dict(),
         "runtime": settings.get_runtime_health(),
     }
 

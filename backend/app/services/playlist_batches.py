@@ -8,6 +8,7 @@ import shutil
 import threading
 import time
 import uuid
+from importlib import import_module
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlparse
@@ -15,17 +16,12 @@ from urllib.parse import parse_qs, urlparse
 from ..models.database import get_db, project_to_dict
 from ..utils.config import PROJECTS_DIR
 from ..utils.task_manager import TaskCancelled, task_manager
-from .app_settings import get_app_settings
+from .app_settings import get_effective_app_settings as get_app_settings
 from .ai_settings import get_ai_settings
 from .ai_providers import assigned_provider
 from .audio_extractor import extract_audio
-from .downloader import (
-    DownloadServiceError,
-    download_audio_source,
-    download_video,
-    extract_youtube_info,
-    remove_managed_download_file,
-)
+from .download_errors import DownloadServiceError
+from .distribution import require_youtube_feature
 from .subtitle_cleaner import clean_subtitles
 from .subtitle_translator import translate_subtitles
 from .transcriber import transcribe_audio
@@ -34,6 +30,27 @@ from .transcriber import transcribe_audio
 PLAYLIST_KIND = "youtube_playlist"
 STAGE_ORDER = ("download", "extract_audio", "transcribe", "clean", "translate")
 TERMINAL_STAGE_STATES = {"success", "partial", "failed", "cancelled", "skipped"}
+
+
+def _download_service():
+    require_youtube_feature()
+    return import_module("." + "downloader", __package__)
+
+
+def download_audio_source(*args, **kwargs):
+    return _download_service().download_audio_source(*args, **kwargs)
+
+
+def download_video(*args, **kwargs):
+    return _download_service().download_video(*args, **kwargs)
+
+
+def extract_youtube_info(*args, **kwargs):
+    return _download_service().extract_youtube_info(*args, **kwargs)
+
+
+def remove_managed_download_file(*args, **kwargs):
+    return _download_service().remove_managed_download_file(*args, **kwargs)
 
 
 class PlaylistBatchError(RuntimeError):

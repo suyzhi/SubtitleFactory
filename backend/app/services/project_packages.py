@@ -13,6 +13,7 @@ from pathlib import Path, PurePosixPath
 
 from ..models.database import get_db
 from ..utils.config import EXPORTS_DIR, PROJECTS_DIR
+from .distribution import distribution_capabilities
 
 
 PACKAGE_VERSION = 2
@@ -163,6 +164,12 @@ def import_project_package(path: str) -> dict:
     with zipfile.ZipFile(path) as archive:
         manifest = _validate_archive(archive)
         project = json.loads(archive.read("data/project.json"))
+        if not distribution_capabilities().youtube:
+            # Interchange remains useful, but an App Store import must become
+            # a local/relinkable project and must not retain a web source URL.
+            project["source_type"] = "local"
+            project["source_url"] = None
+            project["media_mode"] = "local"
         segments = json.loads(archive.read("data/segments.json"))
         speakers = json.loads(archive.read("data/speakers.json"))
         history = json.loads(archive.read("data/history.json"))

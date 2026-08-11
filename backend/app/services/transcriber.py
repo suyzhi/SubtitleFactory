@@ -340,7 +340,7 @@ def transcribe_audio(task_id: str, audio_path: str, project_id: str, language: s
     task_manager.add_log(task_id, "info", "语音转写", "正在准备转写模型...")
 
     try:
-        from .app_settings import get_app_settings
+        from .app_settings import get_effective_app_settings as get_app_settings
         app_settings = get_app_settings()
     except Exception:
         app_settings = {}

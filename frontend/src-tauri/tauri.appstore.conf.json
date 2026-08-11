@@ -1,0 +1,14 @@
+{
+  "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
+  "bundle": {
+    "targets": ["app"],
+    "category": "Video",
+    "macOS": {
+      "entitlements": "./Entitlements.appstore.plist",
+      "files": {
+        "embedded.provisionprofile": "./embedded.provisionprofile"
+      },
+      "signingIdentity": null
+    }
+  }
+}

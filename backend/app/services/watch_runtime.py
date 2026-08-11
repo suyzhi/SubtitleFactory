@@ -60,8 +60,10 @@ def watch_loop(stop_event: threading.Event, interval_seconds: float = 15.0) -> N
 
 def resume_interrupted_workflows(interrupted: list[dict]) -> int:
     from ..api.projects import _do_workflow
+    from ..services.distribution import distribution_capabilities
     from ..utils.task_manager import task_manager
 
+    youtube_enabled = distribution_capabilities().youtube
     resumed = 0
     for original in interrupted:
         if original.get("type") != "workflow":
@@ -73,9 +75,14 @@ def resume_interrupted_workflows(interrupted: list[dict]) -> int:
             if not all(payload.get(key) for key in required):
                 continue
             db = get_db()
-            exists = db.execute("SELECT 1 FROM projects WHERE id=? AND deleted_at IS NULL", (payload["project_id"],)).fetchone()
+            exists = db.execute(
+                "SELECT source_type FROM projects WHERE id=? AND deleted_at IS NULL",
+                (payload["project_id"],),
+            ).fetchone()
             db.close()
             if not exists:
+                continue
+            if exists["source_type"] == "youtube" and not youtube_enabled:
                 continue
             task_id = task_manager.create_task(payload["project_id"], "workflow")
             task_manager.update_task(task_id, parent_task_id=original["id"], details={

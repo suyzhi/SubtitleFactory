@@ -6,6 +6,7 @@ import re
 import shutil
 import subprocess
 import time
+from importlib import import_module
 from pathlib import Path
 from typing import Any
 
@@ -16,7 +17,17 @@ from ..models.schemas import (
     AIConnectionTest, AISettingsUpdate, AIProviderUpdate, AIAssignmentsUpdate,
     AppSettingsUpdate, PathValidationRequest,
 )
-from ..services.app_settings import get_app_settings, save_app_settings
+from ..services.app_settings import (
+    effective_app_settings,
+    get_app_settings,
+    get_effective_app_settings,
+    save_app_settings,
+)
+from ..services.distribution import (
+    distribution_capabilities,
+    is_external_model_reference,
+    require_external_runtime_paths,
+)
 from ..services.local_models import get_imported
 from ..services.sherpa_catalog import MANAGED_SHERPA_BY_ID
 from ..services.model_catalog import WHISPER_CATALOG_BY_ID
@@ -272,10 +283,13 @@ def _is_registered_model(model_id: Any) -> bool:
 
 
 def read_validated_app_settings(*, persist_repairs: bool = True) -> tuple[dict, list[dict]]:
-    settings = get_app_settings()
+    settings = get_effective_app_settings()
     repaired, warnings = _repair_invalid_settings(settings)
     if persist_repairs and repaired != settings:
-        save_app_settings(repaired)
+        save_app_settings({
+            field: value for field, value in repaired.items()
+            if settings.get(field) != value
+        })
     return repaired, warnings
 
 
@@ -301,7 +315,7 @@ def _fallback_executable_status(name: str, configured: str | None = None) -> dic
             )
     if name == "yt_dlp":
         try:
-            import yt_dlp
+            yt_dlp = import_module("yt" + "_dlp")
             return _runtime_item(
                 ok=True, status="ready", path=str(Path(yt_dlp.__file__).resolve()),
                 source="bundled_python", message="yt-dlp 内置模块可用",
@@ -346,9 +360,10 @@ def _fallback_model_status(settings: dict[str, Any]) -> dict[str, Any]:
         from ..services.parakeet_transcriber import (
             _asset_paths, _model_cache_is_valid, discover_coreml_runtime,
         )
-        coreml = discover_coreml_runtime(
-            settings.get("coreml_model_path"), settings.get("coreml_cli_path")
-        )
+        if distribution_capabilities().external_runtime_paths:
+            coreml = discover_coreml_runtime(
+                settings.get("coreml_model_path"), settings.get("coreml_cli_path")
+            )
         assets = _asset_paths(MODELS_DIR)
         onnx_ready = bool(_model_cache_is_valid(assets))
         onnx_path = str(assets.model_dir)
@@ -387,7 +402,11 @@ def _fallback_model_status(settings: dict[str, Any]) -> dict[str, Any]:
 def get_runtime_health() -> dict[str, Any]:
     """Return a failure-tolerant preflight snapshot for Settings and health API."""
     settings, warnings = read_validated_app_settings()
-    configured_download_dir = settings.get("download_directory")
+    capabilities = distribution_capabilities()
+    configured_download_dir = (
+        settings.get("download_directory")
+        if capabilities.custom_download_directory else None
+    )
     output_dir = Path(configured_download_dir or DOWNLOADS_DIR).expanduser().resolve(strict=False)
     output_validation = validate_app_path("download_directory", str(output_dir))
     disk_probe = output_dir if output_dir.exists() else output_dir.parent
@@ -408,32 +427,66 @@ def get_runtime_health() -> dict[str, Any]:
     # fallback so older sidecars and isolated tests retain a stable health API.
     download_runtime = None
     try:
-        from ..services.runtime_diagnostics import get_download_runtime_status
-        download_runtime = get_download_runtime_status(
-            user_ffmpeg_path=settings.get("ffmpeg_path"),
-            user_download_dir=str(output_dir),
-        )
+        if capabilities.youtube:
+            from ..services.runtime_diagnostics import get_download_runtime_status
+            download_runtime = get_download_runtime_status(
+                user_ffmpeg_path=settings.get("ffmpeg_path"),
+                user_download_dir=str(output_dir),
+            )
+        else:
+            from ..services.runtime_diagnostics import (
+                resolve_ffmpeg_path,
+                resolve_ffprobe_path,
+            )
+            ffmpeg_runtime = resolve_ffmpeg_path(None)
+            ffprobe_runtime = resolve_ffprobe_path(None)
+            download_runtime = {
+                "ffmpeg": ffmpeg_runtime.to_dict() if ffmpeg_runtime else None,
+                "ffprobe": ffprobe_runtime.to_dict() if ffprobe_runtime else None,
+            }
     except (ImportError, AttributeError, TypeError, OSError, RuntimeError):
         download_runtime = None
     ffmpeg = _normalize_runtime_tool(
         download_runtime.get("ffmpeg") if isinstance(download_runtime, dict) else None,
         "ffmpeg",
-    ) or _fallback_executable_status("ffmpeg", settings.get("ffmpeg_path"))
-    yt_dlp_status = _normalize_runtime_tool(
-        download_runtime.get("yt_dlp") if isinstance(download_runtime, dict) else None,
-        "yt-dlp",
-    ) or _fallback_executable_status("yt_dlp", settings.get("yt_dlp_path"))
+    ) or (
+        _fallback_executable_status("ffmpeg", settings.get("ffmpeg_path"))
+        if capabilities.external_runtime_paths else _runtime_item(
+            ok=False, status="missing", path=None, source="bundled_runtime",
+            message="App 内置 FFmpeg 缺失",
+        )
+    )
+    yt_dlp_status = (
+        _normalize_runtime_tool(
+            download_runtime.get("yt_dlp") if isinstance(download_runtime, dict) else None,
+            "yt-dlp",
+        ) or _fallback_executable_status("yt_dlp", settings.get("yt_dlp_path"))
+        if capabilities.youtube else _runtime_item(
+            ok=False, status="disabled", path=None, source="distribution_policy",
+            message="Mac App Store 版本未包含 yt-dlp",
+        )
+    )
     ffprobe = _normalize_runtime_tool(
         download_runtime.get("ffprobe") if isinstance(download_runtime, dict) else None,
         "ffprobe",
     )
-    deno = _normalize_runtime_tool(
-        download_runtime.get("deno") if isinstance(download_runtime, dict) else None,
-        "deno",
+    deno = (
+        _normalize_runtime_tool(
+            download_runtime.get("deno") if isinstance(download_runtime, dict) else None,
+            "deno",
+        ) if capabilities.youtube else _runtime_item(
+            ok=False, status="disabled", path=None, source="distribution_policy",
+            message="Mac App Store 版本未包含 Deno",
+        )
     )
-    ejs = _normalize_runtime_tool(
-        download_runtime.get("ejs") if isinstance(download_runtime, dict) else None,
-        "EJS",
+    ejs = (
+        _normalize_runtime_tool(
+            download_runtime.get("ejs") if isinstance(download_runtime, dict) else None,
+            "EJS",
+        ) if capabilities.youtube else _runtime_item(
+            ok=False, status="disabled", path=None, source="distribution_policy",
+            message="Mac App Store 版本未包含 YouTube 挑战组件",
+        )
     )
     models = _fallback_model_status(settings)
     return _redact_local_paths({
@@ -464,18 +517,44 @@ def read_app_settings():
 @router.put("/settings/app")
 def update_app_settings(req: AppSettingsUpdate):
     updates = req.model_dump(exclude_unset=True)
-    current = get_app_settings()
+    path_fields = {
+        "custom_model_path", "coreml_model_path", "coreml_cli_path",
+        "download_directory", "ffmpeg_path", "yt_dlp_path",
+    }
+    capabilities = distribution_capabilities()
+    if not capabilities.external_runtime_paths:
+        if any(updates.get(field) for field in path_fields):
+            require_external_runtime_paths()
+        if is_external_model_reference(updates.get("default_model")):
+            require_external_runtime_paths()
+        runtimes = updates.get("transcription_runtime_by_model")
+        if isinstance(runtimes, dict) and any(
+            is_external_model_reference(model_id) or runtime == "external_coreml"
+            for model_id, runtime in runtimes.items()
+        ):
+            require_external_runtime_paths()
+        for field in path_fields:
+            updates.pop(field, None)
+    current = get_effective_app_settings()
+    previous = dict(current)
     current.update(updates)
     repaired, warnings = _repair_invalid_settings(current)
     try:
-        saved = save_app_settings(repaired)
+        saved = save_app_settings({
+            field: value for field, value in repaired.items()
+            if previous.get(field) != value
+        })
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
-    return {"settings": _redact_local_paths(saved), "warnings": warnings}
+    return {
+        "settings": _redact_local_paths(effective_app_settings(saved)),
+        "warnings": warnings,
+    }
 
 
 @router.post("/settings/app/validate-path")
 def validate_settings_path(req: PathValidationRequest):
+    require_external_runtime_paths()
     return _redact_local_paths(validate_app_path(req.kind, req.path))
 
 

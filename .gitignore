@@ -20,6 +20,9 @@ frontend/dist/
 # Rust / Tauri generated files
 frontend/src-tauri/target/
 frontend/src-tauri/backend-runtime/
+frontend/src-tauri/Entitlements.appstore.plist
+frontend/src-tauri/HelperEntitlements.appstore.plist
+frontend/src-tauri/embedded.provisionprofile
 
 # Packagers and generated binaries
 backend/build/
@@ -31,6 +34,7 @@ vendor/ffmpeg/build/
 vendor/ffmpeg/source/
 *.app/
 *.dmg
+*.pkg
 *.zip
 *.sha256
 release-archive/
