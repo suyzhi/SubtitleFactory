@@ -112,15 +112,27 @@ export default function SettingsCenter(props: Props) {
 
   useEffect(() => {
     if (!open) return;
+    let cancelled = false;
+    const loadProviders = async () => {
+      try {
+        return await api.getAIProviders();
+      } catch {
+        // macOS Keychain access can briefly fail while the app is becoming
+        // active. Retry once before showing a warning so a transient read does
+        // not make otherwise healthy settings look broken.
+        try { return await api.getAIProviders(); }
+        catch { return null; }
+      }
+    };
     setMessage('');
     setError('');
-    Promise.all([
+    void Promise.all([
       api.getAppSettings(),
-      api.getAISettings().catch(() => null),
-      api.getAIProviders().catch(() => null),
+      loadProviders(),
       api.getCloudAuthorizations().catch(() => ({ authorizations: [] })),
     ])
-      .then(([app, ai, providers, authorizations]) => {
+      .then(([app, providers, authorizations]) => {
+        if (cancelled) return;
         setDraft(app.settings || {});
         setWarnings(app.warnings || []);
         if (providers) {
@@ -128,11 +140,14 @@ export default function SettingsCenter(props: Props) {
           setAssignments(providers.assignments);
         }
         setCloudAuthorizations(authorizations.authorizations);
-        if (!ai || !providers) setError('AI 凭据暂时无法读取；本地转写和其他设置仍可使用。');
+        if (!providers) setError('AI 凭据暂时无法读取；本地转写和其他设置仍可使用。');
       })
-      .catch(reason => setError(reason.message));
+      .catch(() => {
+        if (!cancelled) setError('设置数据暂时无法读取，请关闭设置后重试。');
+      });
     onRefreshHealth();
     onRefreshModels();
+    return () => { cancelled = true; };
   }, [open, onRefreshHealth, onRefreshModels]);
 
   useEffect(() => {

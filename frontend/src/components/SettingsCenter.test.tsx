@@ -215,10 +215,22 @@ describe('SettingsCenter model catalog', () => {
       .toHaveClass('theme-light');
   });
 
-  it('keeps non-AI settings usable when provider credentials cannot be loaded', async () => {
-    vi.mocked(api.getAIProviders).mockRejectedValueOnce(new Error('Keychain unavailable'));
+  it('retries a transient provider credential read without showing a false warning', async () => {
+    const callsBefore = vi.mocked(api.getAIProviders).mock.calls.length;
+    vi.mocked(api.getAIProviders).mockRejectedValueOnce(new Error('Keychain temporarily unavailable'));
+    render(<SettingsCenter {...settingsProps()}/>);
+    await waitFor(() => expect(api.getAIProviders).toHaveBeenCalledTimes(callsBefore + 2));
+    expect(screen.queryByText('AI 凭据暂时无法读取；本地转写和其他设置仍可使用。')).not.toBeInTheDocument();
+  });
+
+  it('keeps non-AI settings usable when provider credentials cannot be loaded twice', async () => {
+    const callsBefore = vi.mocked(api.getAIProviders).mock.calls.length;
+    vi.mocked(api.getAIProviders)
+      .mockRejectedValueOnce(new Error('Keychain unavailable'))
+      .mockRejectedValueOnce(new Error('Keychain unavailable'));
     render(<SettingsCenter {...settingsProps()}/>);
     expect(await screen.findByText('AI 凭据暂时无法读取；本地转写和其他设置仍可使用。')).toBeInTheDocument();
+    expect(api.getAIProviders).toHaveBeenCalledTimes(callsBefore + 2);
     expect(screen.getByRole('button', { name: '保存更改' })).toBeEnabled();
   });
 

@@ -1,6 +1,8 @@
 // 字幕工厂 - 主应用组件（集成字幕播放器 + 流程可视化）
 
-import { useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef } from 'react';
+import {
+  lazy, Suspense, useState, useEffect, useLayoutEffect, useCallback, useMemo, useRef,
+} from 'react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import type {
   Project, SubtitleSegment, TaskStatus, ProcessingConfig,
@@ -25,7 +27,7 @@ import './App.css';
 const PROFESSIONAL_UI_MARKER = 'subtitle-factory-ui:professional-v2';
 const LIBRARY_WORKSPACE_UI_MARKER = 'subtitle-factory-ui:library-workspace-v2';
 
-import SubtitlePlayer, { type PlayerPresentationMode, type SubtitlePlayerHandle } from './components/SubtitlePlayer';
+import type { PlayerPresentationMode, SubtitlePlayerHandle } from './components/SubtitlePlayer';
 import { loadSubtitleStyle, saveSubtitleStyle } from './subtitleStyle';
 import ProcessTimeline from './components/ProcessTimeline';
 import ProcessLogViewer from './components/ProcessLogViewer';
@@ -37,12 +39,8 @@ import StyleTemplateBar from './components/StyleTemplateBar';
 import MediaSelectionPanel from './components/MediaSelectionPanel';
 import GlossaryPanel from './components/GlossaryPanel';
 import SmartToolsPanel from './components/SmartToolsPanel';
-import ProductionCenter from './components/ProductionCenter';
-import PlaylistBatchDialog from './components/PlaylistBatchDialog';
 import PlaylistBatchGroups from './components/PlaylistBatchGroups';
 import SubtitleStylePanel from './components/SubtitleStylePanel';
-import SettingsCenter from './components/SettingsCenter';
-import ContentCenter from './components/ContentCenter';
 import {
   isDownloadFailure,
   isTranscriptionFailure,
@@ -53,6 +51,12 @@ import AppSelect from './components/AppSelect';
 import { languageLabel } from './languages';
 import appIcon from './assets/branding/app-icon-ui.png';
 import settingsIcon from './assets/player-icons/settings.png';
+
+const SubtitlePlayer = lazy(() => import('./components/SubtitlePlayer'));
+const ProductionCenter = lazy(() => import('./components/ProductionCenter'));
+const PlaylistBatchDialog = lazy(() => import('./components/PlaylistBatchDialog'));
+const SettingsCenter = lazy(() => import('./components/SettingsCenter'));
+const ContentCenter = lazy(() => import('./components/ContentCenter'));
 
 const DEFAULT_CONFIG: ProcessingConfig = {
   model: 'auto', language: 'auto', target_language: 'zh',
@@ -84,6 +88,25 @@ function libraryTimecode(value: number) {
   return hours
     ? `${hours}:${String(minutes).padStart(2, '0')}:${String(remainder).padStart(2, '0')}`
     : `${minutes}:${String(remainder).padStart(2, '0')}`;
+}
+
+function DeferredPanel({ label, kind = 'panel', theme = 'dark' }: {
+  label: string;
+  kind?: 'panel' | 'player' | 'overlay' | 'settings';
+  theme?: 'light' | 'dark';
+}) {
+  const status = <div className={`deferred-module deferred-module-${kind}`} role="status" aria-live="polite">
+    <i aria-hidden="true"/><span>{label}</span>
+  </div>;
+  if (kind === 'overlay') {
+    return <div className="production-overlay deferred-overlay">{status}</div>;
+  }
+  if (kind === 'settings') {
+    return <div className={`modal-backdrop settings-backdrop theme-${theme}`}>
+      <section className="settings-center deferred-settings">{status}</section>
+    </div>;
+  }
+  return status;
 }
 
 // ── 步骤 ID 到任务类型的映射 ──
@@ -393,6 +416,8 @@ function App() {
     const result = await api.getPlaylistBatches();
     setPlaylistBatches(result.batches);
   }, [backendStatus, youtubeEnabled]);
+  const hasActivePlaylistBatch = playlistBatches.some(({ batch }) =>
+    batch.status === 'running' || batch.status === 'pending');
 
   useEffect(() => {
     if (backendStatus !== 'connected' || libraryView !== 'projects') return;
@@ -447,9 +472,12 @@ function App() {
   useEffect(() => {
     if (!youtubeEnabled || backendStatus !== 'connected' || libraryView !== 'projects') return;
     void refreshPlaylistBatches().catch(() => undefined);
-    const timer = window.setInterval(() => void refreshPlaylistBatches().catch(() => undefined), 2000);
+    // Keep active queues responsive without waking the backend every two
+    // seconds while the project library is idle.
+    const interval = hasActivePlaylistBatch ? 2000 : 30000;
+    const timer = window.setInterval(() => void refreshPlaylistBatches().catch(() => undefined), interval);
     return () => window.clearInterval(timer);
-  }, [backendStatus, libraryView, refreshPlaylistBatches, youtubeEnabled]);
+  }, [backendStatus, hasActivePlaylistBatch, libraryView, refreshPlaylistBatches, youtubeEnabled]);
 
   const refreshModels = useCallback(() => {
     if (backendStatus !== 'connected') return;
@@ -1829,12 +1857,19 @@ function App() {
         if (project) void selectProject(project); else void api.getProject(projectId).then(selectProject).catch(() => undefined);
         setShowTaskDrawer(false);
       }} onOpenSettings={() => { setShowTaskDrawer(false); setShowAISettings(true); }}/>
-      {youtubeEnabled && playlistDialogUrl && <PlaylistBatchDialog
-        url={playlistDialogUrl} workflow={playlistWorkflow} appSettings={appSettings} health={health}
-        aiReady={!!aiSettings?.has_api_key} onClose={() => setPlaylistDialogUrl(null)}
-        onCreated={message => { setPlaylistDialogUrl(null); showToast(message, 4200); void refreshPlaylistBatches(); }}
-      />}
-      {filesystemAutomationEnabled && showProductionCenter && (() => { const batchModel = compatibleModel() || config.model; return <ProductionCenter workflow={{ model: batchModel, language: config.language, target_language: config.target_language, runtime: runtimeForModel(batchModel) }} onClose={() => setShowProductionCenter(false)} onProjectsCreated={() => void api.listProjects({ search: librarySearch, sort: librarySort }).then(result => setProjects(result.projects))} onShowTasks={() => setShowTaskDrawer(true)}/>; })()}
+      {youtubeEnabled && playlistDialogUrl && <Suspense fallback={<DeferredPanel kind="overlay" label="正在打开播放列表工具…"/>}>
+        <PlaylistBatchDialog
+          url={playlistDialogUrl} workflow={playlistWorkflow} appSettings={appSettings} health={health}
+          aiReady={!!aiSettings?.has_api_key} onClose={() => setPlaylistDialogUrl(null)}
+          onCreated={message => { setPlaylistDialogUrl(null); showToast(message, 4200); void refreshPlaylistBatches(); }}
+        />
+      </Suspense>}
+      {filesystemAutomationEnabled && showProductionCenter && (() => {
+        const batchModel = compatibleModel() || config.model;
+        return <Suspense fallback={<DeferredPanel kind="overlay" label="正在打开批量生产工具…"/>}>
+          <ProductionCenter workflow={{ model: batchModel, language: config.language, target_language: config.target_language, runtime: runtimeForModel(batchModel) }} onClose={() => setShowProductionCenter(false)} onProjectsCreated={() => void api.listProjects({ search: librarySearch, sort: librarySort }).then(result => setProjects(result.projects))} onShowTasks={() => setShowTaskDrawer(true)}/>
+        </Suspense>;
+      })()}
       {showFirstRunPreflight && backendStatus === 'connected' && modelStatus && (() => {
         const configuredModel = String(appSettings.default_model || 'auto');
         const modelId = configuredModel === 'auto'
@@ -1959,7 +1994,7 @@ function App() {
           <div className="workbench-split" style={{ '--viewer-height': `${viewerHeight}px` } as React.CSSProperties}>
           <section className="media-workspace">
           <section className="fixed-viewer">
-            {activeProject && canPlayMedia && (useWebPlayback || activeProject.video_url) ? <SubtitlePlayer ref={videoPlayerRef} projectId={activeProject.id} videoUrl={useWebPlayback ? undefined : api.getBackendMediaUrl(activeProject.video_url) || ''} youtubeVideoId={useWebPlayback ? activeProject.youtube_video_id || undefined : undefined} onWebPlayerError={handleWebPlayerError} segments={segments} style={subtitleStyle} activeIdx={activeSegmentIdx} onTimeUpdate={handleTimeUpdate} onDurationChange={setVideoDuration} onStyleChange={handleStyleChange} presentationMode={presentationMode} onPresentationModeChange={setPresentationMode}/>
+            {activeProject && canPlayMedia && (useWebPlayback || activeProject.video_url) ? <Suspense fallback={<DeferredPanel kind="player" label="正在加载本地播放器…"/>}><SubtitlePlayer ref={videoPlayerRef} projectId={activeProject.id} videoUrl={useWebPlayback ? undefined : api.getBackendMediaUrl(activeProject.video_url) || ''} youtubeVideoId={useWebPlayback ? activeProject.youtube_video_id || undefined : undefined} onWebPlayerError={handleWebPlayerError} segments={segments} style={subtitleStyle} activeIdx={activeSegmentIdx} onTimeUpdate={handleTimeUpdate} onDurationChange={setVideoDuration} onStyleChange={handleStyleChange} presentationMode={presentationMode} onPresentationModeChange={setPresentationMode}/></Suspense>
               : <div className="viewer-welcome"><span>▶</span><h2>开始创作字幕</h2><p>{youtubeEnabled ? '导入视频或粘贴 YouTube 链接' : '导入您有权处理的本地视频'}</p><div><button className="button primary" onClick={handleImportLocal}>导入视频</button>{youtubeEnabled && <button className="button secondary" onClick={() => setShowLinkPopover(true)}>添加链接</button>}</div></div>}
           </section>
           {activeProject && <SubtitleTimeline projectId={activeProject.id} segments={segments} currentTime={currentTime} duration={videoDuration} onSeek={handleSeek} onUpdateTime={(index, update) => void handleUpdateSegment(index, update)}/>}
@@ -2002,14 +2037,16 @@ function App() {
             <aside className="process-settings"><header><small>步骤设置</small><h2>{compactSteps.find(step => step.id === activeProcessStep)?.label}</h2></header>{renderProcessSettings()}</aside>
             <details className="process-diagnostics"><summary>任务日志与诊断 <span>{processLogs.length}</span></summary><div><ProcessTimeline steps={processSteps} currentStepId={activeProcessStep} totalProgress={totalProgress} onStepClick={setSelectedStep}/><ProcessLogViewer logs={processLogs} collapsed={false} onToggle={() => undefined} onClear={() => setProcessLogs([])}/></div></details>
           </section>}
-          {projectWorkspace === 'content' && activeProject && <ContentCenter
-            project={activeProject}
-            projectRevision={editorRevision.current}
-            onPreview={previewClipRange}
-            onMessage={message => showToast(message, 4200)}
-          />}
+          {projectWorkspace === 'content' && activeProject && <Suspense fallback={<DeferredPanel label="正在打开内容工作区…"/>}>
+            <ContentCenter
+              project={activeProject}
+              projectRevision={editorRevision.current}
+              onPreview={previewClipRange}
+              onMessage={message => showToast(message, 4200)}
+            />
+          </Suspense>}
           {projectWorkspace === 'style' && <section className="task-page style-task-page">
-            <div className="style-canvas"><StyleTemplateBar style={subtitleStyle} onApply={handleStyleChange}/><header><h2>实时外观预览</h2><p>在接近成片的画面比例中调整字幕，不受其他工具干扰。</p></header><div className="style-canvas-stage">{activeProject && canPlayMedia && (useWebPlayback || activeProject.video_url) ? <SubtitlePlayer ref={videoPlayerRef} projectId={activeProject.id} videoUrl={useWebPlayback ? undefined : api.getBackendMediaUrl(activeProject.video_url) || ''} youtubeVideoId={useWebPlayback ? activeProject.youtube_video_id || undefined : undefined} onWebPlayerError={handleWebPlayerError} segments={segments} style={subtitleStyle} activeIdx={activeSegmentIdx} onTimeUpdate={handleTimeUpdate} onDurationChange={setVideoDuration} onStyleChange={handleStyleChange} presentationMode={presentationMode} onPresentationModeChange={setPresentationMode}/> : <div className="style-preview-card"><span>为每一句话找到恰好的位置。</span><small>Give every line its perfect place.</small></div>}</div></div>
+            <div className="style-canvas"><StyleTemplateBar style={subtitleStyle} onApply={handleStyleChange}/><header><h2>实时外观预览</h2><p>在接近成片的画面比例中调整字幕，不受其他工具干扰。</p></header><div className="style-canvas-stage">{activeProject && canPlayMedia && (useWebPlayback || activeProject.video_url) ? <Suspense fallback={<DeferredPanel kind="player" label="正在加载样式预览…"/>}><SubtitlePlayer ref={videoPlayerRef} projectId={activeProject.id} videoUrl={useWebPlayback ? undefined : api.getBackendMediaUrl(activeProject.video_url) || ''} youtubeVideoId={useWebPlayback ? activeProject.youtube_video_id || undefined : undefined} onWebPlayerError={handleWebPlayerError} segments={segments} style={subtitleStyle} activeIdx={activeSegmentIdx} onTimeUpdate={handleTimeUpdate} onDurationChange={setVideoDuration} onStyleChange={handleStyleChange} presentationMode={presentationMode} onPresentationModeChange={setPresentationMode}/></Suspense> : <div className="style-preview-card"><span>为每一句话找到恰好的位置。</span><small>Give every line its perfect place.</small></div>}</div></div>
             <aside className="style-controls-page"><header><small>字幕检查器</small><h2>字体与排版</h2></header><SubtitleStylePanel style={subtitleStyle} onChange={handleStyleChange}/></aside>
           </section>}
           {projectWorkspace === 'export' && <section className="task-page export-task-page">
@@ -2055,7 +2092,9 @@ function App() {
       {renameProjectState && <div className="modal-backdrop" onMouseDown={() => setRenameProjectState(null)}><form className="rename-dialog" onMouseDown={event => event.stopPropagation()} onSubmit={event => { event.preventDefault(); void saveRename(); }}><header><div><h2>重命名项目</h2><p>媒体与字幕文件不会移动。</p></div><button type="button" aria-label="关闭" onClick={() => setRenameProjectState(null)}>×</button></header><input autoFocus maxLength={120} value={renameDraft} onChange={event => setRenameDraft(event.target.value)} onKeyDown={event => { if (event.key === 'Escape') setRenameProjectState(null); }}/><footer><button type="button" className="button secondary" onClick={() => setRenameProjectState(null)}>取消</button><button className="button primary" disabled={!renameDraft.trim()}>保存</button></footer></form></div>}
       {dragActive && <div className="drop-overlay"><div><span>⇩</span><strong>松开以导入视频</strong><small>支持 MP4、MKV、MOV、WebM 和 AVI</small></div></div>}
       {toast && <div className="studio-toast" role="status" aria-live="polite"><span>✓</span>{toast}</div>}
-      <SettingsCenter open={showAISettings} onClose={() => setShowAISettings(false)} config={config} onConfigChange={setConfig} appSettings={appSettings} onAppSettingsChange={setAppSettings} aiSettings={aiSettings} onAISaved={setAISettings} theme={theme} onThemeChange={setTheme} motionEnabled={motionEnabled} onMotionEnabledChange={setMotionEnabled} density={density} onDensityChange={setDensity} health={health} onRefreshHealth={refreshHealth} modelStatus={modelStatus} onRefreshModels={refreshModels} onOpenLogs={() => { setBottomTab('logs'); setProjectWorkspace('process'); setShowProjectWorkspace(!!activeProject); setInspectorMode(null); }}/>
+      {showAISettings && <Suspense fallback={<DeferredPanel kind="settings" theme={theme} label="正在打开设置中心…"/>}>
+        <SettingsCenter open onClose={() => setShowAISettings(false)} config={config} onConfigChange={setConfig} appSettings={appSettings} onAppSettingsChange={setAppSettings} aiSettings={aiSettings} onAISaved={setAISettings} theme={theme} onThemeChange={setTheme} motionEnabled={motionEnabled} onMotionEnabledChange={setMotionEnabled} density={density} onDensityChange={setDensity} health={health} onRefreshHealth={refreshHealth} modelStatus={modelStatus} onRefreshModels={refreshModels} onOpenLogs={() => { setBottomTab('logs'); setProjectWorkspace('process'); setShowProjectWorkspace(!!activeProject); setInspectorMode(null); }}/>
+      </Suspense>}
     </div>
   );
 }

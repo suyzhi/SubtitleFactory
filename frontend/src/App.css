@@ -526,7 +526,8 @@ body.is-resizing * { transition: none !important; }
    v0.2 — Apple professional workspace
    ────────────────────────────────────────────────────────────────────────── */
 
-.pro-app {
+.pro-app,
+.settings-backdrop.theme-dark {
   --duration-fast: 120ms;
   --duration-normal: 180ms;
   --duration-panel: 240ms;
@@ -557,8 +558,17 @@ body.is-resizing * { transition: none !important; }
   --text-3: rgba(230, 215, 195, .4);
   --shadow-card: 0 1px 1px rgba(0,0,0,.28), 0 8px 24px rgba(0,0,0,.12);
   --shadow-menu: 0 18px 60px rgba(0,0,0,.42), 0 2px 12px rgba(0,0,0,.28);
+}
+
+.pro-app {
   background: var(--window-bg);
   color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Helvetica Neue", sans-serif;
+  font-size: 13px;
+  letter-spacing: -.003em;
+}
+
+.settings-backdrop {
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Helvetica Neue", sans-serif;
   font-size: 13px;
   letter-spacing: -.003em;
@@ -1012,6 +1022,15 @@ body.is-resizing * { transition: none !important; }
 .drop-overlay small { color: var(--text-3); font-size: 10px; }
 .studio-toast { display: flex; align-items: center; gap: 7px; bottom: 22px; min-height: 34px; padding: 0 13px; border-color: var(--border); border-radius: 10px; background: color-mix(in srgb, var(--elevated) 94%, transparent); color: var(--text); box-shadow: var(--shadow-menu); backdrop-filter: blur(20px); animation: toast-in var(--duration-panel) var(--ease-standard); }
 .studio-toast span { color: var(--green); }
+
+.deferred-module { min-height: 180px; display: flex; align-items: center; justify-content: center; gap: 10px; color: var(--text-2); font-size: 12px; }
+.deferred-module i { width: 16px; height: 16px; border: 2px solid color-mix(in srgb, var(--accent) 24%, transparent); border-top-color: var(--accent); border-radius: 50%; animation: deferred-spin .8s linear infinite; }
+.deferred-module-player { width: 100%; height: 100%; min-height: 260px; background: #111; color: rgba(255,255,255,.72); }
+.deferred-overlay { z-index: 115; }
+.deferred-overlay > .deferred-module { width: min(480px, calc(100vw - 48px)); min-height: 180px; border: 1px solid var(--border); border-radius: 16px; background: var(--elevated); box-shadow: var(--shadow-menu); }
+.deferred-settings > .deferred-module { grid-column: 1 / -1; min-height: 100%; }
+@keyframes deferred-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .deferred-module i { animation: none; } }
 
 /* Settings center */
 .modal-backdrop { background: rgba(0,0,0,.38); backdrop-filter: blur(8px); animation: fade-in var(--duration-normal); }
