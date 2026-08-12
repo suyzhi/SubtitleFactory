@@ -19,10 +19,10 @@ from fastapi import HTTPException
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BACKEND_DIR))
-os.environ.setdefault(
-    "SUBTITLE_FACTORY_DATA_DIR",
-    tempfile.mkdtemp(prefix="subtitle-factory-parakeet-tests-"),
-)
+if "SUBTITLE_FACTORY_DATA_DIR" not in os.environ:
+    os.environ["SUBTITLE_FACTORY_DATA_DIR"] = tempfile.mkdtemp(
+        prefix="subtitle-factory-parakeet-tests-",
+    )
 
 from app.models.database import get_db, init_db
 from app.api.projects import start_transcribe

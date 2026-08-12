@@ -8,10 +8,10 @@ from unittest.mock import patch
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BACKEND_DIR))
-os.environ.setdefault(
-    "SUBTITLE_FACTORY_DATA_DIR",
-    tempfile.mkdtemp(prefix="subtitle-factory-runtime-tests-"),
-)
+if "SUBTITLE_FACTORY_DATA_DIR" not in os.environ:
+    os.environ["SUBTITLE_FACTORY_DATA_DIR"] = tempfile.mkdtemp(
+        prefix="subtitle-factory-runtime-tests-",
+    )
 
 from app.services import downloader
 from app.services import ocr as vision_ocr

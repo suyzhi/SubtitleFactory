@@ -10,7 +10,10 @@ from pathlib import Path
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BACKEND_DIR))
-os.environ["SUBTITLE_FACTORY_DATA_DIR"] = tempfile.mkdtemp(prefix="subtitle-factory-tests-")
+if "SUBTITLE_FACTORY_DATA_DIR" not in os.environ:
+    os.environ["SUBTITLE_FACTORY_DATA_DIR"] = tempfile.mkdtemp(
+        prefix="subtitle-factory-tests-",
+    )
 
 from app.models.database import get_db, init_db
 from app.services.subtitle_cleaner import (

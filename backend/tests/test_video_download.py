@@ -11,10 +11,10 @@ from unittest.mock import patch
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BACKEND_DIR))
-os.environ.setdefault(
-    "SUBTITLE_FACTORY_DATA_DIR",
-    tempfile.mkdtemp(prefix="subtitle-factory-video-tests-"),
-)
+if "SUBTITLE_FACTORY_DATA_DIR" not in os.environ:
+    os.environ["SUBTITLE_FACTORY_DATA_DIR"] = tempfile.mkdtemp(
+        prefix="subtitle-factory-video-tests-",
+    )
 
 from app.api import projects
 from app.models import database
