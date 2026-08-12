@@ -10,6 +10,7 @@
 - 副标题建议：`本地优先的专业字幕工作台`（不超过 30 个字符）
 - Bundle ID：`com.subtitlefactory.desktop`；创建 App 记录前必须确认这是最终 ID，首次上传后不能再改
 - 版本：`0.4.1`
+- 最低系统版本：macOS 14.0 Sonoma；结构化元数据、Tauri 配置和最终 App 的 `LSMinimumSystemVersion` 必须一致
 - 主语言：简体中文
 - 类别：Video；App Store Connect 中选择与包内类别一致的 Mac 视频类别
 - 隐私政策 URL：<https://github.com/suyzhi/SubtitleFactory/blob/main/docs/PRIVACY.md>
@@ -41,7 +42,7 @@ App 默认在本机处理，不集成广告、跟踪或分析 SDK。用户主动
 
 ## 自动门禁
 
-`python scripts/verify-app-store-metadata.py` 会检查名称、副标题、描述、关键词和审核备注限制，并把版本、Bundle ID、类别及隐私数据类型与 Tauri、`Info.plist` 和 `PrivacyInfo.xcprivacy` 对齐。CI 与本地 App Store QA 都执行这条公共字段检查。
+`python scripts/verify-app-store-metadata.py` 会检查名称、副标题、描述、关键词和审核备注限制，并把版本、Bundle ID、最低系统版本、类别及隐私数据类型与 Tauri、`Info.plist` 和 `PrivacyInfo.xcprivacy` 对齐。CI 与本地 App Store QA 都执行这条公共字段检查。打包阶段还会用 `scripts/verify-macos-deployment-target.sh` 扫描最终 App 的全部 Mach-O，拒绝任何实际要求高于 macOS 14.0 的原生依赖。
 
 正式 `./scripts/package-app-store.sh` 还会使用 `--require-owner-fields`，要求以下值只通过私有环境变量提供；脚本只检查，不会写入日志或仓库：
 

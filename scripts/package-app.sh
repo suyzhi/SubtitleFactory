@@ -93,6 +93,16 @@ if [ "$(/usr/libexec/PlistBuddy -c 'Print :LSApplicationCategoryType' "$APP_PATH
   echo "最终 App 缺少 Video 应用类别。" >&2
   exit 1
 fi
+MINIMUM_MACOS_VERSION="$(
+  /usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' \
+    "$APP_PATH/Contents/Info.plist" 2>/dev/null || true
+)"
+if [ "$MINIMUM_MACOS_VERSION" != "14.0" ]; then
+  echo "最终 App 必须声明最低支持 macOS 14.0。" >&2
+  exit 1
+fi
+"$ROOT/scripts/verify-macos-deployment-target.sh" \
+  "$APP_PATH" "$MINIMUM_MACOS_VERSION"
 
 PACKAGED_RUNTIME="$APP_PATH/Contents/Resources/backend-runtime/bin"
 "$ROOT/scripts/verify-release-runtime.sh" "$PACKAGED_RUNTIME"
@@ -145,6 +155,8 @@ cp "$DMG_PATH" "$FINAL_DMG"
 )
 
 codesign --verify --deep --strict "$FINAL_APP"
+"$ROOT/scripts/verify-macos-deployment-target.sh" \
+  "$FINAL_APP" "$MINIMUM_MACOS_VERSION"
 if ! strings "$FINAL_APP/Contents/MacOS/app" | rg -F "$UI_MARKER" >/dev/null; then
   echo "根目录最终 App 缺少 professional-v2 标记。" >&2
   exit 1

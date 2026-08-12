@@ -46,4 +46,13 @@ if tauri_config.get("bundle", {}).get("category") != "Video":
     raise SystemExit("Tauri bundle.category 必须是 Video")
 if app_store_metadata["app"]["bundle_id"] != tauri_config["identifier"]:
     raise SystemExit("App Store 元数据 Bundle ID 与 Tauri identifier 不一致")
+minimum_macos_versions = {
+    "tauri": tauri_config.get("bundle", {}).get("macOS", {}).get("minimumSystemVersion"),
+    "app_store_metadata": app_store_metadata["app"].get("minimum_macos_version"),
+}
+if set(minimum_macos_versions.values()) != {"14.0"}:
+    raise SystemExit(
+        "最低 macOS 版本必须统一为 14.0: "
+        + ", ".join(f"{name}={value}" for name, value in minimum_macos_versions.items())
+    )
 print(f"版本号已同步: {next(iter(versions.values()))}")

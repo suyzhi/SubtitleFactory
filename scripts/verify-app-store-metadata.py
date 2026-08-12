@@ -95,11 +95,18 @@ def validate_public_metadata(metadata_path: Path) -> tuple[list[str], dict[str, 
     subtitle = app.get("subtitle")
     bundle_id = app.get("bundle_id")
     version = app.get("version")
+    minimum_macos_version = app.get("minimum_macos_version")
     privacy_url = app.get("privacy_policy_url")
     require(isinstance(name, str) and 2 <= len(name) <= 30, "App 名称必须为 2 至 30 个字符")
     require(isinstance(subtitle, str) and len(subtitle) <= 30, "副标题不得超过 30 个字符")
     require(bundle_id == tauri.get("identifier"), "元数据 Bundle ID 与 Tauri 配置不一致")
     require(version == tauri.get("version"), "元数据版本号与 Tauri 配置不一致")
+    require(
+        minimum_macos_version
+        == tauri.get("bundle", {}).get("macOS", {}).get("minimumSystemVersion")
+        == "14.0",
+        "元数据与 App bundle 的最低 macOS 版本必须同时为 14.0",
+    )
     require(name == tauri.get("productName"), "元数据 App 名称与 Tauri productName 不一致")
     require(app.get("primary_language") == "zh-Hans", "首发主语言必须明确为 zh-Hans")
     require(

@@ -10,15 +10,20 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PYTHON="$ROOT/backend/.venv/bin/python"
 VENDOR_RUNTIME="${SUBTITLE_FACTORY_FFMPEG_VENDOR_DIR:-$ROOT/vendor/ffmpeg/darwin-arm64}"
 DISTRIBUTION_CHANNEL="${SUBTITLE_FACTORY_DISTRIBUTION_CHANNEL:-direct}"
+if [ ! -x "$PYTHON" ]; then
+  echo "缺少 backend/.venv，请先运行 ./start-desktop.sh 安装依赖。" >&2
+  exit 1
+fi
+MINIMUM_MACOS_VERSION="$(
+  "$PYTHON" -c \
+    'import json, sys; print(json.load(open(sys.argv[1], encoding="utf-8"))["bundle"]["macOS"]["minimumSystemVersion"])' \
+    "$ROOT/frontend/src-tauri/tauri.conf.json"
+)"
 DENO_SOURCE=""
 if [ "$DISTRIBUTION_CHANNEL" != "app_store" ]; then
   DENO_SOURCE="${SUBTITLE_FACTORY_DENO_BIN:-$(command -v deno || true)}"
 fi
 
-if [ ! -x "$PYTHON" ]; then
-  echo "缺少 backend/.venv，请先运行 ./start-desktop.sh 安装依赖。" >&2
-  exit 1
-fi
 if [ "$DISTRIBUTION_CHANNEL" != "app_store" ] \
   && { [ -z "$DENO_SOURCE" ] || [ ! -x "$DENO_SOURCE" ]; }; then
   echo "缺少 Deno JavaScript 运行时，无法构建可靠的 YouTube 下载器。请先安装 Deno。" >&2
@@ -28,6 +33,20 @@ fi
 "$ROOT/scripts/verify-release-runtime.sh" "$VENDOR_RUNTIME"
 
 "$PYTHON" -m pip install -q --require-hashes -r "$ROOT/backend/requirements-release.lock"
+SITE_PACKAGES="$("$PYTHON" -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')"
+MLX_WHEEL_METADATA="$SITE_PACKAGES/mlx-0.32.0.dist-info/WHEEL"
+MLX_METAL_WHEEL_METADATA="$SITE_PACKAGES/mlx_metal-0.32.0.dist-info/WHEEL"
+if ! grep -F 'Tag: cp311-cp311-macosx_14_0_arm64' "$MLX_WHEEL_METADATA" >/dev/null 2>&1 \
+  || ! grep -F 'Tag: py3-none-macosx_14_0_arm64' "$MLX_METAL_WHEEL_METADATA" >/dev/null 2>&1; then
+  "$PYTHON" -m pip install -q --require-hashes --force-reinstall --no-deps \
+    -r "$ROOT/backend/requirements-macos14.lock"
+fi
+if ! grep -F 'Tag: cp311-cp311-macosx_14_0_arm64' "$MLX_WHEEL_METADATA" >/dev/null \
+  || ! grep -F 'Tag: py3-none-macosx_14_0_arm64' "$MLX_METAL_WHEEL_METADATA" >/dev/null; then
+  echo "MLX 没有使用锁定的 macOS 14 官方 wheel。" >&2
+  exit 1
+fi
+"$ROOT/scripts/verify-macos-deployment-target.sh" "$SITE_PACKAGES/mlx" "$MINIMUM_MACOS_VERSION"
 TRIPLE="$(rustc -vV | awk '/host:/ {print $2}')"
 OUTPUT_DIR="$ROOT/frontend/src-tauri/backend-runtime"
 BUILD_DIR="$ROOT/backend/build/sidecar"
@@ -150,7 +169,8 @@ if [ "$DISTRIBUTION_CHANNEL" != "app_store" ]; then
     cp "$DENO_ROOT/LICENSE.md" "$OUTPUT_DIR/THIRD_PARTY_LICENSES/deno/LICENSE.md"
   fi
 fi
-swiftc "$ROOT/backend/runtime/vision_ocr.swift" -O -o "$OUTPUT_DIR/bin/vision-ocr"
+swiftc -target "arm64-apple-macos${MINIMUM_MACOS_VERSION}" \
+  "$ROOT/backend/runtime/vision_ocr.swift" -O -o "$OUTPUT_DIR/bin/vision-ocr"
 chmod +x "$OUTPUT_DIR/bin/ffmpeg" "$OUTPUT_DIR/bin/ffprobe"
 if [ "$DISTRIBUTION_CHANNEL" != "app_store" ]; then
   chmod 755 "$OUTPUT_DIR/bin/deno"
@@ -190,4 +210,5 @@ elif ! grep -F 'app.services.downloader' "$ARCHIVE_CONTENTS" >/dev/null; then
   echo "直装版运行包缺少按需加载的下载器实现。" >&2
   exit 1
 fi
+"$ROOT/scripts/verify-macos-deployment-target.sh" "$OUTPUT_DIR" "$MINIMUM_MACOS_VERSION"
 echo "已生成快速启动后端: $OUTPUT_DIR"

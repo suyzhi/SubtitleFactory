@@ -45,6 +45,15 @@ def test_privacy_manifest_drift_is_rejected(tmp_path: Path):
     assert "隐私清单的数据类型、用途、关联或跟踪声明与元数据不一致" in errors
 
 
+def test_minimum_macos_version_drift_is_rejected(tmp_path: Path):
+    metadata = load_metadata()
+    metadata["app"]["minimum_macos_version"] = "12.0"
+
+    errors, _ = metadata_verifier.validate_public_metadata(write_metadata(tmp_path, metadata))
+
+    assert "元数据与 App bundle 的最低 macOS 版本必须同时为 14.0" in errors
+
+
 def test_strict_owner_gate_lists_missing_fields(monkeypatch):
     metadata = load_metadata()
     for name in metadata_verifier.EXPECTED_OWNER_ENVIRONMENTS:

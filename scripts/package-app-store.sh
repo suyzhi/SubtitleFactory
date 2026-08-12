@@ -206,6 +206,16 @@ if [ -e "$RUNTIME_PATH/bin/deno" ] \
 fi
 "$ROOT/scripts/restore-packaged-runtime-symlinks.sh" \
   "$TAURI_DIR/backend-runtime" "$RUNTIME_PATH"
+MINIMUM_MACOS_VERSION="$(
+  /usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' \
+    "$APP_PATH/Contents/Info.plist" 2>/dev/null || true
+)"
+if [ "$MINIMUM_MACOS_VERSION" != "14.0" ]; then
+  echo "最终 App Store App 必须声明最低支持 macOS 14.0。" >&2
+  exit 1
+fi
+"$ROOT/scripts/verify-macos-deployment-target.sh" \
+  "$APP_PATH" "$MINIMUM_MACOS_VERSION"
 
 SIGNING_IDENTITY="-"
 if [ "$QA_BUILD" = false ]; then
@@ -308,6 +318,8 @@ if [ "$QA_BUILD" = true ]; then
   ditto "$APP_PATH" "$FINAL_APP"
   "$ROOT/scripts/restore-packaged-runtime-symlinks.sh" \
     "$TAURI_DIR/backend-runtime" "$FINAL_APP/Contents/Resources/backend-runtime"
+  "$ROOT/scripts/verify-macos-deployment-target.sh" \
+    "$FINAL_APP" "$MINIMUM_MACOS_VERSION"
   codesign --verify --deep --strict "$FINAL_APP"
   "$ROOT/backend/.venv/bin/python" \
     "$ROOT/scripts/verify-packaged-app-store.py" "$FINAL_APP"
@@ -330,6 +342,8 @@ fi
 ditto "$APP_PATH" "$FINAL_APP"
 "$ROOT/scripts/restore-packaged-runtime-symlinks.sh" \
   "$TAURI_DIR/backend-runtime" "$FINAL_APP/Contents/Resources/backend-runtime"
+"$ROOT/scripts/verify-macos-deployment-target.sh" \
+  "$FINAL_APP" "$MINIMUM_MACOS_VERSION"
 codesign --verify --deep --strict "$FINAL_APP"
 
 echo "App Store App: $FINAL_APP"

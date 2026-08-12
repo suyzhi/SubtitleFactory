@@ -5,6 +5,7 @@
     "subtitle": "本地优先的专业字幕工作台",
     "bundle_id": "com.subtitlefactory.desktop",
     "version": "0.4.1",
+    "minimum_macos_version": "14.0",
     "primary_language": "zh-Hans",
     "primary_category": "Video",
     "privacy_policy_url": "https://github.com/suyzhi/SubtitleFactory/blob/main/docs/PRIVACY.md"

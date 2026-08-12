@@ -1,0 +1,8 @@
+# MLX publishes separate wheels for macOS 14, 15, and 26. On a macOS 26
+# build host pip otherwise prefers the macOS 26 wheel even though the product
+# supports macOS 14. Keep these direct, hash-locked requirements separate from
+# the cross-platform dependency lock so release builds select the intended ABI.
+mlx @ https://files.pythonhosted.org/packages/3e/c7/cb62301b01dbccd66b256cab0c98fc29e7533dd76aa599fe44c1bb1f4168/mlx-0.32.0-cp311-cp311-macosx_14_0_arm64.whl \
+    --hash=sha256:72c605368d145c756877057d7e3c54f169c9899fe1f83232bfb3a6342561e234
+mlx-metal @ https://files.pythonhosted.org/packages/d6/ef/d74ae99cfe9ddb59fd08abd14f47754c3d199291a93756903fa595b31b8a/mlx_metal-0.32.0-py3-none-macosx_14_0_arm64.whl \
+    --hash=sha256:5b64b20ac24b0c401f489de01e8209edc4d372125201f19314e6f39e385322aa

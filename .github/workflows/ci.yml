@@ -29,6 +29,13 @@ jobs:
         run: python scripts/check-versions.py
       - name: Verify App Store metadata
         run: python scripts/verify-app-store-metadata.py
+      - name: Verify macOS deployment-target gate
+        run: |
+          scripts/verify-macos-deployment-target.sh /usr/bin/true 99.0
+          if scripts/verify-macos-deployment-target.sh /usr/bin/true 1.0; then
+            echo "Deployment-target gate accepted an intentionally incompatible binary." >&2
+            exit 1
+          fi
       - name: Backend tests
         run: python -m pytest -q backend/tests
       - name: Frontend lint

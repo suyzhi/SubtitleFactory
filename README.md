@@ -1,6 +1,6 @@
 # 字幕工厂 0.4.1
 
-字幕工厂是一款面向 Apple Silicon Mac 的字幕工作台：导入本地视频或粘贴 YouTube 链接后，可选择网页播放或完整下载，自动准备音频并转写，再按需进行 AI 整理、翻译与导出。
+字幕工厂是一款面向搭载 macOS 14 Sonoma 或更高版本的 Apple Silicon Mac 的字幕工作台：导入本地视频或粘贴 YouTube 链接后，可选择网页播放或完整下载，自动准备音频并转写，再按需进行 AI 整理、翻译与导出。
 
 ## v0.4.1 当前能力
 
@@ -101,7 +101,7 @@ Mac App Store 版启用 App Sandbox，数据位于系统管理的 `~/Library/Con
 
 要求：
 
-- Apple Silicon Mac
+- 搭载 macOS 14 Sonoma 或更高版本的 Apple Silicon Mac
 - Python 3.10+
 - Node.js 18+
 - Rust 1.77.2+
@@ -140,9 +140,9 @@ npx tauri dev
 
 1. 验证 Hugging Face/GitHub 模型来源、固定提交、文件大小和哈希元数据。
 2. 运行后端测试、前端测试和 lint。
-3. 检查 FFmpeg/FFprobe 与 arm64 运行时，构建后端 sidecar，并实际加载 MLX、Sherpa、ONNX Runtime、PyAV 等冻结原生依赖。
+3. 检查 FFmpeg/FFprobe 与 arm64 运行时，固定安装官方 macOS 14 MLX 轮子，构建后端 sidecar，并实际加载 MLX、Sherpa、ONNX Runtime、PyAV 等冻结原生依赖。
 4. 只执行一次正式前端构建，再生成 arm64 `.app` 与 `.dmg`。
-5. 检查正确新版 UI 标记、签名、包内运行时和 DMG SHA-256。
+5. 扫描 App 内每个 Mach-O 的部署目标，拒绝高于产品所声明 macOS 14 最低版本的原生依赖，并检查正确新版 UI 标记、签名、包内运行时和 DMG SHA-256。
 6. 退出时清理可重建的前端、Rust、sidecar 和测试缓存。
 
 任一运行时检查失败都会阻止生成 Release。内置 FFmpeg 8.1.2 从 [FFmpeg 官方源码](https://ffmpeg.org/releases/ffmpeg-8.1.2.tar.xz) 构建；许可证和构建信息会放入 App 的 `THIRD_PARTY_LICENSES/ffmpeg/`。
