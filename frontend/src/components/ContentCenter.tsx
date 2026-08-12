@@ -9,6 +9,7 @@ import AppSelect from './AppSelect';
 interface Props {
   project: Project;
   projectRevision: number;
+  hasSegments: boolean;
   onPreview: (start: number, end: number) => void;
   onMessage: (message: string) => void;
 }
@@ -179,9 +180,10 @@ function SectionEditor({
 }
 
 function PublicationPacks({
-  project, granted, onRequireAuthorization, onMessage,
+  project, hasSegments, granted, onRequireAuthorization, onMessage,
 }: {
   project: Project;
+  hasSegments: boolean;
   granted: boolean;
   onRequireAuthorization: () => Promise<boolean>;
   onMessage: (message: string) => void;
@@ -233,6 +235,7 @@ function PublicationPacks({
   }, [onMessage, refresh]);
 
   const create = async (allowFallback = false) => {
+    if (!hasSegments) return;
     if (!granted && !(await onRequireAuthorization())) return;
     setBusy(true);
     setError('');
@@ -322,7 +325,7 @@ function PublicationPacks({
           ]}/></label>
           <label>输出语言<input value={outputLanguage} onChange={event => setOutputLanguage(event.target.value)} placeholder="auto / 中文 / English"/></label>
         </div>
-        <button className="button primary" disabled={busy || !name.trim()} onClick={() => void create()}>{busy ? '正在创建…' : '生成完整发布包'}</button>
+        <button className="button primary" disabled={busy || !name.trim() || !hasSegments} onClick={() => void create()}>{busy ? '正在创建…' : '生成完整发布包'}</button>
       </div>}
       {selected && <>
         <header className="content-pack-toolbar">
@@ -478,9 +481,10 @@ function ClipCandidateCard({
 }
 
 function ClipWorkbench({
-  project, granted, onRequireAuthorization, onPreview, onMessage,
+  project, hasSegments, granted, onRequireAuthorization, onPreview, onMessage,
 }: {
   project: Project;
+  hasSegments: boolean;
   granted: boolean;
   onRequireAuthorization: () => Promise<boolean>;
   onPreview: (start: number, end: number) => void;
@@ -532,6 +536,7 @@ function ClipWorkbench({
   }, [onMessage, refresh]);
 
   const create = async () => {
+    if (!hasSegments) return;
     if (!granted && !(await onRequireAuthorization())) return;
     setBusy(true);
     setError('');
@@ -587,7 +592,7 @@ function ClipWorkbench({
       <label>推荐数量<AppSelect value={String(count)} onChange={value => setCount(Number(value) as 3 | 5 | 10)} label="短片推荐数量" options={[3, 5, 10].map(value => ({ value: String(value), label: `${value} 个` }))}/></label>
       <label>最短秒数<input type="number" min={15} max={179} value={minimum} onChange={event => setMinimum(Number(event.target.value))}/></label>
       <label>最长秒数<input type="number" min={16} max={180} value={maximum} onChange={event => setMaximum(Number(event.target.value))}/></label>
-      <button className="button primary" disabled={busy || minimum >= maximum} onClick={() => void create()}>{busy ? '正在创建…' : '生成候选'}</button>
+      <button className="button primary" disabled={busy || minimum >= maximum || !hasSegments} onClick={() => void create()}>{busy ? '正在创建…' : '生成候选'}</button>
     </section>}
     {selected?.stale && <div className="content-stale-banner">源字幕已更新。候选仍然保留，但渲染前必须重新预览并确认当前时间范围。</div>}
     {selected && <div className="clip-candidate-list">{(selected.candidates || []).map(candidate =>
@@ -602,7 +607,7 @@ function ClipWorkbench({
   </div>;
 }
 
-export default function ContentCenter({ project, projectRevision, onPreview, onMessage }: Props) {
+export default function ContentCenter({ project, projectRevision, hasSegments, onPreview, onMessage }: Props) {
   const [tab, setTab] = useState<ContentTab>('packs');
   const [granted, setGranted] = useState(false);
   const [authorizationBusy, setAuthorizationBusy] = useState(false);
@@ -656,9 +661,16 @@ export default function ContentCenter({ project, projectRevision, onPreview, onM
       </nav>
       {granted && <button className="button secondary" onClick={() => void revoke()}>撤销云端授权</button>}
     </header>
-    <ContentAuthorization granted={granted} busy={authorizationBusy} onGrant={() => void requireAuthorization()}/>
+    {!hasSegments && <div className="content-source-required" role="status">
+      <span>尚无字幕</span>
+      <div>
+        <strong>先生成或导入字幕</strong>
+        <p>完成“处理 → 转写”，或在“字幕”工作区导入字幕后，再创建发布包和短视频候选。</p>
+      </div>
+    </div>}
+    {hasSegments && <ContentAuthorization granted={granted} busy={authorizationBusy} onGrant={() => void requireAuthorization()}/>}
     {tab === 'packs'
-      ? <PublicationPacks project={project} granted={granted} onRequireAuthorization={requireAuthorization} onMessage={onMessage}/>
-      : <ClipWorkbench project={project} granted={granted} onRequireAuthorization={requireAuthorization} onPreview={onPreview} onMessage={onMessage}/>}
+      ? <PublicationPacks project={project} hasSegments={hasSegments} granted={granted} onRequireAuthorization={requireAuthorization} onMessage={onMessage}/>
+      : <ClipWorkbench project={project} hasSegments={hasSegments} granted={granted} onRequireAuthorization={requireAuthorization} onPreview={onPreview} onMessage={onMessage}/>}
   </section>;
 }

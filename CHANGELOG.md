@@ -15,6 +15,7 @@
 - Removed Deno and FFprobe host dependencies from download unit tests while retaining real bundled-runtime checks in packaged-App acceptance.
 - Added isolated end-to-end acceptance for both the direct App and the read-only mounted DMG copy, covering authenticated sidecar APIs, bundled download tools, local media import, exact cleanup, crash exit, and normal Quit.
 - Upgraded CI to the official Node 24-based GitHub Actions releases, pinned every action to a full commit SHA, restricted the workflow token to read-only repository contents, and bounded the quality gate runtime.
+- Restored keyboard focus to the persistent settings control after closing the dialog, removed YouTube-only controls and copy from local projects, and made subtitles an explicit prerequisite for publication-pack and short-video generation.
 
 ## 0.3.2 — 2026-07-26
 

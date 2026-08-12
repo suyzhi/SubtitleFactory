@@ -151,7 +151,7 @@ describe('ContentCenter', () => {
       }],
     };
     vi.mocked(api.updateContentSection).mockResolvedValue(updated);
-    render(<StrictMode><ContentCenter project={project} projectRevision={3} onPreview={() => undefined} onMessage={() => undefined}/></StrictMode>);
+    render(<StrictMode><ContentCenter project={project} projectRevision={3} hasSegments onPreview={() => undefined} onMessage={() => undefined}/></StrictMode>);
 
     expect((await screen.findAllByText('源字幕已更新')).length).toBeGreaterThan(0);
     const overview = await screen.findByLabelText('内容摘要');
@@ -178,7 +178,7 @@ describe('ContentCenter', () => {
       task_id: null, render_ids: ['render-vertical', 'render-square'], reused: true,
     });
     const user = userEvent.setup();
-    render(<ContentCenter project={project} projectRevision={3} onPreview={() => undefined} onMessage={() => undefined}/>);
+    render(<ContentCenter project={project} projectRevision={3} hasSegments onPreview={() => undefined} onMessage={() => undefined}/>);
 
     await user.click(await screen.findByRole('tab', { name: '短视频' }));
     const squareHeading = await screen.findByText('1:1');
@@ -212,7 +212,7 @@ describe('ContentCenter', () => {
     });
     const confirm = vi.spyOn(window, 'confirm');
     const user = userEvent.setup();
-    render(<ContentCenter project={project} projectRevision={3} onPreview={() => undefined} onMessage={() => undefined}/>);
+    render(<ContentCenter project={project} projectRevision={3} hasSegments onPreview={() => undefined} onMessage={() => undefined}/>);
 
     await user.click(await screen.findByRole('tab', { name: '短视频' }));
     await user.click(screen.getByRole('button', { name: '渲染所选版本' }));
@@ -221,5 +221,22 @@ describe('ContentCenter', () => {
       confirm_stale: false,
     }));
     expect(confirm).not.toHaveBeenCalled();
+  });
+
+  it('requires subtitles before authorizing or generating content', async () => {
+    vi.mocked(api.getContentPacks).mockResolvedValue({ packs: [] });
+    vi.mocked(api.getClipSets).mockResolvedValue({ clip_sets: [] });
+    const user = userEvent.setup();
+    render(<ContentCenter project={{ ...project, segments_count: 0 }} projectRevision={0} hasSegments={false} onPreview={() => undefined} onMessage={() => undefined}/>);
+
+    expect(await screen.findByRole('status')).toHaveTextContent('先生成或导入字幕');
+    expect(screen.queryByText('云端内容生成尚未授权')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '生成完整发布包' })).toBeDisabled();
+
+    await user.click(screen.getByRole('tab', { name: '短视频' }));
+    expect(await screen.findByRole('button', { name: '生成候选' })).toBeDisabled();
+    expect(api.setCloudAuthorization).not.toHaveBeenCalled();
+    expect(api.createContentPack).not.toHaveBeenCalled();
+    expect(api.createClipSet).not.toHaveBeenCalled();
   });
 });

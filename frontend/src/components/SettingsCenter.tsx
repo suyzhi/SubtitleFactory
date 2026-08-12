@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import type { RefObject } from 'react';
 import { createPortal } from 'react-dom';
 import * as api from '../api/backend';
 import type {
@@ -32,6 +33,7 @@ interface ModelStatusResult {
 interface Props {
   open: boolean;
   onClose: () => void;
+  returnFocusRef?: RefObject<HTMLElement | null>;
   config: ProcessingConfig;
   onConfigChange: (config: ProcessingConfig) => void;
   appSettings: AppSettings;
@@ -76,7 +78,7 @@ function runtimeCopy(item: Record<string, unknown> | undefined) {
 
 export default function SettingsCenter(props: Props) {
   const {
-    open, onClose, config, onConfigChange, appSettings, onAppSettingsChange, onAIProvidersChange,
+    open, onClose, returnFocusRef, config, onConfigChange, appSettings, onAppSettingsChange, onAIProvidersChange,
     theme, onThemeChange,
     motionEnabled, onMotionEnabledChange, density, onDensityChange, health, onRefreshHealth,
     modelStatus, onRefreshModels, onOpenLogs,
@@ -206,6 +208,7 @@ export default function SettingsCenter(props: Props) {
   useEffect(() => {
     if (!open) return;
     const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const explicitReturnFocus = returnFocusRef?.current;
     const frame = window.requestAnimationFrame(() => {
       const dialog = dialogRef.current;
       const activeCategory = dialog?.querySelector<HTMLButtonElement>('.settings-navigation button.active');
@@ -244,9 +247,9 @@ export default function SettingsCenter(props: Props) {
     return () => {
       window.cancelAnimationFrame(frame);
       window.removeEventListener('keydown', onKeyDown);
-      previousFocus?.focus();
+      (explicitReturnFocus || previousFocus)?.focus();
     };
-  }, [open]);
+  }, [open, returnFocusRef]);
 
   const resolvedSourceLanguage = String(draft.source_language || config.language);
   const resolvedTargetLanguage = String(draft.translation_target_language || config.target_language);

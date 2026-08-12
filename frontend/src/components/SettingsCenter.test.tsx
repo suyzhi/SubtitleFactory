@@ -228,6 +228,29 @@ describe('SettingsCenter model catalog', () => {
     expect(backdrop).toHaveClass('theme-dark');
   });
 
+  it('restores focus to the persistent settings trigger after closing', async () => {
+    const fallback = document.createElement('button');
+    const trigger = document.createElement('button');
+    document.body.append(fallback, trigger);
+    fallback.focus();
+    const onClose = vi.fn();
+    const { unmount } = render(
+      <SettingsCenter
+        {...settingsProps({ onClose })}
+        returnFocusRef={{ current: trigger }}
+      />,
+    );
+    await waitFor(() => expect(screen.getByRole('button', { name: /通用/ })).toHaveFocus());
+
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(onClose).toHaveBeenCalledOnce();
+    unmount();
+    expect(trigger).toHaveFocus();
+
+    fallback.remove();
+    trigger.remove();
+  });
+
   it('carries the light theme into the document-level portal', () => {
     render(<SettingsCenter {...settingsProps({ theme: 'light' })}/>);
     expect(screen.getByRole('dialog', { name: '设置中心' }).closest('.settings-backdrop'))
