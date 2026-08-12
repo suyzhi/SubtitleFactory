@@ -145,7 +145,8 @@ npx tauri dev
 5. 恢复并验证冻结运行时的安全相对链接，对最终 App 重新签名，再用这同一份 App 替换 DMG 中 Tauri 的临时副本，避免直装版与 DMG 版发生内容漂移。
 6. 扫描 App 内每个 Mach-O 的部署目标，拒绝高于产品所声明 macOS 14 最低版本的原生依赖，并检查正确新版 UI 标记、签名和包内运行时。
 7. 只读挂载最终 DMG，递归比较内外 App 的文件哈希、权限和链接目标，并验证 Finder 布局、签名、架构、UI 标记与 DMG SHA-256。
-8. 退出时清理可重建的前端、Rust、sidecar 和测试缓存。
+8. 使用隔离临时项目库分别启动直装 App 和只读挂载 DMG 中的 App，检查真实 sidecar、会话鉴权、发行能力、模型目录、Deno/FFmpeg、本地视频导入以及强制/正常退出清理。
+9. 退出时清理可重建的前端、Rust、sidecar 和测试缓存。
 
 任一运行时检查失败都会阻止生成 Release。内置 FFmpeg 8.1.2 从 [FFmpeg 官方源码](https://ffmpeg.org/releases/ffmpeg-8.1.2.tar.xz) 构建；许可证和构建信息会放入 App 的 `THIRD_PARTY_LICENSES/ffmpeg/`。
 

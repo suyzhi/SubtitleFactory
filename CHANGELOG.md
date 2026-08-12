@@ -13,6 +13,7 @@
 - Set an honest macOS 14 minimum, pinned MLX to its official macOS 14 wheels, compiled Vision OCR for the same target, and made every release scan all bundled Mach-O deployment targets.
 - Preserved the frozen runtime's verified relative links in the direct App, repacked the DMG with that exact signed App, and made release packaging compare every mounted file hash, permission, and link target before delivery.
 - Removed Deno and FFprobe host dependencies from download unit tests while retaining real bundled-runtime checks in packaged-App acceptance.
+- Added isolated end-to-end acceptance for both the direct App and the read-only mounted DMG copy, covering authenticated sidecar APIs, bundled download tools, local media import, exact cleanup, crash exit, and normal Quit.
 
 ## 0.3.2 — 2026-07-26
 

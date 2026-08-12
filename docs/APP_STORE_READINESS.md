@@ -66,6 +66,8 @@ App Store 版的限制是发行策略，不是运行失败后的静默降级。R
 - 根目录 `字幕工厂_0.4.1_aarch64.dmg` 为 262 MB；旧的 323 MB DMG 和上一份 App 已移入带时间戳的 `release-archive/`，没有覆盖历史交付。
 - 最终 App 内 241 个 Mach-O 均为不高于 macOS 14.0 的部署目标，arm64 与深度严格签名校验通过；两个新版 UI 标记存在，旧设置界面标记不存在。
 - 最终 DMG 内外递归清单完全相同：`2,332` 个普通文件、45 个链接、`788,194,282 bytes` 文件内容；Finder 布局、卷图标、安装快捷方式和 DMG 完整性校验同时通过。
+- 验收器使用两个互不复用的临时数据目录，分别从根目录 App 和只读挂载 DMG 中启动同一产品。两者均通过无令牌 401、真实令牌 200、29 个模型、5 项直装能力、包内 FFmpeg/FFprobe/yt-dlp/Deno/EJS 就绪检查，并用 0.5 秒真实 MP4 完成本地项目创建、上传、缩略图生成、读取和精确永久删除。
+- 根目录 App 与 DMG 内 App 都各自完成一次主进程强制终止和一次正常 Quit；四次启动的 sidecar 进程组均退出，正常退出后的 PID 文件均清理。验收临时目录和只读 DMG 挂载点也在成功或异常路径中统一清理，不读取真实项目、模型或媒体目录。
 
 这仍是本机 ad-hoc 签名的直装测试交付，不是 Developer ID 公证版本，也不能作为 Mac App Store 上传件。正式直装发布仍需 Developer ID Application 签名、公证与 stapling；正式商店发布仍需下文列出的 Apple Distribution 身份、profile、完整 Xcode 和 App Store Connect 流程。
 

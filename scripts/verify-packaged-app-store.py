@@ -219,10 +219,21 @@ def wait_for_backend(main_pid: int, timeout: float = 30.0) -> BackendSession:
     raise VerificationError("packaged App sidecar 未在 30 秒内就绪")
 
 
-def launch(executable: Path, log: BinaryIO) -> tuple[subprocess.Popen[bytes], BackendSession]:
-    process = subprocess.Popen([str(executable)], stdout=log, stderr=subprocess.STDOUT)
+def launch(
+    executable: Path,
+    log: BinaryIO,
+    *,
+    environment: dict[str, str] | None = None,
+    timeout: float = 30.0,
+) -> tuple[subprocess.Popen[bytes], BackendSession]:
+    process = subprocess.Popen(
+        [str(executable)],
+        stdout=log,
+        stderr=subprocess.STDOUT,
+        env=environment,
+    )
     try:
-        return process, wait_for_backend(process.pid)
+        return process, wait_for_backend(process.pid, timeout=timeout)
     except Exception:
         stop_exact_process(process, None)
         raise
@@ -349,13 +360,21 @@ def verify_lifecycle(
     log: BinaryIO,
     first_process: subprocess.Popen[bytes],
     first_session: BackendSession,
+    *,
+    environment: dict[str, str] | None = None,
+    label: str = "App Store QA",
 ) -> None:
     first_process.kill()
     first_process.wait(timeout=5)
     wait_for_group_exit(first_session.process.pgid)
-    print("App Store QA 强制退出清理通过")
+    print(f"{label} 强制退出清理通过")
 
-    second_process, second_session = launch(executable, log)
+    second_process, second_session = launch(
+        executable,
+        log,
+        environment=environment,
+        timeout=60,
+    )
     try:
         subprocess.run(
             ["osascript", "-e", f'tell application id "{bundle_id}" to quit'],
@@ -372,7 +391,7 @@ def verify_lifecycle(
         require(not pid_file.exists(), "正常退出后仍遗留 backend.pid")
     finally:
         stop_exact_process(second_process, second_session.process.pgid)
-    print("App Store QA 正常退出清理通过")
+    print(f"{label} 正常退出清理通过")
 
 
 def main() -> int:

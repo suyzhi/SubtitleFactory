@@ -142,6 +142,8 @@ fi
 "$ROOT/backend/.venv/bin/python" "$ROOT/scripts/verify-dmg-app.py" \
   "$DMG_PATH" "$APP_PATH" \
   --minimum-macos-version "$MINIMUM_MACOS_VERSION"
+"$ROOT/backend/.venv/bin/python" "$ROOT/scripts/verify-packaged-direct.py" \
+  "$APP_PATH" --dmg "$DMG_PATH"
 
 ARCHIVE_DIR="$ROOT/release-archive/$(date +%Y%m%d-%H%M%S)"
 if [ -d "$ROOT/字幕工厂.app" ] \
