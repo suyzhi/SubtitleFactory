@@ -1,6 +1,7 @@
 // 字幕工厂 - Backend API Client
 
 import { invoke } from '@tauri-apps/api/core';
+import { openUrl } from '@tauri-apps/plugin-opener';
 
 let BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000';
 let API_TOKEN = import.meta.env.VITE_API_TOKEN || '';
@@ -56,6 +57,21 @@ export interface PreparedFile {
 
 function isTauriDesktop(): boolean {
   return typeof window !== 'undefined' && Boolean((window as any).__TAURI_INTERNALS__);
+}
+
+export type PublicLink = 'privacy';
+const PUBLIC_LINKS: Record<PublicLink, string> = {
+  privacy: 'https://github.com/suyzhi/SubtitleFactory/blob/main/docs/PRIVACY.md',
+};
+
+export async function openPublicLink(link: PublicLink): Promise<void> {
+  const url = PUBLIC_LINKS[link];
+  if (isTauriDesktop()) {
+    await openUrl(url);
+    return;
+  }
+  const opened = window.open(url, '_blank', 'noopener,noreferrer');
+  if (!opened) throw new Error('浏览器阻止了新窗口，请允许后重试');
 }
 
 function nativeError(error: unknown): Error {

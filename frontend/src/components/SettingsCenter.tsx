@@ -10,6 +10,7 @@ import AppSelect from './AppSelect';
 import { languageLabel } from '../languages';
 
 type Category = 'general' | 'transcription' | 'ai' | 'translation' | 'storage' | 'appearance' | 'about';
+const APP_VERSION = __APP_VERSION__;
 
 const CATEGORIES: { id: Category; icon: string; label: string }[] = [
   { id: 'general', icon: '⌂', label: '通用' },
@@ -414,6 +415,15 @@ export default function SettingsCenter(props: Props) {
     }
   };
 
+  const openPrivacyPolicy = async () => {
+    setError('');
+    try {
+      await api.openPublicLink('privacy');
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : '无法打开隐私政策');
+    }
+  };
+
   const renderPath = (
     label: string, field: keyof AppSettings, kind: PathValidationResult['kind'], placeholder: string, directory = false,
   ) => {
@@ -441,7 +451,7 @@ export default function SettingsCenter(props: Props) {
               <i>{item.icon}</i><span>{item.label}</span>
             </button>)}
           </nav>
-          <small className="settings-version">Version {health?.version || '0.3.2'}</small>
+          <small className="settings-version">Version {health?.version || APP_VERSION}</small>
         </aside>
 
         <div className="settings-content">
@@ -674,7 +684,7 @@ export default function SettingsCenter(props: Props) {
                 <div className="shortcut-grid"><span>播放 / 暂停</span><kbd>Space</kbd><span>剧院模式</span><kbd>T</kbd><span>关闭弹窗或检查器</span><kbd>Esc</kbd><span>保存字幕编辑</span><kbd>Return</kbd></div>
               </SettingsSection>
               <SettingsSection title="关于字幕工厂" description="本地优先的专业字幕工作台。">
-                <div className="about-card"><strong>字幕工厂 {health?.version || '0.4.1'}</strong><span>Apple Silicon · {distributionChannel === 'app_store' ? 'Mac App Store 版' : '直装版'}</span><small>服务状态：{health?.status || '正在连接'}</small></div>
+                <div className="about-card"><strong>字幕工厂 {health?.version || APP_VERSION}</strong><span>Apple Silicon · {distributionChannel === 'app_store' ? 'Mac App Store 版' : '直装版'}</span><small>服务状态：{health?.status || '正在连接'}</small></div>
                 <div className="about-data-row"><span><strong>数据目录</strong><small>{health?.runtime?.data_directory || 'App 本地数据目录'}</small></span></div>
                 <div className="inline-actions"><button className="button secondary" onClick={() => void copyDiagnostics()}>复制诊断信息</button><button className="button secondary" onClick={() => void exportDiagnostics()}>导出脱敏诊断包</button><button className="button secondary" onClick={() => { onClose(); onOpenLogs(); }}>查看处理日志</button></div>
                 <p className="settings-help">复制的诊断信息不包含本机路径或 API Key。自定义路径和密钥不会进入 Git、默认配置、日志或 Release。</p>
@@ -685,6 +695,7 @@ export default function SettingsCenter(props: Props) {
                 {youtubeEnabled
                   ? <div className="about-data-row"><span><strong>第三方媒体</strong><small>直装版可按用户指令连接 YouTube；仅应处理拥有明确权利的内容，Chrome 登录状态最多在权限挑战时读取一次。</small></span></div>
                   : <div className="about-data-row"><span><strong>App Store 保护</strong><small>此发行版不提供第三方网站媒体读取、Cookie 访问、持久监听文件夹或外部运行时路径。</small></span></div>}
+                <div className="inline-actions"><button className="button secondary" onClick={() => void openPrivacyPolicy()}>查看完整隐私政策</button></div>
                 <p className="settings-help">API Key 保存在 macOS 钥匙串。诊断包不包含密钥、媒体、字幕正文或完整用户目录路径。</p>
               </SettingsSection>
             </>}

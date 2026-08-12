@@ -23,6 +23,7 @@ from typing import Callable
 from ..models.database import get_db
 from ..utils.config import MLX_MODELS_DIR, QWEN_MLX_MODELS_DIR, WHISPER_MODELS_DIR
 from ..utils.task_manager import TaskCancelled, task_manager
+from ..version import product_user_agent
 
 
 @dataclass(frozen=True)
@@ -484,7 +485,7 @@ def _download_file(
     )
     headers = {
         "Accept": "application/octet-stream",
-        "User-Agent": "SubtitleFactory/0.3.2 verified-model-downloader",
+        "User-Agent": product_user_agent("verified-model-downloader"),
     }
     if existing:
         headers["Range"] = f"bytes={existing}-"

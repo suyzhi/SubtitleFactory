@@ -1,8 +1,8 @@
-# 字幕工厂 0.3.2
+# 字幕工厂 0.4.1
 
 字幕工厂是一款面向 Apple Silicon Mac 的字幕工作台：导入本地视频或粘贴 YouTube 链接后，可选择网页播放或完整下载，自动准备音频并转写，再按需进行 AI 整理、翻译与导出。
 
-## v0.3.2 当前能力
+## v0.4.1 当前能力
 
 - 安全的本地工作台：动态后端端口、会话令牌、项目级签名媒体 URL 与 macOS Keychain 密钥存储。
 - 专业编辑器：波形时间轴、时间码编辑、拆分/合并、批量替换、持久化撤销/重做与可恢复草稿。
@@ -26,7 +26,7 @@
 ./start-desktop.sh
 ```
 
-已构建的 v0.3.2 App 位于：
+已构建的 v0.4.1 App 位于：
 
 ```text
 字幕工厂.app
@@ -41,8 +41,8 @@ open "字幕工厂.app"
 DMG 与校验文件位于仓库根目录：
 
 ```text
-字幕工厂_0.3.2_aarch64.dmg
-字幕工厂_0.3.2_aarch64.dmg.sha256
+字幕工厂_0.4.1_aarch64.dmg
+字幕工厂_0.4.1_aarch64.dmg.sha256
 ```
 
 ## 使用流程
@@ -85,13 +85,15 @@ API Key 在发布版中保存到 macOS Keychain；数据库只保留配置状态
 
 ## 数据与隐私
 
-macOS 发布版数据目录：
+macOS 直装版数据目录：
 
 ```text
 ~/Library/Application Support/com.subtitlefactory.desktop/data/
 ```
 
 其中包含项目媒体、字幕、导出、模型、日志、本机设置和 SQLite 数据库。网页模式播放视频时，播放器会直接连接 YouTube；音频、字幕和项目数据仍保存在本机。移入回收站不会删除这些文件；只有永久删除或清空回收站才会清理对应项目数据。
+
+Mac App Store 版启用 App Sandbox，数据位于系统管理的 `~/Library/Containers/com.subtitlefactory.desktop/` 容器中。该发行版只接受用户主动选择的本地视频，不提供 YouTube、Cookie、持久监听文件夹或外部运行时路径。
 
 详细文档：[隐私说明](docs/PRIVACY.md) · [云端增强授权](docs/CLOUD_AUTHORIZATION.md) · [编辑器快捷键](docs/SHORTCUTS.md) · [备份与故障恢复](docs/RECOVERY.md)
 
@@ -182,4 +184,4 @@ npx tauri dev
 
 ## 发布说明
 
-当前 v0.3.2 使用本机 ad-hoc 签名，适合本机安装与测试，不代表已经完成 Apple 公证。若要公开分发，仍需配置 Developer ID、notarization、stapling 和 Gatekeeper 验证。
+当前 v0.4.1 根目录 App/DMG 使用本机 ad-hoc 签名，适合本机安装与测试，不代表已经完成 Apple 公证。`字幕工厂-AppStore-QA.app` 只验证沙盒产品路径，同样不可上传。公开直装分发仍需 Developer ID、公证、stapling 与 Gatekeeper 验证；Mac App Store 提交还需要正式 App ID、Mac App Distribution / Installer Distribution 证书、provisioning profile、完整 Xcode 和 App Store Connect 元数据。

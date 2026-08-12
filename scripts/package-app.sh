@@ -39,6 +39,7 @@ if [ "$(uname -s)" != "Darwin" ] || [ "$(uname -m)" != "arm64" ]; then
   exit 1
 fi
 
+"$ROOT/backend/.venv/bin/python" "$ROOT/scripts/check-versions.py"
 "$ROOT/backend/.venv/bin/python" "$ROOT/scripts/verify-model-sources.py"
 "$ROOT/backend/.venv/bin/python" -m pytest -q "$ROOT/backend/tests"
 
@@ -85,6 +86,11 @@ DMG_PATH="$(find "$BUNDLE_DIR/dmg" -maxdepth 1 -type f -name '*.dmg' -print -qui
 
 if [ ! -d "$APP_PATH" ] || [ -z "$DMG_PATH" ]; then
   echo "Tauri 构建未生成预期的 App 或 DMG。" >&2
+  exit 1
+fi
+if [ "$(/usr/libexec/PlistBuddy -c 'Print :LSApplicationCategoryType' "$APP_PATH/Contents/Info.plist" 2>/dev/null || true)" \
+  != "public.app-category.video" ]; then
+  echo "最终 App 缺少 Video 应用类别。" >&2
   exit 1
 fi
 

@@ -19,6 +19,7 @@ from typing import Any, Callable, Iterator
 
 from ..utils.config import MODELS_DIR
 from ..utils.task_manager import TaskCancelled, task_manager
+from ..version import product_user_agent
 from .parakeet_transcriber import (
     SILERO_VAD_BYTES,
     SILERO_VAD_SHA256,
@@ -209,7 +210,7 @@ def _download_verified_file(
         existing = 0
     headers = {
         "Accept": "application/octet-stream",
-        "User-Agent": "SubtitleFactory/0.3.2 verified-model-downloader",
+        "User-Agent": product_user_agent("verified-model-downloader"),
     }
     if existing:
         headers["Range"] = f"bytes={existing}-"

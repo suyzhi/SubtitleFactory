@@ -128,6 +128,7 @@ fi
 plutil -lint "$GENERATED_ENTITLEMENTS" "$GENERATED_HELPER_ENTITLEMENTS" \
   "$TAURI_DIR/Info.plist" "$TAURI_DIR/PrivacyInfo.xcprivacy"
 
+"$ROOT/backend/.venv/bin/python" "$ROOT/scripts/check-versions.py"
 "$ROOT/backend/.venv/bin/python" "$ROOT/scripts/verify-model-sources.py"
 SUBTITLE_FACTORY_DISTRIBUTION_CHANNEL="direct" \
   "$ROOT/backend/.venv/bin/python" -m pytest -q "$ROOT/backend/tests"
@@ -169,7 +170,7 @@ if find "$TAURI_DIR/backend-runtime" -iname '*yt_dlp*' -print -quit | grep -q .;
 fi
 
 if [ "$QA_BUILD" = true ]; then
-  QA_TAURI_CONFIG='{"bundle":{"targets":["app"],"category":"Video","macOS":{"entitlements":"./Entitlements.appstore.plist","signingIdentity":"-"}}}'
+  QA_TAURI_CONFIG='{"bundle":{"targets":["app"],"macOS":{"entitlements":"./Entitlements.appstore.plist","signingIdentity":"-"}}}'
   npx tauri build --target aarch64-apple-darwin --bundles app \
     --config "$QA_TAURI_CONFIG"
 else
@@ -185,6 +186,11 @@ if [ ! -d "$APP_PATH" ] || [ ! -x "$RUNTIME_PATH/subtitle-backend" ]; then
 fi
 if [ ! -f "$APP_PATH/Contents/Resources/PrivacyInfo.xcprivacy" ]; then
   echo "最终 App 缺少 PrivacyInfo.xcprivacy。" >&2
+  exit 1
+fi
+if [ "$(/usr/libexec/PlistBuddy -c 'Print :LSApplicationCategoryType' "$APP_PATH/Contents/Info.plist" 2>/dev/null || true)" \
+  != "public.app-category.video" ]; then
+  echo "最终 App Store App 缺少 Video 应用类别。" >&2
   exit 1
 fi
 if [ -e "$RUNTIME_PATH/bin/deno" ] \

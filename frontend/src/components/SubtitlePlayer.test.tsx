@@ -38,7 +38,10 @@ const baseProps = {
 
 describe('SubtitlePlayer frame controls', () => {
   beforeEach(() => {
-    vi.restoreAllMocks();
+    // Keep the module-level resolved API mock; only clear call history.
+    // Restoring the mock erases its Promise implementation and turns this
+    // component's startup contract into a false failure.
+    vi.clearAllMocks();
     Object.defineProperty(HTMLMediaElement.prototype, 'pause', {
       configurable: true,
       value: vi.fn(),

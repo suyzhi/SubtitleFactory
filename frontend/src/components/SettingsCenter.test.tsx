@@ -36,6 +36,7 @@ vi.mock('../api/backend', async importOriginal => {
       pending: true, requires_restart: true, source_name: 'manual.db',
     }),
     restartDesktopApp: vi.fn().mockResolvedValue(true),
+    openPublicLink: vi.fn().mockResolvedValue(undefined),
   };
 });
 
@@ -210,6 +211,15 @@ function settingsProps(overrides: Partial<ComponentProps<typeof SettingsCenter>>
 }
 
 describe('SettingsCenter model catalog', () => {
+  it('shows the package version before the backend health check is ready', () => {
+    render(<SettingsCenter {...settingsProps({ health: null })}/>);
+    expect(screen.getByText('Version 0.4.1')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /快捷键与关于/ }));
+    expect(screen.getByText('字幕工厂 0.4.1')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: '查看完整隐私政策' }));
+    expect(api.openPublicLink).toHaveBeenCalledWith('privacy');
+  });
+
   it('renders the settings surface at the document root', () => {
     render(<SettingsCenter {...settingsProps()}/>);
     const dialog = screen.getByRole('dialog', { name: '设置中心' });

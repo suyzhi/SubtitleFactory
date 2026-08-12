@@ -93,6 +93,10 @@ App Store 版的限制是发行策略，不是运行失败后的静默降级。R
 - [x] 保留 Tauri 默认开启的 Hardened Runtime，并在最终逐层签名时显式使用 `--options runtime`。
 - [x] `Info.plist` 出口合规声明与 `PrivacyInfo.xcprivacy` 基础清单。
 - [x] 核对 Apple 当前 required-reason API 文档：其申报平台不包含原生 macOS，因此当前 `NSPrivacyAccessedAPITypes` 保持空数组，不添加未经证实的理由。
+- [x] 版本号、设置页占位、模型下载请求标识、README、Changelog 与 CycloneDX SBOM 纳入同一发布一致性门禁；CI 会重新生成供应链清单并拒绝未提交的漂移。
+- [x] “快捷键与关于”提供可访问的完整隐私政策入口；Tauri opener 权限只允许公开仓库中的这一条精确 HTTPS URL，不能打开任意地址。
+- [ ] 提供带真实、持续可联系信息的公开支持 URL；当前仓库 Issues 禁止新建，不能把它伪报为客服渠道。
+- [ ] 解锁桌面后制作并人工审核 16:10 的 Mac App Store 截图（1280×800、1440×900、2560×1600 或 2880×1800）。
 - [ ] 使用完整 Xcode 安装并确认当前 macOS SDK。
 - [ ] 注册与 `com.subtitlefactory.desktop` 一致的 App ID，或在所有版本文件中统一替换为最终 Bundle ID。
 - [ ] 安装 Mac App Distribution、Mac Installer Distribution 证书和 Mac App Store Connect provisioning profile。

@@ -36,7 +36,7 @@ describe('AppSelect', () => {
     const input = screen.getByRole('combobox', { name: '源语言' });
     await user.click(input);
     await user.type(input, 'English');
-    expect(screen.getByRole('option', { name: 'EnglishEnglish' })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: /English\s+English/ })).toBeInTheDocument();
 
     await user.keyboard('{Escape}');
     expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
@@ -53,7 +53,7 @@ describe('AppSelect', () => {
     expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
 
     await user.click(input);
-    await user.click(screen.getByRole('option', { name: 'EnglishEnglish' }));
+    await user.click(screen.getByRole('option', { name: /English\s+English/ }));
 
     expect(onChange).toHaveBeenCalledWith('en');
     await waitFor(() => expect(screen.queryByRole('listbox')).not.toBeInTheDocument());

@@ -30,6 +30,7 @@
   "bundle": {
     "active": true,
     "targets": ["app", "dmg"],
+    "category": "Video",
     "resources": [
       "backend-runtime",
       "PrivacyInfo.xcprivacy"

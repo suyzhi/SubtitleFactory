@@ -11,6 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 OUTPUT = ROOT / "artifacts"
 OUTPUT.mkdir(exist_ok=True)
 components = []
+app_version = json.loads((ROOT / "frontend/package.json").read_text())["version"]
 
 lock = (ROOT / "backend/requirements-release.lock").read_text()
 for name, version in re.findall(r"^([A-Za-z0-9_.-]+)==([^\s\\]+)", lock, re.MULTILINE):
@@ -40,7 +41,7 @@ unique = {(item["purl"]): item for item in components}
 components = sorted(unique.values(), key=lambda item: item["purl"])
 sbom = {
     "bomFormat": "CycloneDX", "specVersion": "1.5", "version": 1,
-    "metadata": {"component": {"type": "application", "name": "subtitle-factory", "version": "0.3.2"}},
+    "metadata": {"component": {"type": "application", "name": "subtitle-factory", "version": app_version}},
     "components": components,
 }
 (OUTPUT / "sbom.cdx.json").write_text(json.dumps(sbom, ensure_ascii=False, indent=2) + "\n")

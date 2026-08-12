@@ -44,6 +44,8 @@ jobs:
         run: cargo check --locked --manifest-path frontend/src-tauri/Cargo.toml
       - name: Generate SBOM and license inventory
         run: python scripts/generate-sbom.py
+      - name: Verify committed supply-chain inventory
+        run: git diff --exit-code -- artifacts
       - name: Clean generated build products
         if: always()
         run: |

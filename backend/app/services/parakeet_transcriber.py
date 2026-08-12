@@ -30,6 +30,7 @@ from typing import Any, Callable, Iterator
 
 from ..utils.config import MODELS_DIR, environment_path_overrides_enabled
 from ..utils.task_manager import TaskCancelled, task_manager
+from ..version import product_user_agent
 from .runtime_diagnostics import validate_runtime_executable
 
 logger = logging.getLogger(__name__)
@@ -644,7 +645,7 @@ def _download_file(
     checkpoint()
     headers = {
         "Accept": "application/octet-stream",
-        "User-Agent": "SubtitleFactory/0.1 sherpa-onnx-model-downloader",
+        "User-Agent": product_user_agent("sherpa-onnx-model-downloader"),
     }
     if existing:
         headers["Range"] = f"bytes={existing}-"

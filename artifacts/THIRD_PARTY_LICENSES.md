@@ -9,8 +9,18 @@
 - `pkg:cargo/android_logger@0.15.1` — MIT OR Apache-2.0
 - `pkg:cargo/android_system_properties@0.1.5` — MIT/Apache-2.0
 - `pkg:cargo/anyhow@1.0.103` — MIT OR Apache-2.0
-- `pkg:cargo/app@0.3.2` — See upstream package metadata
+- `pkg:cargo/app@0.4.1` — See upstream package metadata
 - `pkg:cargo/arrayvec@0.7.8` — MIT OR Apache-2.0
+- `pkg:cargo/async-broadcast@0.7.2` — MIT OR Apache-2.0
+- `pkg:cargo/async-channel@2.5.0` — Apache-2.0 OR MIT
+- `pkg:cargo/async-executor@1.14.0` — Apache-2.0 OR MIT
+- `pkg:cargo/async-io@2.6.0` — Apache-2.0 OR MIT
+- `pkg:cargo/async-lock@3.4.2` — Apache-2.0 OR MIT
+- `pkg:cargo/async-process@2.5.0` — Apache-2.0 OR MIT
+- `pkg:cargo/async-recursion@1.1.1` — MIT OR Apache-2.0
+- `pkg:cargo/async-signal@0.2.14` — Apache-2.0 OR MIT
+- `pkg:cargo/async-task@4.7.1` — Apache-2.0 OR MIT
+- `pkg:cargo/async-trait@0.1.92` — MIT OR Apache-2.0
 - `pkg:cargo/atk-sys@0.18.2` — MIT
 - `pkg:cargo/atk@0.18.2` — MIT
 - `pkg:cargo/atomic-waker@1.1.2` — Apache-2.0 OR MIT
@@ -24,6 +34,7 @@
 - `pkg:cargo/bitvec@1.1.1` — MIT
 - `pkg:cargo/block-buffer@0.10.4` — MIT OR Apache-2.0
 - `pkg:cargo/block2@0.6.2` — MIT
+- `pkg:cargo/blocking@1.6.2` — Apache-2.0 OR MIT
 - `pkg:cargo/borsh-derive@1.7.0` — Apache-2.0
 - `pkg:cargo/borsh@1.7.0` — MIT OR Apache-2.0
 - `pkg:cargo/brotli-decompressor@5.0.3` — BSD-3-Clause/MIT
@@ -50,6 +61,7 @@
 - `pkg:cargo/cfg_aliases@0.2.1` — MIT
 - `pkg:cargo/chrono@0.4.45` — MIT OR Apache-2.0
 - `pkg:cargo/combine@4.6.7` — MIT
+- `pkg:cargo/concurrent-queue@2.5.0` — Apache-2.0 OR MIT
 - `pkg:cargo/cookie@0.18.1` — MIT OR Apache-2.0
 - `pkg:cargo/core-foundation-sys@0.8.7` — MIT OR Apache-2.0
 - `pkg:cargo/core-foundation@0.10.1` — MIT OR Apache-2.0
@@ -88,9 +100,15 @@
 - `pkg:cargo/dyn-clone@1.0.20` — MIT OR Apache-2.0
 - `pkg:cargo/embed-resource@3.0.11` — MIT
 - `pkg:cargo/embed_plist@1.2.2` — MIT OR Apache-2.0
+- `pkg:cargo/endi@1.1.1` — MIT
+- `pkg:cargo/enumflags2@0.7.12` — MIT OR Apache-2.0
+- `pkg:cargo/enumflags2_derive@0.7.12` — MIT OR Apache-2.0
 - `pkg:cargo/env_filter@0.1.4` — MIT OR Apache-2.0
 - `pkg:cargo/equivalent@1.0.2` — Apache-2.0 OR MIT
 - `pkg:cargo/erased-serde@0.4.10` — MIT OR Apache-2.0
+- `pkg:cargo/errno@0.3.14` — MIT OR Apache-2.0
+- `pkg:cargo/event-listener-strategy@0.5.4` — Apache-2.0 OR MIT
+- `pkg:cargo/event-listener@5.4.2` — Apache-2.0 OR MIT
 - `pkg:cargo/fastrand@2.4.1` — Apache-2.0 OR MIT
 - `pkg:cargo/fdeflate@0.3.7` — MIT OR Apache-2.0
 - `pkg:cargo/fern@0.7.1` — MIT
@@ -108,6 +126,7 @@
 - `pkg:cargo/futures-core@0.3.32` — MIT OR Apache-2.0
 - `pkg:cargo/futures-executor@0.3.32` — MIT OR Apache-2.0
 - `pkg:cargo/futures-io@0.3.32` — MIT OR Apache-2.0
+- `pkg:cargo/futures-lite@2.6.1` — Apache-2.0 OR MIT
 - `pkg:cargo/futures-macro@0.3.32` — MIT OR Apache-2.0
 - `pkg:cargo/futures-sink@0.3.32` — MIT OR Apache-2.0
 - `pkg:cargo/futures-task@0.3.32` — MIT OR Apache-2.0
@@ -137,6 +156,7 @@
 - `pkg:cargo/hashbrown@0.17.1` — MIT OR Apache-2.0
 - `pkg:cargo/heck@0.4.1` — MIT OR Apache-2.0
 - `pkg:cargo/heck@0.5.0` — MIT OR Apache-2.0
+- `pkg:cargo/hermit-abi@0.5.2` — MIT OR Apache-2.0
 - `pkg:cargo/hex@0.4.3` — MIT OR Apache-2.0
 - `pkg:cargo/html5ever@0.38.0` — MIT OR Apache-2.0
 - `pkg:cargo/http-body-util@0.1.3` — MIT
@@ -162,6 +182,8 @@
 - `pkg:cargo/indexmap@2.14.0` — Apache-2.0 OR MIT
 - `pkg:cargo/infer@0.19.0` — MIT
 - `pkg:cargo/ipnet@2.12.0` — MIT OR Apache-2.0
+- `pkg:cargo/is-docker@0.2.0` — MIT
+- `pkg:cargo/is-wsl@0.4.0` — MIT
 - `pkg:cargo/itoa@1.0.18` — MIT OR Apache-2.0
 - `pkg:cargo/javascriptcore-rs-sys@1.1.1` — MIT
 - `pkg:cargo/javascriptcore-rs@1.1.2` — MIT
@@ -179,6 +201,7 @@
 - `pkg:cargo/libdbus-sys@0.2.7` — Apache-2.0/MIT
 - `pkg:cargo/libloading@0.7.4` — ISC
 - `pkg:cargo/libredox@0.1.18` — MIT
+- `pkg:cargo/linux-raw-sys@0.12.1` — Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT
 - `pkg:cargo/litemap@0.8.2` — Unicode-3.0
 - `pkg:cargo/lock_api@0.4.14` — MIT OR Apache-2.0
 - `pkg:cargo/log@0.4.33` — MIT OR Apache-2.0
@@ -215,9 +238,12 @@
 - `pkg:cargo/objc2-web-kit@0.3.2` — Zlib OR Apache-2.0 OR MIT
 - `pkg:cargo/objc2@0.6.4` — MIT
 - `pkg:cargo/once_cell@1.21.4` — MIT OR Apache-2.0
+- `pkg:cargo/open@5.4.1` — MIT
 - `pkg:cargo/option-ext@0.2.0` — MPL-2.0
+- `pkg:cargo/ordered-stream@0.2.0` — MIT OR Apache-2.0
 - `pkg:cargo/pango-sys@0.18.0` — MIT
 - `pkg:cargo/pango@0.18.3` — MIT
+- `pkg:cargo/parking@2.2.1` — Apache-2.0 OR MIT
 - `pkg:cargo/parking_lot@0.12.5` — MIT OR Apache-2.0
 - `pkg:cargo/parking_lot_core@0.9.12` — MIT OR Apache-2.0
 - `pkg:cargo/percent-encoding@2.3.2` — MIT OR Apache-2.0
@@ -227,10 +253,12 @@
 - `pkg:cargo/phf_macros@0.13.1` — MIT
 - `pkg:cargo/phf_shared@0.13.1` — MIT
 - `pkg:cargo/pin-project-lite@0.2.17` — Apache-2.0 OR MIT
+- `pkg:cargo/piper@0.2.5` — MIT OR Apache-2.0
 - `pkg:cargo/pkg-config@0.3.33` — MIT OR Apache-2.0
 - `pkg:cargo/plist@1.10.0` — MIT
 - `pkg:cargo/png@0.17.16` — MIT OR Apache-2.0
 - `pkg:cargo/png@0.18.1` — MIT OR Apache-2.0
+- `pkg:cargo/polling@3.11.0` — Apache-2.0 OR MIT
 - `pkg:cargo/potential_utf@0.1.5` — Unicode-3.0
 - `pkg:cargo/powerfmt@0.2.0` — MIT OR Apache-2.0
 - `pkg:cargo/ppv-lite86@0.2.21` — MIT OR Apache-2.0
@@ -267,6 +295,7 @@
 - `pkg:cargo/rust_decimal@1.42.1` — MIT
 - `pkg:cargo/rustc-hash@2.1.3` — Apache-2.0 OR MIT
 - `pkg:cargo/rustc_version@0.4.1` — MIT OR Apache-2.0
+- `pkg:cargo/rustix@1.1.4` — Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT
 - `pkg:cargo/rustversion@1.0.22` — MIT OR Apache-2.0
 - `pkg:cargo/same-file@1.0.6` — Unlicense/MIT
 - `pkg:cargo/schemars@0.8.22` — MIT
@@ -293,6 +322,7 @@
 - `pkg:cargo/servo_arc@0.4.3` — MIT OR Apache-2.0
 - `pkg:cargo/sha2@0.10.9` — MIT OR Apache-2.0
 - `pkg:cargo/shlex@2.0.1` — MIT OR Apache-2.0
+- `pkg:cargo/signal-hook-registry@1.4.8` — MIT OR Apache-2.0
 - `pkg:cargo/simd-adler32@0.3.9` — MIT
 - `pkg:cargo/simdutf8@0.1.5` — MIT OR Apache-2.0
 - `pkg:cargo/siphasher@1.0.3` — MIT/Apache-2.0
@@ -309,6 +339,7 @@
 - `pkg:cargo/swift-rs@1.0.7` — MIT OR Apache-2.0
 - `pkg:cargo/syn@1.0.109` — MIT OR Apache-2.0
 - `pkg:cargo/syn@2.0.118` — MIT OR Apache-2.0
+- `pkg:cargo/syn@3.0.3` — MIT OR Apache-2.0
 - `pkg:cargo/sync_wrapper@1.0.2` — Apache-2.0
 - `pkg:cargo/synstructure@0.13.2` — MIT
 - `pkg:cargo/system-deps@6.2.2` — MIT OR Apache-2.0
@@ -322,12 +353,14 @@
 - `pkg:cargo/tauri-plugin-dialog@2.7.1` — Apache-2.0 OR MIT
 - `pkg:cargo/tauri-plugin-fs@2.5.1` — Apache-2.0 OR MIT
 - `pkg:cargo/tauri-plugin-log@2.8.0` — Apache-2.0 OR MIT
+- `pkg:cargo/tauri-plugin-opener@2.5.4` — Apache-2.0 OR MIT
 - `pkg:cargo/tauri-plugin@2.6.3` — Apache-2.0 OR MIT
 - `pkg:cargo/tauri-runtime-wry@2.11.4` — Apache-2.0 OR MIT
 - `pkg:cargo/tauri-runtime@2.11.3` — Apache-2.0 OR MIT
 - `pkg:cargo/tauri-utils@2.9.3` — Apache-2.0 OR MIT
 - `pkg:cargo/tauri-winres@0.3.6` — MIT
 - `pkg:cargo/tauri@2.11.5` — Apache-2.0 OR MIT
+- `pkg:cargo/tempfile@3.27.0` — MIT OR Apache-2.0
 - `pkg:cargo/tendril@0.5.0` — MIT OR Apache-2.0
 - `pkg:cargo/thiserror-impl@1.0.69` — MIT OR Apache-2.0
 - `pkg:cargo/thiserror-impl@2.0.18` — MIT OR Apache-2.0
@@ -356,12 +389,14 @@
 - `pkg:cargo/tower-layer@0.3.3` — MIT
 - `pkg:cargo/tower-service@0.3.3` — MIT
 - `pkg:cargo/tower@0.5.3` — MIT
+- `pkg:cargo/tracing-attributes@0.1.31` — MIT
 - `pkg:cargo/tracing-core@0.1.36` — MIT
 - `pkg:cargo/tracing@0.1.44` — MIT
 - `pkg:cargo/tray-icon@0.24.1` — MIT OR Apache-2.0
 - `pkg:cargo/try-lock@0.2.5` — MIT
 - `pkg:cargo/typeid@1.0.3` — MIT OR Apache-2.0
 - `pkg:cargo/typenum@1.20.1` — MIT OR Apache-2.0
+- `pkg:cargo/uds_windows@1.2.1` — MIT
 - `pkg:cargo/unic-char-property@0.9.0` — MIT/Apache-2.0
 - `pkg:cargo/unic-char-range@0.9.0` — MIT/Apache-2.0
 - `pkg:cargo/unic-common@0.9.0` — MIT/Apache-2.0
@@ -460,6 +495,10 @@
 - `pkg:cargo/x11@2.21.0` — MIT
 - `pkg:cargo/yoke-derive@0.8.2` — Unicode-3.0
 - `pkg:cargo/yoke@0.8.3` — Unicode-3.0
+- `pkg:cargo/zbus@5.19.0` — MIT
+- `pkg:cargo/zbus_macros@5.19.0` — MIT
+- `pkg:cargo/zbus_names@4.3.4` — MIT
+- `pkg:cargo/zcheapstr@1.1.0` — MIT
 - `pkg:cargo/zerocopy-derive@0.8.52` — BSD-2-Clause OR Apache-2.0 OR MIT
 - `pkg:cargo/zerocopy@0.8.52` — BSD-2-Clause OR Apache-2.0 OR MIT
 - `pkg:cargo/zerofrom-derive@0.1.7` — Unicode-3.0
@@ -468,6 +507,9 @@
 - `pkg:cargo/zerovec-derive@0.11.3` — Unicode-3.0
 - `pkg:cargo/zerovec@0.11.6` — Unicode-3.0
 - `pkg:cargo/zmij@1.0.21` — MIT
+- `pkg:cargo/zvariant@5.14.0` — MIT
+- `pkg:cargo/zvariant_derive@5.14.0` — MIT
+- `pkg:cargo/zvariant_utils@4.0.0` — MIT
 - `pkg:npm/@adobe/css-tools@4.5.0` — MIT
 - `pkg:npm/@asamuzakjp/css-color@3.2.0` — MIT
 - `pkg:npm/@babel/code-frame@7.29.7` — MIT
@@ -545,31 +587,7 @@
 - `pkg:npm/@rolldown/binding-win32-arm64-msvc@1.1.4` — MIT
 - `pkg:npm/@rolldown/binding-win32-x64-msvc@1.1.4` — MIT
 - `pkg:npm/@rolldown/pluginutils@1.0.1` — MIT
-- `pkg:npm/@rollup/rollup-android-arm-eabi@4.62.2` — MIT
-- `pkg:npm/@rollup/rollup-android-arm64@4.62.2` — MIT
-- `pkg:npm/@rollup/rollup-darwin-arm64@4.62.2` — MIT
-- `pkg:npm/@rollup/rollup-darwin-x64@4.62.2` — MIT
-- `pkg:npm/@rollup/rollup-freebsd-arm64@4.62.2` — MIT
-- `pkg:npm/@rollup/rollup-freebsd-x64@4.62.2` — MIT
-- `pkg:npm/@rollup/rollup-linux-arm-gnueabihf@4.62.2` — MIT
-- `pkg:npm/@rollup/rollup-linux-arm-musleabihf@4.62.2` — MIT
-- `pkg:npm/@rollup/rollup-linux-arm64-gnu@4.62.2` — MIT
-- `pkg:npm/@rollup/rollup-linux-arm64-musl@4.62.2` — MIT
-- `pkg:npm/@rollup/rollup-linux-loong64-gnu@4.62.2` — MIT
-- `pkg:npm/@rollup/rollup-linux-loong64-musl@4.62.2` — MIT
-- `pkg:npm/@rollup/rollup-linux-ppc64-gnu@4.62.2` — MIT
-- `pkg:npm/@rollup/rollup-linux-ppc64-musl@4.62.2` — MIT
-- `pkg:npm/@rollup/rollup-linux-riscv64-gnu@4.62.2` — MIT
-- `pkg:npm/@rollup/rollup-linux-riscv64-musl@4.62.2` — MIT
-- `pkg:npm/@rollup/rollup-linux-s390x-gnu@4.62.2` — MIT
-- `pkg:npm/@rollup/rollup-linux-x64-gnu@4.62.2` — MIT
-- `pkg:npm/@rollup/rollup-linux-x64-musl@4.62.2` — MIT
-- `pkg:npm/@rollup/rollup-openbsd-x64@4.62.2` — MIT
-- `pkg:npm/@rollup/rollup-openharmony-arm64@4.62.2` — MIT
-- `pkg:npm/@rollup/rollup-win32-arm64-msvc@4.62.2` — MIT
-- `pkg:npm/@rollup/rollup-win32-ia32-msvc@4.62.2` — MIT
-- `pkg:npm/@rollup/rollup-win32-x64-gnu@4.62.2` — MIT
-- `pkg:npm/@rollup/rollup-win32-x64-msvc@4.62.2` — MIT
+- `pkg:npm/@standard-schema/spec@1.1.0` — MIT
 - `pkg:npm/@tanstack/query-core@5.101.4` — MIT
 - `pkg:npm/@tanstack/react-query@5.101.4` — MIT
 - `pkg:npm/@tauri-apps/api@2.11.1` — Apache-2.0 OR MIT
@@ -586,6 +604,7 @@
 - `pkg:npm/@tauri-apps/cli-win32-x64-msvc@2.11.4` — Apache-2.0 OR MIT
 - `pkg:npm/@tauri-apps/cli@2.11.4` — Apache-2.0 OR MIT
 - `pkg:npm/@tauri-apps/plugin-dialog@2.7.1` — MIT OR Apache-2.0
+- `pkg:npm/@tauri-apps/plugin-opener@2.5.4` — MIT OR Apache-2.0
 - `pkg:npm/@testing-library/dom@10.4.1` — MIT
 - `pkg:npm/@testing-library/jest-dom/node_modules/dom-accessibility-api@0.6.3` — MIT
 - `pkg:npm/@testing-library/jest-dom@6.9.1` — MIT
@@ -600,32 +619,31 @@
 - `pkg:npm/@types/react-dom@19.2.3` — MIT
 - `pkg:npm/@types/react@19.2.17` — MIT
 - `pkg:npm/@vitejs/plugin-react@6.0.3` — MIT
-- `pkg:npm/@vitest/expect@3.2.7` — MIT
-- `pkg:npm/@vitest/pretty-format@3.2.7` — MIT
-- `pkg:npm/@vitest/runner@3.2.7` — MIT
-- `pkg:npm/@vitest/snapshot@3.2.7` — MIT
-- `pkg:npm/@vitest/spy@3.2.7` — MIT
-- `pkg:npm/@vitest/utils@3.2.7` — MIT
+- `pkg:npm/@vitest/expect@4.1.10` — MIT
+- `pkg:npm/@vitest/mocker@4.1.10` — MIT
+- `pkg:npm/@vitest/pretty-format@4.1.10` — MIT
+- `pkg:npm/@vitest/runner@4.1.10` — MIT
+- `pkg:npm/@vitest/snapshot@4.1.10` — MIT
+- `pkg:npm/@vitest/spy@4.1.10` — MIT
+- `pkg:npm/@vitest/utils@4.1.10` — MIT
 - `pkg:npm/agent-base@7.1.4` — MIT
 - `pkg:npm/ansi-regex@5.0.1` — MIT
 - `pkg:npm/ansi-styles@5.2.0` — MIT
 - `pkg:npm/aria-query@5.3.0` — Apache-2.0
 - `pkg:npm/assertion-error@2.0.1` — MIT
-- `pkg:npm/cac@6.7.14` — MIT
-- `pkg:npm/chai@5.3.3` — MIT
-- `pkg:npm/check-error@2.1.3` — MIT
+- `pkg:npm/chai@6.2.2` — MIT
+- `pkg:npm/convert-source-map@2.0.0` — MIT
 - `pkg:npm/css.escape@1.5.1` — MIT
 - `pkg:npm/cssstyle@4.6.0` — MIT
 - `pkg:npm/csstype@3.2.3` — MIT
 - `pkg:npm/data-urls@5.0.0` — MIT
 - `pkg:npm/debug@4.4.3` — MIT
 - `pkg:npm/decimal.js@10.6.0` — MIT
-- `pkg:npm/deep-eql@5.0.2` — MIT
 - `pkg:npm/dequal@2.0.3` — MIT
 - `pkg:npm/detect-libc@2.1.2` — Apache-2.0
 - `pkg:npm/dom-accessibility-api@0.5.16` — MIT
 - `pkg:npm/entities@6.0.1` — BSD-2-Clause
-- `pkg:npm/es-module-lexer@1.7.0` — MIT
+- `pkg:npm/es-module-lexer@2.3.1` — MIT
 - `pkg:npm/esbuild@0.28.1` — MIT
 - `pkg:npm/estree-walker@3.0.3` — MIT
 - `pkg:npm/expect-type@1.4.0` — Apache-2.0
@@ -651,21 +669,20 @@
 - `pkg:npm/lightningcss-win32-arm64-msvc@1.32.0` — MPL-2.0
 - `pkg:npm/lightningcss-win32-x64-msvc@1.32.0` — MPL-2.0
 - `pkg:npm/lightningcss@1.32.0` — MPL-2.0
-- `pkg:npm/loupe@3.2.1` — MIT
 - `pkg:npm/lru-cache@10.4.3` — ISC
 - `pkg:npm/lz-string@1.5.0` — MIT
 - `pkg:npm/magic-string@0.30.21` — MIT
 - `pkg:npm/min-indent@1.0.1` — MIT
 - `pkg:npm/ms@2.1.3` — MIT
-- `pkg:npm/nanoid@3.3.15` — MIT
+- `pkg:npm/nanoid@3.3.18` — MIT
 - `pkg:npm/nwsapi@2.2.24` — MIT
+- `pkg:npm/obug@2.1.4` — MIT
 - `pkg:npm/oxlint@1.72.0` — MIT
 - `pkg:npm/parse5@7.3.0` — MIT
 - `pkg:npm/pathe@2.0.3` — MIT
-- `pkg:npm/pathval@2.0.1` — MIT
 - `pkg:npm/picocolors@1.1.1` — ISC
 - `pkg:npm/picomatch@4.0.5` — MIT
-- `pkg:npm/postcss@8.5.16` — MIT
+- `pkg:npm/postcss@8.5.26` — MIT
 - `pkg:npm/pretty-format@27.5.1` — MIT
 - `pkg:npm/punycode@2.3.1` — MIT
 - `pkg:npm/react-dom@19.2.7` — MIT
@@ -673,7 +690,6 @@
 - `pkg:npm/react@19.2.7` — MIT
 - `pkg:npm/redent@3.0.0` — MIT
 - `pkg:npm/rolldown@1.1.4` — MIT
-- `pkg:npm/rollup@4.62.2` — MIT
 - `pkg:npm/rrweb-cssom@0.8.0` — MIT
 - `pkg:npm/safer-buffer@2.1.2` — MIT
 - `pkg:npm/saxes@6.0.0` — ISC
@@ -681,17 +697,13 @@
 - `pkg:npm/siginfo@2.0.0` — ISC
 - `pkg:npm/source-map-js@1.2.1` — BSD-3-Clause
 - `pkg:npm/stackback@0.0.2` — MIT
-- `pkg:npm/std-env@3.10.0` — MIT
+- `pkg:npm/std-env@4.2.0` — MIT
 - `pkg:npm/strip-indent@3.0.0` — MIT
-- `pkg:npm/strip-literal/node_modules/js-tokens@9.0.1` — MIT
-- `pkg:npm/strip-literal@3.1.0` — MIT
 - `pkg:npm/symbol-tree@3.2.4` — MIT
 - `pkg:npm/tinybench@2.9.0` — MIT
-- `pkg:npm/tinyexec@0.3.2` — MIT
+- `pkg:npm/tinyexec@1.3.0` — MIT
 - `pkg:npm/tinyglobby@0.2.17` — MIT
-- `pkg:npm/tinypool@1.1.1` — MIT
-- `pkg:npm/tinyrainbow@2.0.0` — MIT
-- `pkg:npm/tinyspy@4.0.4` — MIT
+- `pkg:npm/tinyrainbow@3.1.1` — MIT
 - `pkg:npm/tldts-core@6.1.86` — MIT
 - `pkg:npm/tldts@6.1.86` — MIT
 - `pkg:npm/tough-cookie@5.1.2` — BSD-3-Clause
@@ -699,12 +711,8 @@
 - `pkg:npm/tslib@2.8.1` — 0BSD
 - `pkg:npm/typescript@6.0.3` — Apache-2.0
 - `pkg:npm/undici-types@7.18.2` — MIT
-- `pkg:npm/vite-node/node_modules/vite@7.3.6` — MIT
-- `pkg:npm/vite-node@3.2.4` — MIT
 - `pkg:npm/vite@8.1.3` — MIT
-- `pkg:npm/vitest/node_modules/@vitest/mocker@3.2.7` — MIT
-- `pkg:npm/vitest/node_modules/vite@7.3.6` — MIT
-- `pkg:npm/vitest@3.2.7` — MIT
+- `pkg:npm/vitest@4.1.10` — MIT
 - `pkg:npm/w3c-xmlserializer@5.0.0` — MIT
 - `pkg:npm/webidl-conversions@7.0.0` — BSD-2-Clause
 - `pkg:npm/whatwg-encoding@3.1.1` — MIT
@@ -746,6 +754,7 @@
 - `pkg:pypi/macholib@1.16.4` — See upstream package metadata
 - `pkg:pypi/markupsafe@3.0.3` — See upstream package metadata
 - `pkg:pypi/mlx-metal@0.32.0` — See upstream package metadata
+- `pkg:pypi/mlx-qwen3-asr@0.3.5` — See upstream package metadata
 - `pkg:pypi/mlx-whisper@0.4.3` — See upstream package metadata
 - `pkg:pypi/mlx@0.32.0` — See upstream package metadata
 - `pkg:pypi/more-itertools@11.1.0` — See upstream package metadata
@@ -755,6 +764,7 @@
 - `pkg:pypi/numpy@2.4.6` — See upstream package metadata
 - `pkg:pypi/onnxruntime@1.27.0` — See upstream package metadata
 - `pkg:pypi/packaging@26.2` — See upstream package metadata
+- `pkg:pypi/pillow@12.3.0` — See upstream package metadata
 - `pkg:pypi/protobuf@7.35.1` — See upstream package metadata
 - `pkg:pypi/pydantic-core@2.46.4` — See upstream package metadata
 - `pkg:pypi/pydantic-settings@2.14.2` — See upstream package metadata
@@ -769,8 +779,8 @@
 - `pkg:pypi/requests@2.34.2` — See upstream package metadata
 - `pkg:pypi/scipy@1.17.1` — See upstream package metadata
 - `pkg:pypi/setuptools@83.0.0` — See upstream package metadata
-- `pkg:pypi/sherpa-onnx-core@1.13.4` — See upstream package metadata
-- `pkg:pypi/sherpa-onnx@1.13.4` — See upstream package metadata
+- `pkg:pypi/sherpa-onnx-core@1.13.3` — See upstream package metadata
+- `pkg:pypi/sherpa-onnx@1.13.3` — See upstream package metadata
 - `pkg:pypi/srt@3.5.3` — See upstream package metadata
 - `pkg:pypi/starlette@1.3.1` — See upstream package metadata
 - `pkg:pypi/sympy@1.14.0` — See upstream package metadata

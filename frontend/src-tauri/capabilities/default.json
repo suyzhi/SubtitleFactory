@@ -10,6 +10,14 @@
     "core:window:allow-set-fullscreen",
     "core:window:allow-set-theme",
     "dialog:allow-open",
-    "dialog:allow-save"
+    "dialog:allow-save",
+    {
+      "identifier": "opener:allow-open-url",
+      "allow": [
+        {
+          "url": "https://github.com/suyzhi/SubtitleFactory/blob/main/docs/PRIVACY.md"
+        }
+      ]
+    }
   ]
 }

@@ -26,6 +26,7 @@ from app.services.parakeet_transcriber import (  # noqa: E402
     SILERO_VAD_URL,
 )
 from app.services.sherpa_catalog import MANAGED_SHERPA_MODELS  # noqa: E402
+from app.version import product_user_agent  # noqa: E402
 
 
 # Git blob IDs protect regular repository files. LFS/Xet files expose their
@@ -103,7 +104,7 @@ def get_json(url: str) -> dict | list:
         url,
         headers={
             "Accept": "application/vnd.github+json, application/json",
-            "User-Agent": "SubtitleFactory/0.3.2 release-source-verifier",
+            "User-Agent": product_user_agent("release-source-verifier"),
         },
     )
     with urllib.request.urlopen(request, timeout=45) as response:
