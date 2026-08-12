@@ -434,6 +434,10 @@ def create_content_pack(
     finally:
         db.close()
     task_id = task_manager.create_task(project_id, "content_generate", resource_class="network_ai")
+    task_manager.update_task(task_id, details={
+        "content_pack_id": pack_id,
+        "content_section": None,
+    })
     task_manager.run_background(
         task_id, generate_content_pack, pack_id, allow_translation_fallback, None
     )
@@ -634,6 +638,10 @@ def regenerate_section(pack_id: str, kind: str) -> str:
     if kind not in SECTION_ORDER:
         raise ContentPackError("未知内容区域", error_code="CONTENT_SECTION_INVALID", recoverable=False)
     task_id = task_manager.create_task(pack["project_id"], "content_generate", resource_class="network_ai")
+    task_manager.update_task(task_id, details={
+        "content_pack_id": pack_id,
+        "content_section": kind,
+    })
     task_manager.run_background(task_id, generate_content_pack, pack_id, None, kind)
     return task_id
 

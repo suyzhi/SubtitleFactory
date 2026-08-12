@@ -911,6 +911,21 @@ def resume_batch(batch_id: str) -> dict[str, Any]:
     for row in paused:
         if row["task_id"] and task_manager.resume_task(row["task_id"]):
             db = get_db(); db.execute("UPDATE batch_item_stages SET status='running',updated_at=? WHERE item_id=? AND stage=?", (_now(), row["item_id"], row["stage"])); db.commit(); db.close()
+        else:
+            # After an app restart the old Future no longer exists.  A user
+            # clicking Continue explicitly authorizes a fresh attempt of this
+            # stage instead of reviving a task row with no worker behind it.
+            db = get_db()
+            try:
+                db.execute(
+                    """UPDATE batch_item_stages
+                          SET status='waiting',task_id=NULL,error_code=NULL,error=NULL,updated_at=?
+                        WHERE item_id=? AND stage=? AND status='paused'""",
+                    (_now(), row["item_id"], row["stage"]),
+                )
+                db.commit()
+            finally:
+                db.close()
     _dispatch_batch(batch_id)
     return get_batch_detail(batch_id)
 
@@ -996,18 +1011,55 @@ def enable_batch_stage(batch_id: str, stage: str, configuration: dict[str, Any])
 
 
 def recover_playlist_batches(interrupted_tasks: list[dict[str, Any]]) -> None:
-    interrupted_ids = {task["id"] for task in interrupted_tasks}
-    if interrupted_ids:
-        db = get_db()
-        try:
-            placeholders = ",".join("?" for _ in interrupted_ids)
-            db.execute(
-                f"UPDATE batch_item_stages SET status='failed',error_code='APP_INTERRUPTED',error='应用在任务执行期间退出',updated_at=? WHERE task_id IN ({placeholders})",
-                (_now(), *interrupted_ids),
+    """Reconcile playlist stages whose in-process workers disappeared.
+
+    Running/queued stages become explicit failures.  A stage that the user had
+    paused remains paused; ``resume_batch`` will create a new worker only after
+    the user clicks Continue.
+    """
+    original_status = {
+        str(task.get("id")): str(task.get("status") or "running")
+        for task in interrupted_tasks if task.get("id")
+    }
+    db = get_db()
+    try:
+        active = db.execute(
+            """SELECT s.item_id,s.stage,s.status,s.task_id,i.batch_id
+                 FROM batch_item_stages s
+                 JOIN batch_items i ON i.id=s.item_id
+                WHERE s.status IN ('queued','running','paused')"""
+        ).fetchall()
+        if not active:
+            return
+        now = _now()
+        affected_items: set[str] = set()
+        paused_batches: set[str] = set()
+        for row in active:
+            was_paused = (
+                row["status"] == "paused"
+                or original_status.get(str(row["task_id"] or "")) == "paused"
             )
-            db.commit()
-            batch_ids = [row[0] for row in db.execute("SELECT id FROM batches WHERE kind=?", (PLAYLIST_KIND,)).fetchall()]
-        finally:
-            db.close()
-        for batch_id in batch_ids:
-            _refresh_batch(batch_id)
+            next_status = "paused" if was_paused else "failed"
+            error = (
+                "应用退出前已暂停；点击继续将从该阶段重新开始"
+                if was_paused else "应用在任务执行期间退出"
+            )
+            db.execute(
+                """UPDATE batch_item_stages
+                      SET status=?,error_code='APP_INTERRUPTED',error=?,updated_at=?
+                    WHERE item_id=? AND stage=?""",
+                (next_status, error, now, row["item_id"], row["stage"]),
+            )
+            affected_items.add(row["item_id"])
+            if was_paused:
+                paused_batches.add(row["batch_id"])
+        for batch_id in paused_batches:
+            db.execute(
+                "UPDATE batches SET paused=1,status='paused',updated_at=? WHERE id=?",
+                (now, batch_id),
+            )
+        db.commit()
+    finally:
+        db.close()
+    for item_id in affected_items:
+        _refresh_item(item_id)

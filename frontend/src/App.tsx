@@ -42,8 +42,7 @@ import SmartToolsPanel from './components/SmartToolsPanel';
 import PlaylistBatchGroups from './components/PlaylistBatchGroups';
 import SubtitleStylePanel from './components/SubtitleStylePanel';
 import {
-  isDownloadFailure,
-  isTranscriptionFailure,
+  recoveryAction,
   recoveryActionLabel as taskRecoveryActionLabel,
 } from './taskRecovery';
 import LanguagePicker from './components/LanguagePicker';
@@ -1048,11 +1047,38 @@ function App() {
     }));
   }, [activeProject, compatibleModel, config.language, requireRuntime, startTask]);
 
-  const recoverTranscription = useCallback(async () => {
+  const recoverTranscription = useCallback(async (preserveModel = false) => {
     if (!activeProject || !currentTask?.recoverable) return;
     try {
       const status = await api.getTranscriptionModels(activeProject.id, config.language);
-      const failedModel = String(currentTask.details?.model_id || currentTask.details?.resolved_model || config.model);
+      const failedModel = String(
+        currentTask.details?.model_id
+        || currentTask.details?.model_resolution?.model_id
+        || currentTask.details?.resume_payload?.model
+        || currentTask.details?.resolved_model
+        || config.model,
+      );
+      if (preserveModel) {
+        const selected = status.models.find(item => item.id === failedModel);
+        if (!selected?.ready) {
+          setSelectedStep('transcribe');
+          setProjectWorkspace('process');
+          setToast('原转写模型当前未就绪，请检查模型与运行设备后重试');
+          return;
+        }
+        const runtime = String(currentTask.details?.runtime || runtimeForModel(failedModel) || '');
+        if (!runtime) {
+          setSelectedStep('transcribe');
+          setProjectWorkspace('process');
+          setToast('请重新选择转写运行设备后再重试');
+          return;
+        }
+        if (!window.confirm(`上次转写在应用退出时被中断。原有已发布字幕未被覆盖。\n\n是否使用 ${selected.name} 从头重新转写？`)) return;
+        await startTask('重新开始转写', 'transcribe', () => api.retryTranscription(activeProject.id, {
+          model: failedModel, language: String(currentTask.details?.language || config.language), runtime,
+        }));
+        return;
+      }
       const fallback = status.models.find(item => item.ready && item.id !== failedModel && item.id === 'small')
         || status.models.find(item => item.ready && item.id !== failedModel);
       if (!fallback) {
@@ -1068,7 +1094,7 @@ function App() {
     } catch (error: any) {
       setToast(`无法启动恢复：${error.message}`);
     }
-  }, [activeProject, config.language, config.model, currentTask, requireRuntime, startTask]);
+  }, [activeProject, config.language, config.model, currentTask, requireRuntime, runtimeForModel, startTask]);
 
   const doClean = useCallback(() => {
     if (!activeProject) return;
@@ -1683,6 +1709,7 @@ function App() {
 
   const retryCurrentFailure = useCallback(() => {
     if (!currentTask?.recoverable) return;
+    const action = recoveryAction(currentTask);
     if (currentTask.type === 'materialize_video') {
       void beginMaterialization('manual', '重新下载本地副本');
       return;
@@ -1691,22 +1718,54 @@ function App() {
       void changeProjectMediaMode('local');
       return;
     }
-    if (currentTask.type === 'workflow' && isDownloadFailure(currentTask)) {
+    if (action === 'workflow') {
       doGenerateSubtitles();
       return;
     }
-    if (['download', 'prepare_audio'].includes(currentTask.type)) {
+    if (action === 'download') {
       retryDownload();
       return;
     }
-    if (isTranscriptionFailure(currentTask)) {
-      void recoverTranscription();
+    if (action === 'transcription') {
+      void recoverTranscription(currentTask.error_code === 'APP_INTERRUPTED');
       return;
     }
-    doGenerateSubtitles();
+    if (action === 'extract_audio') {
+      doExtractAudio();
+      return;
+    }
+    if (action === 'clean') {
+      doClean();
+      return;
+    }
+    if (action === 'translate') {
+      doTranslate();
+      return;
+    }
+    if (action === 'render') {
+      const format = currentTask.details?.format === 'mkv' ? 'mkv' : 'mp4';
+      void doExport(format);
+      return;
+    }
+    if (action === 'smart_tools') {
+      setProjectWorkspace('smart');
+      setToast('已打开智能工具；请检查范围与模型后重新开始');
+      return;
+    }
+    if (action === 'content') {
+      setProjectWorkspace('content');
+      setToast('已打开内容工作区；已完成结果仍在，请手动重试中断的部分');
+      return;
+    }
+    if (action === 'settings') {
+      setShowAISettings(true);
+      return;
+    }
+    setProjectWorkspace('process');
+    setToast('已打开处理流程，请检查参数后重新开始');
   }, [
-    beginMaterialization, changeProjectMediaMode, currentTask, doGenerateSubtitles,
-    recoverTranscription, retryDownload,
+    beginMaterialization, changeProjectMediaMode, currentTask, doClean, doExport,
+    doExtractAudio, doGenerateSubtitles, doTranslate, recoverTranscription, retryDownload,
   ]);
 
   const recoveryActionLabel = taskRecoveryActionLabel(currentTask);

@@ -216,6 +216,7 @@ def create_clip_set(
     finally:
         db.close()
     task_id = task_manager.create_task(project_id, "clip_recommend", resource_class="network_ai")
+    task_manager.update_task(task_id, details={"clip_set_id": identifier})
     task_manager.run_background(task_id, recommend_clips, identifier)
     return identifier, task_id
 
@@ -884,6 +885,10 @@ def create_render_batch(project_id: str, items: list[dict[str, str]], confirm_st
     if not jobs:
         return "", render_ids
     task_id = task_manager.create_task(project_id, "clip_render_batch", resource_class="ffmpeg")
+    task_manager.update_task(task_id, details={
+        "clip_set_id": str(jobs[0]["candidate"].get("clip_set_id") or "") if jobs else "",
+        "render_ids": list(render_ids),
+    })
     db = get_db()
     try:
         db.executemany(

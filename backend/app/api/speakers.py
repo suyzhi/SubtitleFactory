@@ -115,6 +115,10 @@ def start_diarization(project_id: str, request: DiarizationRequest):
     for path in (request.segmentation_model, request.embedding_model):
         if not os.path.isfile(os.path.expanduser(path)): raise HTTPException(422, "说话人模型文件不存在")
     task_id = task_manager.create_task(project_id, "speaker_diarization", resource_class="ml")
+    task_manager.update_task(task_id, details={
+        "num_speakers": request.num_speakers,
+        "managed_models": not distribution_capabilities().external_runtime_paths,
+    })
     task_manager.run_background(task_id, diarize_project, project_id, os.path.expanduser(request.segmentation_model), os.path.expanduser(request.embedding_model), request.num_speakers)
     return {"task_id": task_id, "local": True}
 

@@ -67,8 +67,10 @@ except Exception:
 async def lifespan(application: FastAPI):
     resume_interrupted_workflows(interrupted_tasks)
     capabilities = distribution_capabilities()
-    if capabilities.youtube:
-        recover_playlist_batches(interrupted_tasks)
+    # This is local database reconciliation, not a YouTube network action.
+    # Run it in every distribution so legacy rows cannot remain falsely live
+    # after a direct-build database is opened by the App Store build.
+    recover_playlist_batches(interrupted_tasks)
     stop_event = None
     worker = None
     if capabilities.filesystem_automation:

@@ -979,8 +979,8 @@ def list_projects(
     total = db.execute(f"SELECT COUNT(*) FROM projects p WHERE {where}", values).fetchone()[0]
     rows = db.execute(
         """SELECT p.*, (SELECT COUNT(*) FROM segments s WHERE s.project_id=p.id) segments_count,
-           (SELECT status FROM tasks t WHERE t.project_id=p.id ORDER BY updated_at DESC LIMIT 1) latest_task_status,
-           (SELECT message FROM tasks t WHERE t.project_id=p.id ORDER BY updated_at DESC LIMIT 1) latest_task_message
+           (SELECT status FROM tasks t WHERE t.project_id=p.id ORDER BY updated_at DESC,t.rowid DESC LIMIT 1) latest_task_status,
+           (SELECT message FROM tasks t WHERE t.project_id=p.id ORDER BY updated_at DESC,t.rowid DESC LIMIT 1) latest_task_message
            FROM projects p WHERE """ + where + f" ORDER BY {order} LIMIT ? OFFSET ?",
         [*values, page_size, (page - 1) * page_size],
     ).fetchall()
@@ -1318,6 +1318,9 @@ def update_project_media_mode(project_id: str, update: ProjectMediaModeUpdate):
     if not row["source_url"]:
         raise HTTPException(400, "项目没有可下载的视频链接")
     task_id = task_manager.create_task(project_id, "switch_media_mode")
+    task_manager.update_task(
+        task_id, details={"materialization_reason": "mode_switch"},
+    )
     task_manager.run_background(
         task_id, _do_download, project_id, row["source_url"],
         set_media_mode="local", preserve_metadata=True,
@@ -1354,6 +1357,9 @@ def materialize_project_video(
             },
         )
     task_id = task_manager.create_task(project_id, "materialize_video")
+    task_manager.update_task(
+        task_id, details={"materialization_reason": reason},
+    )
     task_manager.run_background(
         task_id, _do_download, project_id, row["source_url"],
         preserve_metadata=True, materialization_reason=reason,
@@ -1625,6 +1631,13 @@ async def import_local_video(
         imported=get_imported(resolved_model) if resolved_model.startswith("local:") else None
         selected_runtime=_select_runtime(resolved_model, runtime, settings, imported)
         task_id = task_manager.create_task(project_id, "workflow")
+        task_manager.update_task(task_id, details={"resume_payload": {
+            "project_id": project_id,
+            "model": resolved_model,
+            "language": language,
+            "source_url": None,
+            "runtime": selected_runtime,
+        }})
         task_manager.run_background(
             task_id, _do_workflow, project_id, resolved_model, language, None, selected_runtime,
         )
@@ -1848,7 +1861,7 @@ def start_transcribe(project_id: str, language: str = Form("auto"), model: str =
     task_id = task_manager.create_task(project_id, "transcribe")
     task_manager.update_task(
         task_id,
-        details={"model_id": model, "runtime": runtime},
+        details={"model_id": model, "runtime": runtime, "language": language},
     )
     task_manager.run_background(task_id, _do_transcribe, project_id, row["audio_path"], language, model, runtime)
     return {"task_id": task_id, "message": "转写任务已创建"}
@@ -1910,10 +1923,13 @@ def start_workflow(project_id: str, request: WorkflowRequest):
         )
         else None
     )
-    task_manager.update_task(task_id, details={"resume_payload": {
-        "project_id": project_id, "model": model, "language": request.language,
-        "source_url": should_download_source, "runtime": runtime,
-    }})
+    task_manager.update_task(task_id, details={
+        "resume_policy": "automatic_local_only",
+        "resume_payload": {
+            "project_id": project_id, "model": model, "language": request.language,
+            "source_url": should_download_source, "runtime": runtime,
+        },
+    })
     task_manager.run_background(
         task_id, _do_workflow, project_id, model, request.language,
         should_download_source, runtime,
@@ -2011,7 +2027,7 @@ def retry_transcription(project_id: str, request: TranscriptionRetryRequest):
     task_id = task_manager.create_task(project_id, "transcribe")
     task_manager.update_task(
         task_id,
-        details={"model_id": model, "runtime": runtime},
+        details={"model_id": model, "runtime": runtime, "language": request.language},
     )
     task_manager.run_background(task_id, _do_transcribe, project_id, row["audio_path"], request.language, model, runtime)
     return {"task_id": task_id, "message": "转写重试任务已创建", "model": model}
@@ -2036,6 +2052,11 @@ def start_clean(project_id: str, target_length: int = Form(42), provider_id: Opt
     db=get_db(); existing=db.execute("SELECT id FROM tasks WHERE project_id=? AND type='clean' AND status IN ('pending','running','paused') ORDER BY created_at DESC LIMIT 1",(project_id,)).fetchone(); db.close()
     if existing: return {"task_id":existing["id"],"message":"AI 整理已在运行","existing":True}
     task_id = task_manager.create_task(project_id, "clean")
+    task_manager.update_task(task_id, details={
+        "target_length": target_length,
+        "provider_id": provider_id,
+        "model": model,
+    })
     task_manager.run_background(task_id, _do_clean, project_id, target_length, provider_id, model)
     return {"task_id": task_id, "message": "AI 整理任务已创建"}
 
@@ -2082,6 +2103,11 @@ def start_translate(project_id: str, target_language: str = Form("zh"), provider
     db.close()
 
     task_id = task_manager.create_task(project_id, "translate")
+    task_manager.update_task(task_id, details={
+        "target_language": target_language,
+        "provider_id": provider_id,
+        "model": model,
+    })
     task_manager.run_background(task_id, _do_translate, project_id, target_language, provider_id, model)
     return {"task_id": task_id, "message": "AI 翻译任务已创建"}
 
@@ -2324,6 +2350,11 @@ def export_subtitles(project_id: str, req: ExportRequest):
 
         # 后台压制
         task_id = task_manager.create_task(project_id, "render")
+        task_manager.update_task(task_id, details={
+            "format": fmt,
+            "bilingual": bilingual,
+            "style": style_settings or {},
+        })
         from ..utils.config import EXPORTS_DIR
         output_path = os.path.join(EXPORTS_DIR, f"{project_id}_hardsub.{fmt}")
         task_manager.run_background(

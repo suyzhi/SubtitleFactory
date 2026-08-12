@@ -101,6 +101,91 @@ class DistributionPolicyTests(unittest.TestCase):
         self.assertEqual(resumed, 0)
         create_task.assert_not_called()
 
+    def test_restart_never_auto_resumes_paused_or_cloud_workflows(self):
+        interrupted = [
+            {
+                "id": "paused-workflow",
+                "type": "workflow",
+                "status": "paused",
+                "details": {"resume_payload": {
+                    "project_id": "project", "model": "small", "language": "en",
+                    "runtime": "cpu",
+                }},
+            },
+            {
+                "id": "cloud-workflow",
+                "type": "workflow",
+                "status": "running",
+                "details": json.dumps({"resume_payload": {
+                    "project_id": "project", "model": "fun-asr-realtime", "language": "zh",
+                    "runtime": "dashscope_cloud",
+                }}),
+            },
+        ]
+        with (
+            patch.dict(os.environ, {CHANNEL_ENV: DIRECT_CHANNEL}),
+            patch.object(task_manager, "create_task") as create_task,
+        ):
+            resumed = watch_runtime.resume_interrupted_workflows(interrupted)
+        self.assertEqual(resumed, 0)
+        create_task.assert_not_called()
+
+    def test_restart_links_automatic_local_workflow_continuation(self):
+        created = self.client.post("/api/projects", json={
+            "title": "local restart recovery", "source_type": "local",
+        })
+        self.assertEqual(created.status_code, 201, created.text)
+        project_id = created.json()["project_id"]
+        payload = {
+            "project_id": project_id, "model": "small", "language": "en",
+            "runtime": "cpu", "source_url": None,
+        }
+        db = get_db()
+        try:
+            db.execute(
+                """INSERT INTO tasks(
+                       id,project_id,type,status,message,error,error_code,recoverable,
+                       available_actions,details,logs,created_at,updated_at
+                   ) VALUES (
+                       'local-workflow-before-restart',?,'workflow','failed',
+                       '上次运行被中断','应用在任务执行期间退出','APP_INTERRUPTED',1,
+                       '[\"retry\"]',?,'[]','before','before'
+                   )""",
+                (project_id, json.dumps({"resume_payload": payload})),
+            )
+            db.commit()
+        finally:
+            db.close()
+
+        interrupted = [{
+            "id": "local-workflow-before-restart", "type": "workflow",
+            "status": "running", "details": json.dumps({"resume_payload": payload}),
+        }]
+        with (
+            patch.dict(os.environ, {CHANNEL_ENV: DIRECT_CHANNEL}),
+            patch.object(task_manager, "create_task", return_value="continued-workflow") as create_task,
+            patch.object(task_manager, "update_task") as update_task,
+            patch.object(task_manager, "run_background") as run_background,
+        ):
+            resumed = watch_runtime.resume_interrupted_workflows(interrupted)
+        self.assertEqual(resumed, 1)
+        create_task.assert_called_once_with(project_id, "workflow")
+        update_task.assert_called_once()
+        run_background.assert_called_once()
+
+        db = get_db()
+        try:
+            original = db.execute(
+                "SELECT recoverable,available_actions,message,details FROM tasks WHERE id=?",
+                ("local-workflow-before-restart",),
+            ).fetchone()
+        finally:
+            db.close()
+        self.assertFalse(original["recoverable"])
+        self.assertEqual(json.loads(original["available_actions"]), [])
+        self.assertEqual(original["message"], "应用重启后已在新任务中继续")
+        self.assertEqual(json.loads(original["details"])["resumed_by_task_id"], "continued-workflow")
+
     def test_app_store_rejects_all_youtube_entry_points_before_work(self):
         with patch.dict(os.environ, {CHANNEL_ENV: APP_STORE_CHANNEL}):
             responses = [

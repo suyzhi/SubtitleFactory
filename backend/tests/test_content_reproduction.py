@@ -502,10 +502,63 @@ class ContentReproductionTests(unittest.TestCase):
             "UPDATE content_pack_sections SET status='generating' WHERE pack_id=?",
             (pack["id"],),
         )
+        db.execute(
+            """INSERT INTO tasks(
+                   id,project_id,type,status,step,progress,message,recoverable,
+                   available_actions,details,logs,created_at,updated_at
+               ) VALUES (
+                   'interrupted-paused',?,'translate','paused','translating',35,
+                   '已暂停',0,'[]','{\"target_language\":\"en\"}',
+                   '[{\"time\":\"before\",\"level\":\"info\",\"step\":\"translating\",\"message\":\"已暂停\"}]',
+                   'before','before'
+               )""",
+            (self.project_id,),
+        )
+        db.execute(
+            """INSERT INTO tasks(
+                   id,project_id,type,status,step,progress,message,recoverable,
+                   available_actions,details,logs,created_at,updated_at
+               ) VALUES (
+                   'interrupted-running',?,'transcribe','running','transcribing',42,
+                   '正在转写',0,'[]','{\"model_id\":\"small\",\"runtime\":\"cpu\"}',
+                   '[]','before','before'
+               )""",
+            (self.project_id,),
+        )
+        db.execute(
+            """INSERT INTO tasks(
+                   id,project_id,type,status,progress,message,details,logs,
+                   available_actions,created_at,updated_at
+               ) VALUES (
+                   'already-complete',?,'render','success',100,'完成','{}','[]','[]','before','before'
+               )""",
+            (self.project_id,),
+        )
+        db.execute(
+            """INSERT INTO transcription_runs(
+                   id,project_id,task_id,model,status,started_at
+               ) VALUES ('interrupted-run',?,'interrupted-running','small','running','before')""",
+            (self.project_id,),
+        )
+        db.execute(
+            """INSERT INTO transcription_segments(
+                   id,run_id,project_id,idx,start,end,text,is_draft
+               ) VALUES ('interrupted-draft','interrupted-run',?,1,0,1,'draft survives',1)""",
+            (self.project_id,),
+        )
+        db.execute(
+            """INSERT INTO ai_batch_results(
+                   task_id,project_id,operation,batch_index,input_fingerprint,
+                   status,result_json,attempts,error,updated_at
+               ) VALUES (
+                   'interrupted-paused',?,'translate',1,'fingerprint','running','[]',1,'','before'
+               )""",
+            (self.project_id,),
+        )
         db.commit()
         db.close()
 
-        database.mark_interrupted_tasks()
+        interrupted = database.mark_interrupted_tasks()
         db = database.get_db()
         render = db.execute(
             "SELECT status,error FROM clip_renders WHERE id='interrupted-render'"
@@ -521,11 +574,51 @@ class ContentReproductionTests(unittest.TestCase):
                 "SELECT status FROM content_pack_sections WHERE pack_id=?", (pack["id"],)
             )
         }
+        paused_task = db.execute(
+            "SELECT * FROM tasks WHERE id='interrupted-paused'"
+        ).fetchone()
+        running_task = db.execute(
+            "SELECT * FROM tasks WHERE id='interrupted-running'"
+        ).fetchone()
+        complete_task = db.execute(
+            "SELECT status,message FROM tasks WHERE id='already-complete'"
+        ).fetchone()
+        run = db.execute(
+            "SELECT * FROM transcription_runs WHERE id='interrupted-run'"
+        ).fetchone()
+        draft_count = db.execute(
+            "SELECT COUNT(*) FROM transcription_segments WHERE run_id='interrupted-run'"
+        ).fetchone()[0]
+        ai_batch = db.execute(
+            "SELECT status,error FROM ai_batch_results WHERE task_id='interrupted-paused'"
+        ).fetchone()
         db.close()
         self.assertEqual((render["status"], render["error"]), ("failed", "应用在渲染期间退出"))
         self.assertEqual(clip_status, "failed")
         self.assertEqual(pack_status, "failed")
         self.assertEqual(section_statuses, {"failed"})
+        self.assertIn("interrupted-paused", {item["id"] for item in interrupted})
+        self.assertEqual(paused_task["status"], "failed")
+        self.assertEqual(paused_task["error_code"], "APP_INTERRUPTED")
+        self.assertTrue(paused_task["recoverable"])
+        self.assertEqual(json.loads(paused_task["available_actions"]), ["retry"])
+        paused_details = json.loads(paused_task["details"])
+        self.assertEqual(paused_details["interruption"]["previous_status"], "paused")
+        self.assertTrue(paused_details["interruption"]["published_data_preserved"])
+        paused_logs = json.loads(paused_task["logs"])
+        self.assertEqual(len(paused_logs), 2)
+        self.assertEqual(paused_logs[-1]["message"], "检测到上次运行被中断")
+        self.assertIn("不会擅自继续", paused_details["failure_suggestion"])
+        self.assertEqual(running_task["status"], "failed")
+        self.assertEqual(running_task["error_code"], "APP_INTERRUPTED")
+        self.assertEqual((complete_task["status"], complete_task["message"]), ("success", "完成"))
+        self.assertEqual(run["status"], "failed")
+        self.assertEqual(run["error_code"], "APP_INTERRUPTED")
+        self.assertIsNotNone(run["finished_at"])
+        self.assertEqual(draft_count, 1)
+        self.assertEqual(ai_batch["status"], "failed")
+        self.assertIn("未自动重试", ai_batch["error"])
+        self.assertEqual(database.mark_interrupted_tasks(), [])
 
 
 if __name__ == "__main__":

@@ -43,12 +43,12 @@ def list_tasks(status: str = "", limit: int = 100):
     try:
         if status:
             rows = db.execute(
-                "SELECT * FROM tasks WHERE status=? ORDER BY priority DESC,updated_at DESC LIMIT ?",
+                "SELECT * FROM tasks WHERE status=? ORDER BY priority DESC,updated_at DESC,rowid DESC LIMIT ?",
                 (status, max(1, min(limit, 500))),
             ).fetchall()
         else:
             rows = db.execute(
-                "SELECT * FROM tasks ORDER BY priority DESC,updated_at DESC LIMIT ?",
+                "SELECT * FROM tasks ORDER BY priority DESC,updated_at DESC,rowid DESC LIMIT ?",
                 (max(1, min(limit, 500)),),
             ).fetchall()
         return {"tasks": [_task_dict(row) for row in rows]}
@@ -60,7 +60,7 @@ def list_tasks(status: str = "", limit: int = 100):
 def get_latest_project_task(project_id: str):
     db = get_db()
     row = db.execute(
-        "SELECT * FROM tasks WHERE project_id=? ORDER BY updated_at DESC LIMIT 1", (project_id,)
+        "SELECT * FROM tasks WHERE project_id=? ORDER BY updated_at DESC,rowid DESC LIMIT 1", (project_id,)
     ).fetchone()
     db.close()
     if not row:

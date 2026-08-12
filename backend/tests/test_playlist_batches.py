@@ -163,6 +163,76 @@ class PlaylistBatchTests(unittest.TestCase):
         db.close()
         self.assertEqual(removed, 1)
 
+    def test_restart_reconciles_running_stage_but_preserves_user_pause(self):
+        created = playlist_batches.create_or_sync_playlist(
+            playlist_fixture(), self.configuration,
+        )
+        db = database.get_db()
+        items = db.execute(
+            "SELECT id FROM batch_items WHERE batch_id=? ORDER BY position",
+            (created["batch_id"],),
+        ).fetchall()
+        self.assertEqual(len(items), 2)
+        running_item, paused_item = items[0]["id"], items[1]["id"]
+        db.execute(
+            """UPDATE batch_item_stages
+                  SET status='running',task_id='stage-running'
+                WHERE item_id=? AND stage='download'""",
+            (running_item,),
+        )
+        db.execute(
+            """UPDATE batch_item_stages
+                  SET status='paused',task_id='stage-paused'
+                WHERE item_id=? AND stage='download'""",
+            (paused_item,),
+        )
+        db.execute(
+            "UPDATE batches SET status='running',paused=0 WHERE id=?",
+            (created["batch_id"],),
+        )
+        db.commit()
+        db.close()
+
+        playlist_batches.recover_playlist_batches([
+            {"id": "stage-running", "status": "running"},
+            {"id": "stage-paused", "status": "paused"},
+        ])
+
+        db = database.get_db()
+        running = db.execute(
+            "SELECT status,error_code,error FROM batch_item_stages WHERE item_id=? AND stage='download'",
+            (running_item,),
+        ).fetchone()
+        paused = db.execute(
+            "SELECT status,error_code,error FROM batch_item_stages WHERE item_id=? AND stage='download'",
+            (paused_item,),
+        ).fetchone()
+        batch = db.execute(
+            "SELECT status,paused FROM batches WHERE id=?", (created["batch_id"],)
+        ).fetchone()
+        db.close()
+        self.assertEqual((running["status"], running["error_code"]), ("failed", "APP_INTERRUPTED"))
+        self.assertIn("执行期间退出", running["error"])
+        self.assertEqual((paused["status"], paused["error_code"]), ("paused", "APP_INTERRUPTED"))
+        self.assertIn("点击继续", paused["error"])
+        self.assertEqual((batch["status"], batch["paused"]), ("paused", 1))
+
+        playlist_batches.resume_batch(created["batch_id"])
+        db = database.get_db()
+        resumed = db.execute(
+            "SELECT status,task_id,error_code,error FROM batch_item_stages WHERE item_id=? AND stage='download'",
+            (paused_item,),
+        ).fetchone()
+        batch = db.execute(
+            "SELECT paused FROM batches WHERE id=?", (created["batch_id"],)
+        ).fetchone()
+        db.close()
+        self.assertEqual(resumed["status"], "waiting")
+        self.assertIsNone(resumed["task_id"])
+        self.assertIsNone(resumed["error_code"])
+        self.assertIsNone(resumed["error"])
+        self.assertEqual(batch["paused"], 0)
+
     def test_create_hides_children_from_default_projects_and_preserves_detail(self):
         fixture = playlist_fixture()
         with patch.object(batches, "preview_playlist", return_value=fixture):

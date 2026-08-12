@@ -2,10 +2,12 @@
 字幕工厂 - 数据库初始化和管理
 """
 
+import json
 import os
 import re
 import sqlite3
 import threading
+import time
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 from ..utils.config import DB_PATH
@@ -256,17 +258,101 @@ def _init_db_unlocked():
 
 
 def mark_interrupted_tasks():
-    """Mark workers from a previous backend process as explicitly recoverable."""
+    """Finalize every non-terminal worker left by the previous backend process.
+
+    Task rows are the public history, while several feature tables keep their
+    own staging state.  Recovery happens before this process can submit new
+    work, so every still-active row belongs to the previous process and can be
+    reconciled in one transaction without racing a live worker.
+    """
     conn = get_db()
     rows = [dict(row) for row in conn.execute(
         "SELECT * FROM tasks WHERE status IN ('pending','running','paused')"
     )]
+    now = time.strftime("%Y-%m-%d %H:%M:%S")
+
+    def json_object(value) -> dict:
+        try:
+            decoded = json.loads(value or "{}")
+            return decoded if isinstance(decoded, dict) else {}
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return {}
+
+    def json_array(value) -> list:
+        try:
+            decoded = json.loads(value or "[]")
+            return decoded if isinstance(decoded, list) else []
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return []
+
+    settings_tasks = {"prepare_model", "prepare_speaker_models"}
+    for row in rows:
+        previous_status = str(row.get("status") or "running")
+        details = json_object(row.get("details"))
+        details["interruption"] = {
+            "previous_status": previous_status,
+            "interrupted_at": now,
+            "published_data_preserved": True,
+        }
+        if previous_status == "paused":
+            suggestion = "该任务在退出前已暂停；请检查参数后手动重新开始，应用不会擅自继续"
+            error = "应用退出时任务仍处于暂停状态"
+        else:
+            suggestion = "项目、已发布字幕和已完成阶段均已保留；请从对应工作区重新开始"
+            error = "应用在任务执行期间退出"
+        details["failure_suggestion"] = suggestion
+
+        logs = json_array(row.get("logs"))
+        logs.append({
+            "time": now,
+            "level": "warning",
+            "step": str(row.get("step") or "startup_recovery"),
+            "message": "检测到上次运行被中断",
+            "detail": error,
+            "suggestion": suggestion,
+        })
+
+        actions = [
+            action for action in json_array(row.get("available_actions"))
+            if isinstance(action, str)
+        ]
+        if row.get("type") in settings_tasks:
+            if "open_settings" not in actions:
+                actions.append("open_settings")
+        elif row.get("project_id") and "retry" not in actions:
+            actions.append("retry")
+        recoverable = bool(actions)
+        conn.execute(
+            """UPDATE tasks
+                  SET status='failed',error_code='APP_INTERRUPTED',error=?,
+                      recoverable=?,available_actions=?,message='上次运行被中断，项目内容已保留',
+                      details=?,logs=?,next_retry_at=NULL,updated_at=?
+                WHERE id=?""",
+            (
+                error, int(recoverable), json.dumps(actions, ensure_ascii=False),
+                json.dumps(details, ensure_ascii=False),
+                json.dumps(logs, ensure_ascii=False), now, row["id"],
+            ),
+        )
+
+    # A transcription run is an unpublished staging area.  Preserve its draft
+    # segments for diagnostics, but never leave the run claiming to be live.
     conn.execute(
-        """UPDATE tasks SET status='failed', error_code='APP_INTERRUPTED',
-           error='应用在任务执行期间退出', recoverable=1,
-           available_actions='[\"retry\"]', message='任务已中断，可重新开始',
-           updated_at=datetime('now','localtime')
-           WHERE status IN ('pending','running','paused')"""
+        """UPDATE transcription_runs
+              SET status='failed',error_code='APP_INTERRUPTED',
+                  error_message='应用在转写期间退出；原有已发布字幕未被覆盖',
+                  finished_at=?
+            WHERE status IN ('pending','running')""",
+        (now,),
+    )
+    # Network AI calls can have an uncertain remote outcome after a crash.
+    # Mark their local staging rows failed so a later user-confirmed retry can
+    # reuse only known-successful cached batches.
+    conn.execute(
+        """UPDATE ai_batch_results
+              SET status='failed',error='应用在 AI 请求期间退出，未自动重试',updated_at=?
+            WHERE status IN ('pending','running')""",
+        (now,),
     )
     # Reconcile feature-owned state as well as the task row.  These tables are
     # initialized before startup recovery runs, so no newly-created task can be
@@ -274,18 +360,21 @@ def mark_interrupted_tasks():
     conn.execute(
         """UPDATE clip_renders
               SET status='failed',error='应用在渲染期间退出',
-                  updated_at=datetime('now','localtime')
-            WHERE status IN ('pending','running')"""
+                  updated_at=?
+            WHERE status IN ('pending','running')""",
+        (now,),
     )
     conn.execute(
-        """UPDATE clip_sets SET status='failed',updated_at=datetime('now','localtime')
-            WHERE status='pending'"""
+        """UPDATE clip_sets SET status='failed',updated_at=?
+            WHERE status='pending'""",
+        (now,),
     )
     conn.execute(
         """UPDATE content_pack_sections
               SET status='failed',error='应用在生成期间退出',
-                  updated_at=datetime('now','localtime')
-            WHERE status IN ('pending','generating')"""
+                  updated_at=?
+            WHERE status IN ('pending','generating')""",
+        (now,),
     )
     conn.execute(
         """UPDATE content_packs
@@ -294,8 +383,9 @@ def mark_interrupted_tasks():
                         SELECT 1 FROM content_pack_sections s
                         WHERE s.pack_id=content_packs.id AND s.status='ready'
                     ) THEN 'partial' ELSE 'failed' END,
-                  updated_at=datetime('now','localtime')
-            WHERE status IN ('pending','generating')"""
+                  updated_at=?
+            WHERE status IN ('pending','generating')""",
+        (now,),
     )
     conn.commit()
     conn.close()

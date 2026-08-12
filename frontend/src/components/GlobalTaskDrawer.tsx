@@ -1,7 +1,20 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import * as api from '../api/backend';
+import { recoveryActionLabel } from '../taskRecovery';
 
 const TASK_LABELS: Record<string, string> = {
+  download: '下载素材',
+  prepare_audio: '准备网页音频',
+  extract_audio: '提取音频',
+  transcribe: '语音转写',
+  workflow: '自动字幕工作流',
+  clean: 'AI 整理',
+  translate: 'AI 翻译',
+  render: '导出成片',
+  ocr: '硬字幕 OCR',
+  speaker_diarization: '说话人识别',
+  prepare_model: '准备转写模型',
+  prepare_speaker_models: '准备说话人模型',
   content_generate: '生成内容发布包',
   clip_recommend: '推荐短片候选',
   clip_render_batch: '批量渲染短片',
@@ -38,10 +51,10 @@ export default function GlobalTaskDrawer({ open, onClose, onOpenProject, onOpenS
           <progress max={100} value={task.progress || 0}/>
         </button>
         {task.status === 'failed' && <section className="global-task-failure">
-          <strong>{task.error_code || '任务失败'} · 第 {task.attempt || 1} 次尝试</strong>
+          <strong>{task.error_code === 'APP_INTERRUPTED' ? '上次运行被中断' : task.error_code || '任务失败'} · 第 {task.attempt || 1} 次尝试</strong>
           <span>{task.suggestion || task.details?.failure_suggestion || task.error || ''}</span>
         </section>}
-        <div>{task.status === 'running' && <button onClick={() => void act(task.id, 'pause')}>暂停</button>}{task.status === 'paused' && <button onClick={() => void act(task.id, 'resume')}>继续</button>}{['pending', 'running', 'paused'].includes(task.status) && <button onClick={() => void act(task.id, 'cancel')}>取消</button>}{task.status === 'failed' && task.recoverable && task.project_id && <button onClick={() => onOpenProject(task.project_id)}>打开项目重试</button>}{task.available_actions?.includes('open_settings') && onOpenSettings && <button onClick={onOpenSettings}>打开设置</button>}</div>
+        <div>{task.status === 'running' && <button onClick={() => void act(task.id, 'pause')}>暂停</button>}{task.status === 'paused' && <button onClick={() => void act(task.id, 'resume')}>继续</button>}{['pending', 'running', 'paused'].includes(task.status) && <button onClick={() => void act(task.id, 'cancel')}>取消</button>}{task.status === 'failed' && task.recoverable && task.project_id && <button onClick={() => onOpenProject(task.project_id)}>打开项目 · {recoveryActionLabel(task)}</button>}{task.available_actions?.includes('open_settings') && onOpenSettings && <button onClick={onOpenSettings}>打开设置</button>}</div>
       </article>; })}
     </div>
   </aside>;
