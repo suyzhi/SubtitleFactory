@@ -47,7 +47,7 @@ App Store 版的限制是发行策略，不是运行失败后的静默降级。R
 
 - 187 个后端测试与 25 个子测试、61 个前端测试、6 个 Rust 测试、lint 全部通过。
 - 主 App、Python sidecar 和 Vision OCR 均为 arm64，深度严格签名校验通过；主 App 有 sandbox、网络与用户选取文件权限，helper 有 sandbox + inherit。
-- Tauri 展开的 45 个 PyInstaller 运行库链接会在签名前按原始相对目标恢复；脚本逐项拒绝绝对目标、目录逃逸、内容不一致或断链。本轮避免重复复制 `115,764,320 bytes`，根目录 QA App 从约 780 MB 降至 669 MB，深度签名与完整沙盒运行验收仍通过。
+- Sherpa 1.13.3 wheel 中字节完全相同、且没有代码引用的未版本化 ONNX Runtime 副本，会先移除签名并逐字节比较，再改为指向版本化运行库的安全相对链接；任何布局、内容或引用变化都会中止构建。连同 Tauri 展开的其他 PyInstaller 运行库链接，签名前共恢复并验证 46 个相对链接，逐项拒绝绝对目标、目录逃逸、内容不一致或断链。本轮合计避免重复复制 `150,995,104 bytes`（约 144 MiB），根目录 QA App 从约 780 MB 降至 636 MB（`651,104 KiB`），深度签名与完整沙盒运行验收仍通过。
 - 沙盒 App 能持续启动 localhost sidecar，数据库和项目文件位于 `~/Library/Containers/com.subtitlefactory.desktop/`；无令牌请求返回 401，真实会话请求返回 200。
 - `app_store` 能力矩阵关闭 YouTube、浏览器 Cookie、自定义下载目录、文件系统自动化和外部运行时路径；相应越权接口在真实 sidecar 上均返回 `DISTRIBUTION_FEATURE_UNAVAILABLE`，28 个可见模型中没有外部模型 ID。
 - 捆绑 arm64 FFmpeg/FFprobe 在沙盒内可用，yt-dlp、Deno 和 EJS 报告为 `disabled`。

@@ -65,8 +65,57 @@ else
 fi
 "$PYTHON" -m PyInstaller "${PYINSTALLER_ARGS[@]}" sidecar_main.py
 
+SHERPA_LIB_DIR="$DIST_DIR/subtitle-backend/_internal/sherpa_onnx/lib"
+SHERPA_ORT_ALIAS="$SHERPA_LIB_DIR/libonnxruntime.dylib"
+SHERPA_ORT_VERSIONED="$SHERPA_LIB_DIR/libonnxruntime.1.24.4.dylib"
+if [ ! -f "$SHERPA_ORT_ALIAS" ] || [ ! -f "$SHERPA_ORT_VERSIONED" ]; then
+  echo "Sherpa ONNX Runtime 文件布局与固定的 1.13.3 运行包不一致。" >&2
+  exit 1
+fi
+
+# sherpa-onnx 1.13.3's wheel ships these as two byte-identical Mach-O files,
+# even though every binary links the versioned install name. PyInstaller signs
+# each copy separately, so normalize temporary copies before proving identity.
+ORT_COMPARE_DIR="$(mktemp -d /tmp/subtitle-factory-ort-compare.XXXXXX)"
+cleanup_ort_compare() {
+  if [ -d "$ORT_COMPARE_DIR" ]; then
+    find "$ORT_COMPARE_DIR" -depth -delete
+  fi
+}
+trap cleanup_ort_compare EXIT
+cp "$SHERPA_ORT_ALIAS" "$ORT_COMPARE_DIR/unversioned.dylib"
+cp "$SHERPA_ORT_VERSIONED" "$ORT_COMPARE_DIR/versioned.dylib"
+codesign --remove-signature "$ORT_COMPARE_DIR/unversioned.dylib" 2>/dev/null || true
+codesign --remove-signature "$ORT_COMPARE_DIR/versioned.dylib" 2>/dev/null || true
+if ! cmp -s "$ORT_COMPARE_DIR/unversioned.dylib" "$ORT_COMPARE_DIR/versioned.dylib"; then
+  echo "Sherpa 的两个 ONNX Runtime 文件不再相同，拒绝合并。" >&2
+  exit 1
+fi
+while IFS= read -r reference; do
+  case "$reference" in
+    "$DIST_DIR/subtitle-backend/_internal"/sherpa_onnx*-*.dist-info/RECORD) ;;
+    *)
+      echo "发现代码引用未版本化的 Sherpa ONNX Runtime：$reference" >&2
+      exit 1
+      ;;
+  esac
+done < <(rg -a -l -F 'libonnxruntime.dylib' \
+  "$DIST_DIR/subtitle-backend/_internal" || true)
+SHERPA_DUPLICATE_BYTES="$(stat -f %z "$SHERPA_ORT_ALIAS")"
+cleanup_ort_compare
+trap - EXIT
+find "$SHERPA_ORT_ALIAS" -delete
+ln -s "$(basename "$SHERPA_ORT_VERSIONED")" "$SHERPA_ORT_ALIAS"
+echo "Sherpa ONNX Runtime 合并通过：避免复制 ${SHERPA_DUPLICATE_BYTES} bytes。"
+
 cp -R "$DIST_DIR/subtitle-backend/." "$OUTPUT_DIR/"
 chmod +x "$OUTPUT_DIR/subtitle-backend"
+OUTPUT_ORT_ALIAS="$OUTPUT_DIR/_internal/sherpa_onnx/lib/libonnxruntime.dylib"
+if [ ! -L "$OUTPUT_ORT_ALIAS" ] \
+  || [ "$(readlink "$OUTPUT_ORT_ALIAS")" != "libonnxruntime.1.24.4.dylib" ]; then
+  echo "Sherpa ONNX Runtime 的安全相对链接没有进入 sidecar 运行包。" >&2
+  exit 1
+fi
 SMOKE_HOME="$(mktemp -d /tmp/subtitle-factory-runtime-smoke.XXXXXX)"
 cleanup_smoke_home() {
   if [ -d "$SMOKE_HOME" ]; then
