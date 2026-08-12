@@ -219,6 +219,13 @@ class DistributionPolicyTests(unittest.TestCase):
                 self.client.put("/api/settings/app", json={
                     "default_model": "local:external-model",
                 }),
+                self.client.post(
+                    "/api/projects/not-needed/speakers/diarize",
+                    json={
+                        "segmentation_model": "/tmp/external-segmentation.onnx",
+                        "embedding_model": "/tmp/external-embedding.onnx",
+                    },
+                ),
             ]
         self.assertEqual(catalog.status_code, 200, catalog.text)
         model_ids = {item["id"] for item in catalog.json()["models"]}

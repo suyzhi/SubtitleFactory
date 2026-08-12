@@ -9,6 +9,10 @@ from pydantic import BaseModel, Field
 
 from ..models.database import get_db
 from ..services.diarization import diarize_project
+from ..services.distribution import (
+    distribution_capabilities,
+    require_external_runtime_paths,
+)
 from ..services.speaker_models import prepare as prepare_speaker_models, status as speaker_model_status
 from ..utils.task_manager import task_manager
 
@@ -92,6 +96,22 @@ def merge_speakers(project_id: str, source_id: str, target_id: str):
 
 @router.post("/projects/{project_id}/speakers/diarize")
 def start_diarization(project_id: str, request: DiarizationRequest):
+    if not distribution_capabilities().external_runtime_paths:
+        managed = speaker_model_status()
+        requested_paths = {
+            os.path.realpath(os.path.expanduser(request.segmentation_model)),
+            os.path.realpath(os.path.expanduser(request.embedding_model)),
+        }
+        managed_paths = {
+            os.path.realpath(path)
+            for path in (
+                managed.get("segmentation_model"),
+                managed.get("embedding_model"),
+            )
+            if path
+        }
+        if requested_paths != managed_paths:
+            require_external_runtime_paths()
     for path in (request.segmentation_model, request.embedding_model):
         if not os.path.isfile(os.path.expanduser(path)): raise HTTPException(422, "说话人模型文件不存在")
     task_id = task_manager.create_task(project_id, "speaker_diarization", resource_class="ml")

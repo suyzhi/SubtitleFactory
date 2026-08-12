@@ -3,7 +3,7 @@
 import '@testing-library/jest-dom/vitest';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import SmartToolsPanel from './SmartToolsPanel';
 import * as api from '../api/backend';
 
@@ -11,6 +11,7 @@ vi.mock('../api/backend', async importOriginal => {
   const actual = await importOriginal<typeof import('../api/backend')>();
   return {
     ...actual,
+    externalRuntimePathsEnabled: vi.fn().mockReturnValue(true),
     getSpeakers: vi.fn().mockResolvedValue({ speakers: [] }),
     getCloudAuthorizations: vi.fn().mockResolvedValue({ authorizations: [] }),
     getSpeakerModelStatus: vi.fn().mockResolvedValue({
@@ -34,6 +35,10 @@ vi.mock('../api/backend', async importOriginal => {
 });
 
 describe('SmartToolsPanel task polling', () => {
+  beforeEach(() => {
+    vi.mocked(api.externalRuntimePathsEnabled).mockReturnValue(true);
+  });
+
   it('keeps polling OCR until the completed preview is rendered', async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     render(
@@ -55,5 +60,24 @@ describe('SmartToolsPanel task polling', () => {
     });
     expect(screen.getByText('识别成功')).toBeInTheDocument();
     expect(api.getTaskStatus).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not expose external speaker model paths in the App Store channel', async () => {
+    vi.mocked(api.externalRuntimePathsEnabled).mockReturnValue(false);
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={client}>
+        <SmartToolsPanel
+          projectId="project"
+          revision={1}
+          duration={2}
+          onEditorResult={vi.fn()}
+          onProjectChanged={vi.fn()}
+        />
+      </QueryClientProvider>,
+    );
+
+    expect(screen.queryByText('使用自定义模型文件')).not.toBeInTheDocument();
+    expect(await screen.findByText('首次使用需准备离线模型')).toBeInTheDocument();
   });
 });
