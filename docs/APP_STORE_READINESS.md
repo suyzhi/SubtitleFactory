@@ -45,7 +45,7 @@ App Store 版的限制是发行策略，不是运行失败后的静默降级。R
 
 本轮真实 App 验收结果：
 
-- 187 个后端测试与 25 个子测试、61 个前端测试、6 个 Rust 测试、lint 全部通过。
+- 192 个后端测试与 25 个子测试、61 个前端测试、6 个 Rust 测试、lint 全部通过。
 - 主 App、Python sidecar 和 Vision OCR 均为 arm64，深度严格签名校验通过；主 App 有 sandbox、网络与用户选取文件权限，helper 有 sandbox + inherit。
 - Sherpa 1.13.3 wheel 中字节完全相同、且没有代码引用的未版本化 ONNX Runtime 副本，会先移除签名并逐字节比较，再改为指向版本化运行库的安全相对链接；任何布局、内容或引用变化都会中止构建。连同 Tauri 展开的其他 PyInstaller 运行库链接，签名前共恢复并验证 46 个相对链接，逐项拒绝绝对目标、目录逃逸、内容不一致或断链。本轮合计避免重复复制 `150,995,104 bytes`（约 144 MiB），根目录 QA App 从约 780 MB 降至 636 MB（`651,104 KiB`），深度签名与完整沙盒运行验收仍通过。
 - 沙盒 App 能持续启动 localhost sidecar，数据库和项目文件位于 `~/Library/Containers/com.subtitlefactory.desktop/`；无令牌请求返回 401，真实会话请求返回 200。
@@ -94,7 +94,7 @@ App Store 版的限制是发行策略，不是运行失败后的静默降级。R
 - [x] 保留 Tauri 默认开启的 Hardened Runtime，并在最终逐层签名时显式使用 `--options runtime`。
 - [x] `Info.plist` 出口合规声明与 `PrivacyInfo.xcprivacy` 基础清单。
 - [x] 核对 Apple 当前 required-reason API 文档：其申报平台不包含原生 macOS，因此当前 `NSPrivacyAccessedAPITypes` 保持空数组，不添加未经证实的理由。
-- [x] 版本号、设置页占位、模型下载请求标识、README、Changelog 与 CycloneDX SBOM 纳入同一发布一致性门禁；CI 会重新生成供应链清单并拒绝未提交的漂移。
+- [x] 版本号、Bundle ID、类别、公开 App Store 描述/关键词/审核备注、隐私清单、设置页占位、模型下载请求标识、README、Changelog 与 CycloneDX SBOM 纳入发布一致性门禁；CI 会检查 Apple 字符/字节限制，重新生成供应链清单并拒绝未提交的漂移。
 - [x] “快捷键与关于”提供可访问的完整隐私政策入口；Tauri opener 权限只允许公开仓库中的这一条精确 HTTPS URL，不能打开任意地址。
 - [ ] 提供带真实、持续可联系信息的公开支持 URL；当前仓库 Issues 禁止新建，不能把它伪报为客服渠道。
 - [ ] 解锁桌面后制作并人工审核 16:10 的 Mac App Store 截图（1280×800、1440×900、2560×1600 或 2880×1800）。

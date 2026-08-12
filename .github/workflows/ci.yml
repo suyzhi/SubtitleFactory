@@ -27,6 +27,8 @@ jobs:
         run: npm ci
       - name: Verify synchronized versions
         run: python scripts/check-versions.py
+      - name: Verify App Store metadata
+        run: python scripts/verify-app-store-metadata.py
       - name: Backend tests
         run: python -m pytest -q backend/tests
       - name: Frontend lint

@@ -16,6 +16,12 @@ QA_BUILD=false
 if [ "$MODE" = "qa" ]; then
   QA_BUILD=true
 fi
+if [ "$QA_BUILD" = false ]; then
+  "$ROOT/backend/.venv/bin/python" "$ROOT/scripts/verify-app-store-metadata.py" \
+    --require-owner-fields
+else
+  "$ROOT/backend/.venv/bin/python" "$ROOT/scripts/verify-app-store-metadata.py"
+fi
 GENERATED_ENTITLEMENTS="$TAURI_DIR/Entitlements.appstore.plist"
 GENERATED_HELPER_ENTITLEMENTS="$TAURI_DIR/HelperEntitlements.appstore.plist"
 EMBEDDED_PROFILE="$TAURI_DIR/embedded.provisionprofile"

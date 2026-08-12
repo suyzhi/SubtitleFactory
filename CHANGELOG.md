@@ -9,6 +9,7 @@
 - Bound the frozen Python sidecar and its media helpers to the desktop process so normal quits, external termination, and forced crashes do not leave orphan processes.
 - Deferred heavy workspace modules and reduced idle polling while preserving visible task state, keyboard operation, and cloud-upload consent boundaries.
 - Added model-free native runtime smoke tests, preserved PyInstaller's safe relative-library link topology, and deduplicated Sherpa's byte-identical ONNX Runtime alias, reducing the App Store QA App by about 144 MiB without removing inference capabilities.
+- Added source-controlled Simplified Chinese App Store metadata and fail-fast validation for product copy, privacy declarations, legal ownership, support, review contacts, and account-holder confirmations.
 
 ## 0.3.2 — 2026-07-26
 

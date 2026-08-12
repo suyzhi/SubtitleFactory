@@ -8,6 +8,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 tauri_config = json.loads((ROOT / "frontend/src-tauri/tauri.conf.json").read_text())
+app_store_metadata = json.loads((ROOT / "app-store/metadata.zh-Hans.json").read_text())
 versions = {
     "backend": re.search(r'VERSION\s*=\s*"([^"]+)"', (ROOT / "backend/app/version.py").read_text()).group(1),
     "frontend": json.loads((ROOT / "frontend/package.json").read_text())["version"],
@@ -37,9 +38,12 @@ versions = {
     "sbom": json.loads((ROOT / "artifacts/sbom.cdx.json").read_text())[
         "metadata"
     ]["component"]["version"],
+    "app_store_metadata": app_store_metadata["app"]["version"],
 }
 if len(set(versions.values())) != 1:
     raise SystemExit("版本号不一致: " + ", ".join(f"{name}={value}" for name, value in versions.items()))
 if tauri_config.get("bundle", {}).get("category") != "Video":
     raise SystemExit("Tauri bundle.category 必须是 Video")
+if app_store_metadata["app"]["bundle_id"] != tauri_config["identifier"]:
+    raise SystemExit("App Store 元数据 Bundle ID 与 Tauri identifier 不一致")
 print(f"版本号已同步: {next(iter(versions.values()))}")

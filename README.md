@@ -95,7 +95,7 @@ macOS 直装版数据目录：
 
 Mac App Store 版启用 App Sandbox，数据位于系统管理的 `~/Library/Containers/com.subtitlefactory.desktop/` 容器中。该发行版只接受用户主动选择的本地视频，不提供 YouTube、Cookie、持久监听文件夹或外部运行时路径。
 
-详细文档：[隐私说明](docs/PRIVACY.md) · [云端增强授权](docs/CLOUD_AUTHORIZATION.md) · [编辑器快捷键](docs/SHORTCUTS.md) · [备份与故障恢复](docs/RECOVERY.md)
+详细文档：[隐私说明](docs/PRIVACY.md) · [云端增强授权](docs/CLOUD_AUTHORIZATION.md) · [编辑器快捷键](docs/SHORTCUTS.md) · [备份与故障恢复](docs/RECOVERY.md) · [App Store 交接单](docs/APP_STORE_METADATA.md) · [App Store 交付基线](docs/APP_STORE_READINESS.md)
 
 ## 开发环境
 

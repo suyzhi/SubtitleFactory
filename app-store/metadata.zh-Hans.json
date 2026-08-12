@@ -1,0 +1,95 @@
+{
+  "schema_version": 1,
+  "app": {
+    "name": "字幕工厂",
+    "subtitle": "本地优先的专业字幕工作台",
+    "bundle_id": "com.subtitlefactory.desktop",
+    "version": "0.4.1",
+    "primary_language": "zh-Hans",
+    "primary_category": "Video",
+    "privacy_policy_url": "https://github.com/suyzhi/SubtitleFactory/blob/main/docs/PRIVACY.md"
+  },
+  "localization": {
+    "locale": "zh-Hans",
+    "description": "字幕工厂是一款为 Mac 打造的本地优先字幕工作台，让视频导入、语音转写、字幕校对、翻译、质检与导出集中在一个专业项目空间中。\n\n本地优先\n• 项目、媒体、字幕和翻译记忆保存在你的 Mac 上。\n• 支持 App 管理的本地语音识别模型，并明确显示可用运行设备。\n• 本地处理失败不会静默上传，也不会自动切换到云端。\n\n专业编辑\n• 独立项目库帮助你创建、搜索、归档和恢复项目。\n• 项目工作区整合中央播放器、逐句字幕编辑、时间轴定位、检查器和后台任务状态。\n• 支持字幕查找替换、术语表、质量检查、历史记录、草稿恢复与项目备份。\n• 可通过 macOS 原生存储面板导出字幕、带字幕成片、短片和项目交付包。\n\n按需 AI 增强\n• 可自行配置兼容的文本或语音服务，用于整理、翻译、质检和转写。\n• 云端操作只在用户主动配置并执行后发生；涉及音频上传的服务另有独立、可撤销授权。\n• 涉及云端音频或批量 AI 时，App 会说明上传范围、服务商与可能产生的费用。\n\nMac App Store 版只处理用户主动选择的本地媒体，不提供第三方网站下载、浏览器 Cookie、持续文件夹监听或外部运行时路径。核心本地导入、编辑、离线质检和导出不要求第三方账号。",
+    "keywords": [
+      "字幕制作",
+      "视频转写",
+      "语音识别",
+      "字幕编辑",
+      "双语字幕",
+      "本地转写",
+      "字幕导出"
+    ],
+    "promotional_text": null,
+    "marketing_url": null
+  },
+  "review": {
+    "sign_in_required": false,
+    "notes": "No account is required. The app opens in the project library.\n\nTo test the complete local workflow:\n1. Click Import and select a local MP4 that the reviewer is authorized to use.\n2. Open the created project to inspect playback, subtitle editing, quality tools, and export.\n3. Local import, editing, offline quality checks, and export work without any third-party API key.\n\nThe Mac App Store build intentionally removes YouTube, browser-cookie access, persistent watched folders, custom download directories, and external runtime/model paths. These entries are absent from the UI and are also blocked by the backend distribution policy.\n\nCloud text and speech features are optional and run only after the user configures a provider and explicitly starts an operation. Fun-Realtime-ASR has an additional revocable authorization explaining that the current project's 16 kHz WAV chunks are uploaded to Alibaba Cloud Bailian. The app never silently falls back from local processing to cloud processing. Dedicated review credentials, if requested, must be supplied only through App Review Notes and must not be embedded in the app or public repository."
+  },
+  "privacy_manifest": {
+    "tracking": false,
+    "tracking_domains": [],
+    "collected_data_types": [
+      {
+        "identifier": "NSPrivacyCollectedDataTypeAudioData",
+        "linked": false,
+        "tracking": false,
+        "purposes": [
+          "NSPrivacyCollectedDataTypePurposeAppFunctionality"
+        ]
+      },
+      {
+        "identifier": "NSPrivacyCollectedDataTypeOtherUserContent",
+        "linked": false,
+        "tracking": false,
+        "purposes": [
+          "NSPrivacyCollectedDataTypePurposeAppFunctionality"
+        ]
+      }
+    ]
+  },
+  "owner_inputs": [
+    {
+      "environment": "APP_STORE_SUPPORT_URL",
+      "field": "Support URL"
+    },
+    {
+      "environment": "APP_STORE_COPYRIGHT",
+      "field": "Copyright"
+    },
+    {
+      "environment": "APP_STORE_SKU",
+      "field": "SKU"
+    },
+    {
+      "environment": "APP_STORE_REVIEW_CONTACT_NAME",
+      "field": "App Review contact name"
+    },
+    {
+      "environment": "APP_STORE_REVIEW_CONTACT_EMAIL",
+      "field": "App Review contact email"
+    },
+    {
+      "environment": "APP_STORE_REVIEW_CONTACT_PHONE",
+      "field": "App Review contact phone"
+    },
+    {
+      "environment": "APP_STORE_AGE_RATING_CONFIRMED",
+      "field": "Age Rating questionnaire confirmation"
+    },
+    {
+      "environment": "APP_STORE_CONTENT_RIGHTS_CONFIRMED",
+      "field": "Content Rights confirmation"
+    },
+    {
+      "environment": "APP_STORE_PRIVACY_ANSWERS_CONFIRMED",
+      "field": "App Privacy answers confirmation"
+    },
+    {
+      "environment": "APP_STORE_PRICE_AND_AVAILABILITY_CONFIRMED",
+      "field": "Price and availability confirmation"
+    }
+  ]
+}
