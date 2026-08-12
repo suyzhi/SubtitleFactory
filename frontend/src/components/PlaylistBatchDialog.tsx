@@ -7,7 +7,7 @@ interface Props {
   workflow: { model: string; language: string; target_language: string; runtime?: string; clean_target_length: number };
   appSettings: AppSettings;
   health: HealthStatus | null;
-  aiReady: boolean;
+  aiReady: { clean: boolean; translate: boolean };
   onClose: () => void;
   onCreated: (message: string) => void;
 }
@@ -46,7 +46,8 @@ export default function PlaylistBatchDialog({ url, workflow, appSettings, health
     if (!health?.runtime?.deno?.ok) values.push('Deno 不可用');
     if (!health?.runtime?.ejs?.ok) values.push('EJS 挑战组件不可用');
     if (transcribe && !workflow.runtime) values.push('尚未选择转写运行设备');
-    if ((clean || translate) && !aiReady) values.push('AI 服务尚未配置可用的 API Key');
+    if (clean && !aiReady.clean) values.push('AI 整理供应商尚未配置可用的 API Key');
+    if (translate && !aiReady.translate) values.push('AI 翻译供应商尚未配置可用的 API Key');
     if (translate && workflow.target_language === 'none') values.push('AI 翻译需要目标语言');
     if ((clean || translate) && !aiAuthorized) values.push('请确认 AI 内容授权');
     return values;

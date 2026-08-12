@@ -8,7 +8,7 @@ import type {
   Project, SubtitleSegment, TaskStatus, ProcessingConfig,
   ModelSize, ExportFormat,
   ProcessStep, ProcessLogEntry, TaskStepStatus,
-  SubtitleStyleSettings, SubtitleStats, AISettings, AIProviderPreset,
+  SubtitleStyleSettings, SubtitleStats,
   HealthStatus, AppSettings,
   SegmentUpdate, SegmentOperationRequest,
   FailedCleanBatch, PlaylistBatchDetail, SegmentSearchHit,
@@ -156,8 +156,7 @@ function App() {
   const [showProductionCenter, setShowProductionCenter] = useState(false);
   const [showFirstRunPreflight, setShowFirstRunPreflight] = useState(() => localStorage.getItem('subtitle_factory_preflight_v1') !== 'done');
   const [backendStatus, setBackendStatus] = useState<'connecting' | 'connected' | 'error'>('connecting');
-  const [aiSettings, setAISettings] = useState<AISettings | null>(null);
-  const [aiPresets, setAIPresets] = useState<AIProviderPreset[]>([]);
+  const [aiProviderState, setAIProviderState] = useState<api.AIProvidersResponse | null>(null);
   const [toast, setToast] = useState('');
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const [taskStarting, setTaskStarting] = useState(false);
@@ -484,6 +483,21 @@ function App() {
     api.getTranscriptionModels(activeProject?.id, config.language).then(setModelStatus).catch(() => setModelStatus(null));
   }, [activeProject?.id, backendStatus, config.language]);
 
+  const refreshAIProviders = useCallback(async () => {
+    try {
+      const latest = await api.getAIProviders();
+      setAIProviderState(latest);
+    } catch {
+      // Local media and transcription remain available when Keychain access is
+      // temporarily unavailable. SettingsCenter provides the visible retry UI.
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!showProjectWorkspace && !playlistDialogUrl) return;
+    void refreshAIProviders();
+  }, [playlistDialogUrl, refreshAIProviders, showProjectWorkspace]);
+
   const refreshHealth = useCallback(() => {
     api.checkHealth().then(setHealth).catch(() => undefined);
   }, []);
@@ -695,10 +709,6 @@ function App() {
         if (!stopped) {
           setProjects(startup.projects);
           setTrashProjects(startup.trashProjects);
-          if (startup.ai) {
-            setAISettings(startup.ai.settings);
-            setAIPresets(startup.ai.presets);
-          }
           setAppSettings(startup.app.settings);
           setConfig(current => ({
             ...current,
@@ -1711,7 +1721,14 @@ function App() {
   const canPlayMedia = useWebPlayback || hasLocalVideo;
   const activeSegmentIndex = activeSegmentIdx >= 0 ? segments[activeSegmentIdx]?.index ?? -1 : -1;
   const subtitleEntryFocusIndex = findSubtitleFocusIndex(segments, currentTime);
-  const activeAIPreset = aiPresets.find(item => item.id === aiSettings?.provider);
+  const cleanAIProvider = aiProviderState?.providers.find(
+    item => item.provider_id === aiProviderState.assignments.clean_provider_id,
+  );
+  const translateAIProvider = aiProviderState?.providers.find(
+    item => item.provider_id === aiProviderState.assignments.translate_provider_id,
+  );
+  const cleanAIReady = Boolean(cleanAIProvider?.enabled && cleanAIProvider.has_api_key);
+  const translateAIReady = Boolean(translateAIProvider?.enabled && translateAIProvider.has_api_key);
 
   const compactSteps = useMemo(() => {
     const find = (id: string) => processSteps.find(step => step.id === id);
@@ -1810,9 +1827,9 @@ function App() {
   const renderProcessSettings = () => <div className="process-settings-content">
     {activeProcessStep === 'download' && renderMediaInspector()}
     {activeProcessStep === 'transcribe' && <section className="inspector-section transcription-inspector"><h3>语音转写</h3><label>转写模型<AppSelect value={config.model} onChange={model=>setConfig({...config,model:model as ModelSize})} options={modelOptions} label="转写模型" searchable/></label><div className="runtime-picker"><header><strong>运行设备</strong><small>{runtimeForModel(inspectorModelId)?'已为此模型记住':'首次使用必须选择'}</small></header><div className="runtime-choice-grid">{inspectorModel?.runtimes?.map(runtime=><button type="button" key={runtime.id} disabled={!runtime.available} className={runtimeForModel(inspectorModelId)===runtime.id?'selected':''} onClick={()=>chooseRuntime(inspectorModelId,runtime.id)}><i>{runtime.id==='cpu'?'CPU':runtime.id==='mlx'?'GPU':runtime.id==='coreml'?'ANE':'ML'}</i><span><strong>{runtime.name}</strong><small>{runtime.engine}</small>{!runtime.available&&<em>{runtime.reason}</em>}</span>{runtimeForModel(inspectorModelId)===runtime.id&&<b>✓</b>}</button>)}</div>{!inspectorModel?.runtimes?.length&&<p className="runtime-empty">正在读取此模型支持的运行设备…</p>}</div><label>源语言<LanguagePicker value={config.language} onChange={language => setConfig({ ...config, language })}/></label>{modelStatus && <div className="model-readiness"><strong>{inspectorModel?.name||inspectorModelId}</strong><small>{inspectorModel?.ready?'模型已就绪':inspectorModel?.download_required?'首次运行时下载到 App 数据目录':'模型不可用'}</small>{config.model==='auto'&&modelStatus.recommendation_reason&&<small>{modelStatus.recommendation_reason}</small>}</div>}<button className="button primary" disabled={!hasAudio || isProcessing || !runtimeForModel(inspectorModelId)} onClick={doTranscribe}>开始转写</button>{!runtimeForModel(inspectorModelId)&&<p className="runtime-required">请选择上方运行设备后再开始转写。</p>}</section>}
-    {activeProcessStep === 'clean' && <section className="inspector-section"><h3>AI 忠实整理</h3><div className="ai-summary-row"><span className="ai-logo">✦</span><div><strong>{activeAIPreset?.name || aiSettings?.provider || '未配置 AI'}</strong><small>{aiSettings?.model || '请先打开设置中心'}</small></div></div><label>参考单句长度 <span>{config.clean_target_length} 字</span><input type="range" min={16} max={100} step={2} value={config.clean_target_length} onChange={event => setConfig({ ...config, clean_target_length: Number(event.target.value) })}/></label><p>只修正明显错词、标点和断句，不改变原意。</p><button className="button primary" disabled={!hasSegments || isProcessing || !aiSettings?.has_api_key} onClick={doClean}>确认并开始整理</button><button className="button secondary" disabled={!hasSegments || isProcessing} onClick={undoClean}>撤销上次整理</button></section>}
+    {activeProcessStep === 'clean' && <section className="inspector-section"><h3>AI 忠实整理</h3><div className="ai-summary-row"><span className="ai-logo">✦</span><div><strong>{cleanAIProvider?.name || (aiProviderState ? '未配置 AI' : '正在读取 AI 服务')}</strong><small>{cleanAIProvider?.model || '请先打开设置中心'}</small></div></div><label>参考单句长度 <span>{config.clean_target_length} 字</span><input type="range" min={16} max={100} step={2} value={config.clean_target_length} onChange={event => setConfig({ ...config, clean_target_length: Number(event.target.value) })}/></label><p>只修正明显错词、标点和断句，不改变原意。</p><button className="button primary" disabled={!hasSegments || isProcessing || !cleanAIReady} onClick={doClean}>确认并开始整理</button><button className="button secondary" disabled={!hasSegments || isProcessing} onClick={undoClean}>撤销上次整理</button></section>}
     {activeProcessStep === 'clean' && renderFailedBatchRecovery()}
-    {activeProcessStep === 'translate' && <section className="inspector-section"><h3>AI 翻译</h3><label>目标语言<LanguagePicker mode="target" allowCustom allowNone value={config.target_language} onChange={target_language => setConfig({ ...config, target_language })}/></label><label className="check-row"><input type="checkbox" checked={config.bilingual} onChange={event => setConfig({ ...config, bilingual: event.target.checked })}/> 导出时包含原文与译文</label><p>翻译结果会单独保存，可继续逐句校对。</p><button className="button primary" disabled={!hasSegments || isProcessing || !aiSettings?.has_api_key || config.target_language === 'none'} onClick={doTranslate}>确认并开始翻译</button></section>}
+    {activeProcessStep === 'translate' && <section className="inspector-section"><h3>AI 翻译</h3><label>目标语言<LanguagePicker mode="target" allowCustom allowNone value={config.target_language} onChange={target_language => setConfig({ ...config, target_language })}/></label><label className="check-row"><input type="checkbox" checked={config.bilingual} onChange={event => setConfig({ ...config, bilingual: event.target.checked })}/> 导出时包含原文与译文</label><p>翻译结果会单独保存，可继续逐句校对。</p><button className="button primary" disabled={!hasSegments || isProcessing || !translateAIReady || config.target_language === 'none'} onClick={doTranslate}>确认并开始翻译</button></section>}
     {activeProcessStep === 'export' && <section className="inspector-section"><h3>快速导出</h3><p>{youtubeEnabled ? '字幕文件立即生成；带字幕视频会在后台压制。网页模式首次导出成片时会先下载并保留本地视频。' : '字幕文件立即生成；带字幕视频只在本机后台压制，不上传媒体。'}</p><button className="button primary" onClick={() => setProjectWorkspace('export')}>前往导出工作区</button></section>}
     {currentTask?.status === 'failed' && <section className="recovery-card"><strong>{currentTask.error_code || '任务失败'}</strong><span>{currentTask.error || currentTask.message}</span>{currentTask.suggestion && <small>{currentTask.suggestion}</small>}<small>尝试次数：{currentTask.attempt || 1}</small>{currentTask.recoverable && <button onClick={retryCurrentFailure}>{recoveryActionLabel}</button>}{currentTask.available_actions?.includes('open_settings') && <button onClick={() => setShowAISettings(true)}>打开下载与存储设置</button>}</section>}
   </div>;
@@ -1860,7 +1877,7 @@ function App() {
       {youtubeEnabled && playlistDialogUrl && <Suspense fallback={<DeferredPanel kind="overlay" label="正在打开播放列表工具…"/>}>
         <PlaylistBatchDialog
           url={playlistDialogUrl} workflow={playlistWorkflow} appSettings={appSettings} health={health}
-          aiReady={!!aiSettings?.has_api_key} onClose={() => setPlaylistDialogUrl(null)}
+          aiReady={{ clean: cleanAIReady, translate: translateAIReady }} onClose={() => setPlaylistDialogUrl(null)}
           onCreated={message => { setPlaylistDialogUrl(null); showToast(message, 4200); void refreshPlaylistBatches(); }}
         />
       </Suspense>}
@@ -2064,9 +2081,9 @@ function App() {
             {inspectorMode === 'step' && <div className="step-inspector">
               {selectedStep === 'download' && renderMediaInspector()}
               {selectedStep === 'transcribe' && <section className="inspector-section transcription-inspector"><h3>语音转写</h3><label>转写模型<AppSelect value={config.model} onChange={model=>setConfig({...config,model:model as ModelSize})} options={modelOptions} label="转写模型" searchable/></label><div className="runtime-picker"><header><strong>运行设备</strong><small>{runtimeForModel(inspectorModelId)?'已为此模型记住':'首次使用必须选择'}</small></header><div className="runtime-choice-grid">{inspectorModel?.runtimes?.map(runtime=><button type="button" key={runtime.id} disabled={!runtime.available} className={runtimeForModel(inspectorModelId)===runtime.id?'selected':''} onClick={()=>chooseRuntime(inspectorModelId,runtime.id)}><i>{runtime.id==='cpu'?'CPU':runtime.id==='mlx'?'GPU':runtime.id==='coreml'?'ANE':'ML'}</i><span><strong>{runtime.name}</strong><small>{runtime.engine} · {runtime.model_ready?'模型已就绪':runtime.download_required?`需下载 ${runtime.download_bytes?`${(runtime.download_bytes/1024/1024).toFixed(0)} MB`:''}`:'本地模型'}</small>{!runtime.available&&<em>{runtime.reason}</em>}</span>{runtimeForModel(inspectorModelId)===runtime.id&&<b>✓</b>}</button>)}</div>{!inspectorModel?.runtimes?.length&&<p className="runtime-empty">正在读取此模型支持的运行设备…</p>}</div><label>源语言<LanguagePicker value={config.language} onChange={language => setConfig({ ...config, language })}/></label>{modelStatus && <div className="model-readiness"><strong>{inspectorModel?.name||inspectorModelId}</strong><small>{!runtimeForModel(inspectorModelId)?'先选择运行设备':inspectorRuntime?.model_ready?'所选运行设备的模型已就绪':inspectorRuntime?.download_required?'首次运行将复用模型中心下载器':'所选本地模型需要重新校验'}</small>{config.model==='auto'&&modelStatus.recommendation_reason&&<small>{modelStatus.recommendation_reason}</small>}</div>}<button className="button primary" disabled={!hasAudio || isProcessing || !runtimeForModel(inspectorModelId)} onClick={doTranscribe}>开始转写</button>{!runtimeForModel(inspectorModelId)&&<p className="runtime-required">请选择上方运行设备后再开始转写。</p>}</section>}
-              {selectedStep === 'clean' && <section className="inspector-section"><h3>AI 忠实整理</h3><div className="ai-summary-row"><span className="ai-logo">✦</span><div><strong>{activeAIPreset?.name || aiSettings?.provider || '未配置 AI'}</strong><small>{aiSettings?.model || '请先打开设置中心'}</small></div></div><label>参考单句长度 <span>{config.clean_target_length} 字</span><input type="range" min={16} max={100} step={2} value={config.clean_target_length} onChange={event => setConfig({ ...config, clean_target_length: Number(event.target.value) })}/></label><p>只修正明显错词、标点和断句，不改变原意。完整长句不会被强行截断。</p><button className="button primary" disabled={!hasSegments || isProcessing || !aiSettings?.has_api_key} onClick={doClean}>确认并开始整理</button><button className="button secondary" disabled={!hasSegments || isProcessing} onClick={undoClean}>撤销上次整理</button></section>}
+              {selectedStep === 'clean' && <section className="inspector-section"><h3>AI 忠实整理</h3><div className="ai-summary-row"><span className="ai-logo">✦</span><div><strong>{cleanAIProvider?.name || (aiProviderState ? '未配置 AI' : '正在读取 AI 服务')}</strong><small>{cleanAIProvider?.model || '请先打开设置中心'}</small></div></div><label>参考单句长度 <span>{config.clean_target_length} 字</span><input type="range" min={16} max={100} step={2} value={config.clean_target_length} onChange={event => setConfig({ ...config, clean_target_length: Number(event.target.value) })}/></label><p>只修正明显错词、标点和断句，不改变原意。完整长句不会被强行截断。</p><button className="button primary" disabled={!hasSegments || isProcessing || !cleanAIReady} onClick={doClean}>确认并开始整理</button><button className="button secondary" disabled={!hasSegments || isProcessing} onClick={undoClean}>撤销上次整理</button></section>}
               {selectedStep === 'clean' && renderFailedBatchRecovery()}
-              {selectedStep === 'translate' && <section className="inspector-section"><h3>AI 翻译</h3><label>目标语言<LanguagePicker mode="target" allowCustom allowNone value={config.target_language} onChange={target_language => setConfig({ ...config, target_language })}/></label><label className="check-row"><input type="checkbox" checked={config.bilingual} onChange={event => setConfig({ ...config, bilingual: event.target.checked })}/> 导出时包含原文与译文</label><p>翻译由已配置的 {activeAIPreset?.name || aiSettings?.provider || 'AI 服务'} 完成，结果可继续编辑。</p><button className="button primary" disabled={!hasSegments || isProcessing || !aiSettings?.has_api_key || config.target_language === 'none'} onClick={doTranslate}>确认并开始翻译</button></section>}
+              {selectedStep === 'translate' && <section className="inspector-section"><h3>AI 翻译</h3><label>目标语言<LanguagePicker mode="target" allowCustom allowNone value={config.target_language} onChange={target_language => setConfig({ ...config, target_language })}/></label><label className="check-row"><input type="checkbox" checked={config.bilingual} onChange={event => setConfig({ ...config, bilingual: event.target.checked })}/> 导出时包含原文与译文</label><p>翻译由已配置的 {translateAIProvider?.name || 'AI 服务'} 完成，结果可继续编辑。</p><button className="button primary" disabled={!hasSegments || isProcessing || !translateAIReady || config.target_language === 'none'} onClick={doTranslate}>确认并开始翻译</button></section>}
               {selectedStep === 'export' && <section className="inspector-section"><h3>导出</h3><div className="export-grid">{(['srt', 'vtt', 'ass', 'srt-bilingual', 'mp4', 'mkv'] as ExportFormat[]).map(format => <button key={format} disabled={!hasSegments || isProcessing} onClick={() => void doExport(format)}>{format === 'srt-bilingual' ? '双语 SRT' : format.toUpperCase()}</button>)}</div></section>}
               {currentTask?.status === 'failed' && <section className="recovery-card"><strong>{currentTask.error_code || '任务失败'}</strong><span>{currentTask.error || currentTask.message}</span>{currentTask.suggestion && <small>{currentTask.suggestion}</small>}<small>尝试次数：{currentTask.attempt || 1}</small>{currentTask.recoverable && <button onClick={retryCurrentFailure}>{recoveryActionLabel}</button>}{currentTask.available_actions?.includes('open_settings') && <button onClick={() => setShowAISettings(true)}>打开下载与存储设置</button>}</section>}
               <details className="inspector-details"><summary>流程诊断</summary><ProcessTimeline steps={processSteps} currentStepId={selectedStep} totalProgress={totalProgress} onStepClick={setSelectedStep}/><SubtitleStatsPanel stats={subtitleStats}/></details>
@@ -2093,7 +2110,7 @@ function App() {
       {dragActive && <div className="drop-overlay"><div><span>⇩</span><strong>松开以导入视频</strong><small>支持 MP4、MKV、MOV、WebM 和 AVI</small></div></div>}
       {toast && <div className="studio-toast" role="status" aria-live="polite"><span>✓</span>{toast}</div>}
       {showAISettings && <Suspense fallback={<DeferredPanel kind="settings" theme={theme} label="正在打开设置中心…"/>}>
-        <SettingsCenter open onClose={() => setShowAISettings(false)} config={config} onConfigChange={setConfig} appSettings={appSettings} onAppSettingsChange={setAppSettings} aiSettings={aiSettings} onAISaved={setAISettings} theme={theme} onThemeChange={setTheme} motionEnabled={motionEnabled} onMotionEnabledChange={setMotionEnabled} density={density} onDensityChange={setDensity} health={health} onRefreshHealth={refreshHealth} modelStatus={modelStatus} onRefreshModels={refreshModels} onOpenLogs={() => { setBottomTab('logs'); setProjectWorkspace('process'); setShowProjectWorkspace(!!activeProject); setInspectorMode(null); }}/>
+        <SettingsCenter open onClose={() => setShowAISettings(false)} config={config} onConfigChange={setConfig} appSettings={appSettings} onAppSettingsChange={setAppSettings} onAIProvidersChange={setAIProviderState} theme={theme} onThemeChange={setTheme} motionEnabled={motionEnabled} onMotionEnabledChange={setMotionEnabled} density={density} onDensityChange={setDensity} health={health} onRefreshHealth={refreshHealth} modelStatus={modelStatus} onRefreshModels={refreshModels} onOpenLogs={() => { setBottomTab('logs'); setProjectWorkspace('process'); setShowProjectWorkspace(!!activeProject); setInspectorMode(null); }}/>
       </Suspense>}
     </div>
   );

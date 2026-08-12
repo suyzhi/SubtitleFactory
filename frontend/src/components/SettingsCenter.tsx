@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import * as api from '../api/backend';
 import type {
-  AISettings, AppSettings, HealthStatus, PathValidationResult,
+  AppSettings, HealthStatus, PathValidationResult,
   ProcessingConfig, AppSettingWarning, TaskStatus,
 } from '../types';
 import LanguagePicker from './LanguagePicker';
@@ -35,8 +35,7 @@ interface Props {
   onConfigChange: (config: ProcessingConfig) => void;
   appSettings: AppSettings;
   onAppSettingsChange: (settings: AppSettings) => void;
-  aiSettings: AISettings | null;
-  onAISaved: (settings: AISettings) => void;
+  onAIProvidersChange: (state: api.AIProvidersResponse) => void;
   theme: 'light' | 'dark';
   onThemeChange: (theme: 'light' | 'dark') => void;
   motionEnabled: boolean;
@@ -69,7 +68,8 @@ function runtimeCopy(item: Record<string, unknown> | undefined) {
 
 export default function SettingsCenter(props: Props) {
   const {
-    open, onClose, config, onConfigChange, appSettings, onAppSettingsChange, theme, onThemeChange,
+    open, onClose, config, onConfigChange, appSettings, onAppSettingsChange, onAIProvidersChange,
+    theme, onThemeChange,
     motionEnabled, onMotionEnabledChange, density, onDensityChange, health, onRefreshHealth,
     modelStatus, onRefreshModels, onOpenLogs,
   } = props;
@@ -138,6 +138,7 @@ export default function SettingsCenter(props: Props) {
         if (providers) {
           setProviderCards(providers.providers);
           setAssignments(providers.assignments);
+          onAIProvidersChange(providers);
         }
         setCloudAuthorizations(authorizations.authorizations);
         if (!providers) setError('AI 凭据暂时无法读取；本地转写和其他设置仍可使用。');
@@ -148,7 +149,7 @@ export default function SettingsCenter(props: Props) {
     onRefreshHealth();
     onRefreshModels();
     return () => { cancelled = true; };
-  }, [open, onRefreshHealth, onRefreshModels]);
+  }, [onAIProvidersChange, open, onRefreshHealth, onRefreshModels]);
 
   useEffect(() => {
     if (!open || category !== 'storage') return;
@@ -171,7 +172,8 @@ export default function SettingsCenter(props: Props) {
 
   const scanModelFolder=async()=>{ try { const {open}=await import('@tauri-apps/plugin-dialog'); const path=await open({directory:true,multiple:false,title:'选择模型根目录'}); if(typeof path!=='string')return; setBusy(true); const result=await api.scanLocalModels(path); setScannedModels(result.models); setMessage(`发现 ${result.models.length} 个模型候选`); } catch(reason){setError(reason instanceof Error?reason.message:String(reason));} finally{setBusy(false);} };
   const updateProvider=(id:string,patch:Partial<api.AIProviderCard>)=>setProviderCards(items=>items.map(item=>item.provider_id===id?{...item,...patch}:item));
-  const saveProvider=async(card:api.AIProviderCard)=>{setBusy(true);try{const saved=await api.saveAIProvider(card.provider_id,card);updateProvider(card.provider_id,saved);setMessage(`${card.name} 已保存`);onRefreshModels();}catch(reason){setError(reason instanceof Error?reason.message:String(reason));}finally{setBusy(false);}};
+  const saveProvider=async(card:api.AIProviderCard)=>{setBusy(true);try{const saved=await api.saveAIProvider(card.provider_id,card);const providers=providerCards.map(item=>item.provider_id===card.provider_id?{...item,...saved}:item);setProviderCards(providers);onAIProvidersChange({providers,assignments});setMessage(`${card.name} 已保存`);onRefreshModels();}catch(reason){setError(reason instanceof Error?reason.message:String(reason));}finally{setBusy(false);}};
+  const saveAssignments=async()=>{setBusy(true);try{await api.saveAIAssignments(assignments);onAIProvidersChange({providers:providerCards,assignments});setMessage('任务分配已保存');}catch(reason){setError(reason instanceof Error?reason.message:String(reason));}finally{setBusy(false);}};
   const updateTranscriptionCloudAuthorization=async(granted:boolean)=>{
     const dashscope=providerCards.find(card=>card.provider_id==='dashscope');
     if(granted&&!dashscope?.has_api_key){setCategory('ai');setError('请先在 AI 服务中保存通义千问（百炼）API Key。');return;}
@@ -571,7 +573,7 @@ export default function SettingsCenter(props: Props) {
                   <label>AI 整理<AppSelect value={assignments.clean_provider_id} onChange={clean_provider_id=>setAssignments({...assignments,clean_provider_id})} label="AI 整理供应商" options={providerCards.map(card=>({value:card.provider_id,label:card.name,description:card.model}))}/></label>
                   <label>AI 翻译<AppSelect value={assignments.translate_provider_id} onChange={translate_provider_id=>setAssignments({...assignments,translate_provider_id})} label="AI 翻译供应商" options={providerCards.map(card=>({value:card.provider_id,label:card.name,description:card.model}))}/></label>
                   <label>内容生成<AppSelect value={assignments.content_provider_id} onChange={content_provider_id=>setAssignments({...assignments,content_provider_id})} label="内容生成供应商" options={providerCards.map(card=>({value:card.provider_id,label:card.name,description:card.model}))}/></label>
-                  <button className="button primary" onClick={()=>void api.saveAIAssignments(assignments).then(()=>setMessage('任务分配已保存')).catch(reason=>setError(reason.message))}>保存分配</button>
+                  <button className="button primary" disabled={busy} onClick={()=>void saveAssignments()}>保存分配</button>
                 </div>
               </SettingsSection>
               <SettingsSection title="模型供应商" description="每张卡的地址、密钥和模型互相隔离，密钥只保存在本机。">

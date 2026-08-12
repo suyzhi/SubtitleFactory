@@ -14,6 +14,8 @@ vi.mock('../api/backend', async importOriginal => {
     getAppSettings: vi.fn().mockResolvedValue({ settings: { default_model: 'small' }, warnings: [] }),
     getAISettings: vi.fn().mockResolvedValue({ settings: {}, presets: [] }),
     getAIProviders: vi.fn().mockResolvedValue({ providers: [], assignments: { clean_provider_id: 'deepseek', translate_provider_id: 'deepseek', content_provider_id: 'deepseek' } }),
+    saveAIProvider: vi.fn(),
+    saveAIAssignments: vi.fn().mockResolvedValue({}),
     getCloudAuthorizations: vi.fn().mockResolvedValue({ authorizations: [] }),
     setCloudAuthorization: vi.fn().mockResolvedValue(undefined),
     prepareTranscriptionModel: vi.fn().mockResolvedValue({ task_id: 'download-task', model_id: 'tiny', runtime: 'cpu', message: '正在准备模型' }),
@@ -175,8 +177,7 @@ function settingsProps(overrides: Partial<ComponentProps<typeof SettingsCenter>>
     onConfigChange: vi.fn(),
     appSettings: { default_model: 'small' } as never,
     onAppSettingsChange: vi.fn(),
-    aiSettings: null,
-    onAISaved: vi.fn(),
+    onAIProvidersChange: vi.fn(),
     theme: 'dark',
     onThemeChange: vi.fn(),
     motionEnabled: true,
@@ -213,6 +214,47 @@ describe('SettingsCenter model catalog', () => {
     render(<SettingsCenter {...settingsProps({ theme: 'light' })}/>);
     expect(screen.getByRole('dialog', { name: '设置中心' }).closest('.settings-backdrop'))
       .toHaveClass('theme-light');
+  });
+
+  it('reports the current provider assignments to the workspace', async () => {
+    const onAIProvidersChange = vi.fn();
+    render(<SettingsCenter {...settingsProps({ onAIProvidersChange })}/>);
+    await waitFor(() => expect(onAIProvidersChange).toHaveBeenCalledWith({
+      providers: [],
+      assignments: {
+        clean_provider_id: 'deepseek',
+        translate_provider_id: 'deepseek',
+        content_provider_id: 'deepseek',
+      },
+    }));
+  });
+
+  it('updates workspace readiness immediately after a provider is saved', async () => {
+    const provider: api.AIProviderCard = {
+      provider_id: 'deepseek', name: 'DeepSeek', base_url: 'https://api.deepseek.com/v1',
+      api_key: '', model: 'deepseek-v4-flash', models: ['deepseek-v4-flash'],
+      enabled: true, has_api_key: false,
+    };
+    const assignments = {
+      clean_provider_id: 'deepseek',
+      translate_provider_id: 'deepseek',
+      content_provider_id: 'deepseek',
+    };
+    vi.mocked(api.getAIProviders).mockResolvedValueOnce({ providers: [provider], assignments });
+    vi.mocked(api.saveAIProvider).mockResolvedValueOnce({ ...provider, has_api_key: true });
+    const onAIProvidersChange = vi.fn();
+    render(<SettingsCenter {...settingsProps({ onAIProvidersChange })}/>);
+
+    fireEvent.click(screen.getByRole('button', { name: /AI 服务/ }));
+    const providerSection = (await screen.findByText('模型供应商')).closest('section');
+    const card = providerSection?.querySelector('article.provider-card') || null;
+    expect(card).not.toBeNull();
+    fireEvent.click(within(card as HTMLElement).getByRole('button', { name: '保存' }));
+
+    await waitFor(() => expect(onAIProvidersChange).toHaveBeenLastCalledWith({
+      providers: [{ ...provider, has_api_key: true }],
+      assignments,
+    }));
   });
 
   it('retries a transient provider credential read without showing a false warning', async () => {

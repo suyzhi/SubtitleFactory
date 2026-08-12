@@ -19,15 +19,15 @@ describe('loadAppBootstrap', () => {
     vi.mocked(api.getAppSettings).mockResolvedValue({ settings: { startup_behavior: 'project_library' }, warnings: [] });
   });
 
-  it('keeps the local project library usable when Keychain-backed AI settings fail', async () => {
+  it('loads the local project library without touching Keychain-backed AI settings', async () => {
     vi.mocked(api.getAISettings).mockRejectedValue(new Error('macOS Keychain unavailable'));
 
     const snapshot = await loadAppBootstrap();
 
     expect(snapshot.projects).toEqual([{ id: 'active' }]);
     expect(snapshot.trashProjects).toEqual([{ id: 'trash' }]);
-    expect(snapshot.ai).toBeNull();
     expect(snapshot.app.settings.startup_behavior).toBe('project_library');
+    expect(api.getAISettings).not.toHaveBeenCalled();
     const [activeCall, deletedCall] = vi.mocked(api.listProjects).mock.invocationCallOrder;
     expect(activeCall).toBeLessThan(deletedCall);
   });

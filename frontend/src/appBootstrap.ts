@@ -1,17 +1,16 @@
 import * as api from './api/backend';
-import type { AIProviderPreset, AISettings, AppSettings, AppSettingsResponse, Project } from './types';
+import type { AppSettings, AppSettingsResponse, Project } from './types';
 
 export interface AppBootstrapSnapshot {
   projects: Project[];
   trashProjects: Project[];
-  ai: { settings: AISettings; presets: AIProviderPreset[] } | null;
   app: AppSettingsResponse;
 }
 
 /**
  * Load optional startup data after the health endpoint has confirmed that the
- * local backend is reachable. AI credentials can be unavailable in an ad-hoc
- * signed macOS build without making local transcription features unavailable.
+ * local backend is reachable. Keychain-backed AI provider state is loaded only
+ * when a project workspace or the settings center actually needs it.
  */
 export async function loadAppBootstrap(): Promise<AppBootstrapSnapshot> {
   // Keep the two library reads sequential during cold start. Some embedded
@@ -23,16 +22,14 @@ export async function loadAppBootstrap(): Promise<AppBootstrapSnapshot> {
     const deleted = await api.listProjects({ deleted: true }).catch(() => ({ projects: [] as Project[] }));
     return { active, deleted };
   };
-  const [{ active, deleted }, ai, app] = await Promise.all([
+  const [{ active, deleted }, app] = await Promise.all([
     loadLibraries(),
-    api.getAISettings().catch(() => null),
     api.getAppSettings().catch(() => ({ settings: {} as AppSettings, warnings: [] })),
   ]);
 
   return {
     projects: active.projects,
     trashProjects: deleted.projects,
-    ai,
     app,
   };
 }

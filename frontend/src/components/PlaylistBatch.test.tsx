@@ -30,12 +30,23 @@ describe('playlist batches', () => {
     vi.mocked(api.previewPlaylist).mockResolvedValue(preview);
     vi.mocked(api.createPlaylistBatch).mockResolvedValue({ action: 'created', batch_id: 'batch-1', added_count: 2, existing_count: 0, batch: detail.batch });
     const user = userEvent.setup();
-    render(<PlaylistBatchDialog url={preview.playlist.url} workflow={{ model: 'small', runtime: 'cpu', language: 'en', target_language: 'zh', clean_target_length: 42 }} appSettings={{ download_quality: 'best', download_container: 'mp4' }} health={{ runtime: { ffmpeg: { ok: true }, ffprobe: { ok: true }, yt_dlp: { ok: true }, deno: { ok: true }, ejs: { ok: true }, disk: { ok: true, message: '空间充足' } } } as any} aiReady onClose={() => undefined} onCreated={() => undefined}/>);
+    render(<PlaylistBatchDialog url={preview.playlist.url} workflow={{ model: 'small', runtime: 'cpu', language: 'en', target_language: 'zh', clean_target_length: 42 }} appSettings={{ download_quality: 'best', download_container: 'mp4' }} health={{ runtime: { ffmpeg: { ok: true }, ffprobe: { ok: true }, yt_dlp: { ok: true }, deno: { ok: true }, ejs: { ok: true }, disk: { ok: true, message: '空间充足' } } } as any} aiReady={{ clean: true, translate: true }} onClose={() => undefined} onCreated={() => undefined}/>);
     expect(await screen.findByText('Piano course')).toBeInTheDocument();
     await user.click(screen.getByRole('checkbox', { name: /AI 整理/ }));
     expect(screen.getByRole('button', { name: /创建并处理/ })).toBeDisabled();
     await user.click(screen.getByRole('checkbox', { name: /确认批量调用 AI 服务/ }));
     expect(screen.getByRole('button', { name: /创建并处理 2 个视频/ })).toBeEnabled();
+  });
+
+  it('checks the assigned provider for each selected AI stage', async () => {
+    vi.mocked(api.previewPlaylist).mockResolvedValue(preview);
+    const user = userEvent.setup();
+    render(<PlaylistBatchDialog url={preview.playlist.url} workflow={{ model: 'small', runtime: 'cpu', language: 'en', target_language: 'zh', clean_target_length: 42 }} appSettings={{ download_quality: 'best', download_container: 'mp4' }} health={{ runtime: { ffmpeg: { ok: true }, ffprobe: { ok: true }, yt_dlp: { ok: true }, deno: { ok: true }, ejs: { ok: true }, disk: { ok: true, message: '空间充足' } } } as any} aiReady={{ clean: false, translate: true }} onClose={() => undefined} onCreated={() => undefined}/>);
+
+    expect(await screen.findByText('Piano course')).toBeInTheDocument();
+    await user.click(screen.getByRole('checkbox', { name: /AI 整理/ }));
+    expect(screen.getByText('! AI 整理供应商尚未配置可用的 API Key')).toBeInTheDocument();
+    expect(screen.queryByText('! AI 翻译供应商尚未配置可用的 API Key')).not.toBeInTheDocument();
   });
 
   it('renders child projects inside one batch group and opens the existing editor project', async () => {

@@ -961,7 +961,8 @@ export async function testAISettings(settings: AISettings): Promise<{ ok: boolea
 
 export interface AIProviderCard { provider_id:string; name:string; base_url:string; api_key:string; model:string; models:string[]; enabled:boolean; has_api_key:boolean; last_test_status?:string; last_latency_ms?:number; }
 export interface AIAssignments { clean_provider_id:string; translate_provider_id:string; content_provider_id:string; }
-export const getAIProviders=()=>request<{providers:AIProviderCard[];assignments:AIAssignments}>('/api/settings/ai/providers');
+export interface AIProvidersResponse { providers:AIProviderCard[]; assignments:AIAssignments; }
+export const getAIProviders=()=>request<AIProvidersResponse>('/api/settings/ai/providers');
 export const saveAIProvider=async(id:string,data:Partial<AIProviderCard>)=>(await request<{provider:AIProviderCard}>(`/api/settings/ai/providers/${id}`,{method:'PUT',body:JSON.stringify(data)})).provider;
 export const testAIProvider=(id:string)=>request<{ok:boolean;latency_ms:number}>(`/api/settings/ai/providers/${id}/test`,{method:'POST'});
 export const saveAIAssignments=(data:AIAssignments)=>request('/api/settings/ai/assignments',{method:'PUT',body:JSON.stringify(data)});
