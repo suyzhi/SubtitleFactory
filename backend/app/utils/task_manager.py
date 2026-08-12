@@ -20,6 +20,13 @@ class TaskCancelled(Exception):
     """Raised inside a worker when cooperative cancellation is requested."""
 
 
+class TaskCreationBlocked(RuntimeError):
+    """Raised while an exclusive maintenance boundary blocks new work."""
+
+    error_code = "TASK_CREATION_BLOCKED"
+    recoverable = True
+
+
 class TaskManager:
     """全局任务管理器，管理所有后台任务的生命周期"""
 
@@ -29,6 +36,8 @@ class TaskManager:
         self._lock = threading.RLock()
         self._pause_conditions: dict[str, threading.Condition] = {}
         self._futures: dict[str, Future] = {}
+        self._maintenance_reason: str | None = None
+        self._active_api_mutations = 0
         self._resource_limits = {
             "ml": threading.Semaphore(1), "ffmpeg": threading.Semaphore(1),
             "io": threading.Semaphore(2), "network_ai": threading.Semaphore(2),
@@ -69,6 +78,10 @@ class TaskManager:
             "next_retry_at": None,
         }
         with self._lock:
+            if self._maintenance_reason:
+                raise TaskCreationBlocked(
+                    "数据库恢复已开始，暂时不能创建新任务；App 将在安全重启后恢复工作"
+                )
             self._tasks[task_id] = task
             self._pause_conditions[task_id] = threading.Condition(self._lock)
             self._persist(task)
@@ -190,6 +203,73 @@ class TaskManager:
         except Exception:
             logger.debug("Unable to inspect persisted project tasks", exc_info=True)
         return sorted(task_ids)
+
+    def active_tasks(self) -> list[dict]:
+        """Return every task that makes a database restore unsafe.
+
+        The in-memory Future is authoritative while a worker is unwinding;
+        SQLite persistence is best-effort and can briefly lag under write
+        contention, so restore callers must inspect both sources.
+        """
+        with self._lock:
+            return self._active_tasks_locked()
+
+    def _active_tasks_locked(self) -> list[dict]:
+        active_statuses = {"pending", "running", "paused"}
+        task_ids = {
+            task_id for task_id, task in self._tasks.items()
+            if task.get("status") in active_statuses
+        }
+        task_ids.update(
+            task_id for task_id, future in self._futures.items()
+            if not future.done()
+        )
+        return [
+            {
+                "id": task_id,
+                "type": str(self._tasks.get(task_id, {}).get("type") or "unknown"),
+                "status": str(self._tasks.get(task_id, {}).get("status") or "running"),
+            }
+            for task_id in sorted(task_ids)
+        ]
+
+    def begin_exclusive_maintenance(self, reason: str) -> tuple[bool, list[dict]]:
+        """Atomically stop new task creation when no in-memory work is active."""
+        with self._lock:
+            active = self._active_tasks_locked()
+            if self._maintenance_reason:
+                return False, [{
+                    "id": "maintenance",
+                    "type": self._maintenance_reason,
+                    "status": "running",
+                }]
+            if self._active_api_mutations:
+                return False, [{
+                    "id": "request",
+                    "type": "database_write",
+                    "status": "running",
+                }]
+            if active:
+                return False, active
+            self._maintenance_reason = reason
+            return True, []
+
+    def end_exclusive_maintenance(self, reason: str) -> None:
+        with self._lock:
+            if self._maintenance_reason == reason:
+                self._maintenance_reason = None
+
+    def begin_api_mutation(self) -> bool:
+        """Enter a mutating API request unless maintenance has closed the gate."""
+        with self._lock:
+            if self._maintenance_reason:
+                return False
+            self._active_api_mutations += 1
+            return True
+
+    def end_api_mutation(self) -> None:
+        with self._lock:
+            self._active_api_mutations = max(0, self._active_api_mutations - 1)
 
     def cancel_project_tasks(self, project_id: str) -> list[str]:
         """Request cooperative cancellation for every active project task."""

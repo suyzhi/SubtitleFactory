@@ -8,10 +8,13 @@ import re
 import time
 import uuid
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Iterable
 
+from pydantic import ValidationError
+
 from ..models.database import get_db, segment_to_dict
-from ..models.schemas import SegmentOperationRequest
+from ..models.schemas import SegmentOperationItem, SegmentOperationRequest
 
 
 SEGMENT_COLUMNS = (
@@ -41,6 +44,10 @@ class EditorServiceError(Exception):
 
 def _now() -> str:
     return time.strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _now_milliseconds() -> str:
+    return datetime.now().isoformat(sep=" ", timespec="milliseconds")
 
 
 def _project_revision(conn, project_id: str) -> int:
@@ -347,17 +354,81 @@ APPLIERS = {
 }
 
 
-def execute_operation(project_id: str, request: SegmentOperationRequest) -> dict:
+def execute_operation(
+    project_id: str,
+    request: SegmentOperationRequest | None,
+    *,
+    commit_saved_draft: bool = False,
+    rebase_draft: bool = False,
+) -> dict:
     conn = get_db()
     try:
         conn.execute("BEGIN IMMEDIATE")
         revision = _project_revision(conn, project_id)
+        if commit_saved_draft:
+            draft = conn.execute(
+                "SELECT base_revision,draft_json FROM segment_drafts WHERE project_id=?",
+                (project_id,),
+            ).fetchone()
+            if not draft:
+                raise EditorServiceError(
+                    409, "DRAFT_EMPTY", "没有待保存的字幕草稿"
+                )
+            try:
+                items = json.loads(draft["draft_json"] or "[]")
+                request = SegmentOperationRequest(
+                    expected_revision=(revision if rebase_draft else int(draft["base_revision"])),
+                    operation="update_many",
+                    items=items,
+                )
+                if not request.items or any(
+                    not (item.model_fields_set - {"index"})
+                    for item in request.items
+                ):
+                    raise ValueError("draft must contain at least one change")
+            except (TypeError, ValueError, ValidationError) as error:
+                raise EditorServiceError(
+                    422, "DRAFT_INVALID", "字幕草稿已损坏",
+                    "请放弃该草稿并重新编辑",
+                ) from error
+        if request is None:
+            raise EditorServiceError(422, "EDITOR_OPERATION_REQUIRED", "缺少字幕编辑操作")
         if revision != request.expected_revision:
             raise EditorServiceError(
                 409, "EDIT_REVISION_CONFLICT", "字幕已在其他操作中发生变化",
                 "请刷新字幕后重试", {"expected": request.expected_revision, "actual": revision},
             )
         before = _snapshot(_rows(conn, project_id))
+        if commit_saved_draft:
+            content_indices = {
+                item.index
+                for item in request.items
+                if item.model_fields_set - {"index", "locked"}
+            }
+            explicit_unlock_indices = {
+                item.index
+                for item in request.items
+                if "locked" in item.model_fields_set and item.locked is False
+            }
+            locked_indices = {
+                int(row["idx"]) for row in before
+                if row["locked"] and row["idx"] in content_indices
+            }
+            locked_conflicts = sorted(locked_indices - explicit_unlock_indices)
+            if locked_conflicts:
+                raise EditorServiceError(
+                    409,
+                    "DRAFT_LOCKED_CONFLICT",
+                    "草稿包含当前已锁定的字幕，未应用任何更改",
+                    "请在草稿中明确解锁这些字幕，或放弃草稿",
+                    {"indices": locked_conflicts},
+                )
+            # The normal editor only overrides a lock when the caller opts in.
+            # A saved draft may do so atomically only for rows that explicitly
+            # carry locked=false; the conflict check above protects every
+            # other locked content row in the same batch.
+            if locked_indices:
+                request.include_locked = True
         affected, time_changed = APPLIERS[request.operation](conn, project_id, request)
         if time_changed:
             _validate_timeline(conn, project_id)
@@ -389,6 +460,11 @@ def execute_operation(project_id: str, request: SegmentOperationRequest) -> dict
                )""",
             (project_id,),
         )
+        if commit_saved_draft:
+            # Committing the official edit and removing its staging draft must
+            # be one transaction. A crash can no longer leave an already-
+            # applied draft behind to be offered a second time after restart.
+            conn.execute("DELETE FROM segment_drafts WHERE project_id=?", (project_id,))
         conn.commit()
         return {
             "revision": next_revision,
@@ -506,16 +582,26 @@ def history_step(project_id: str, expected_revision: int, direction: str) -> dic
 
 
 def save_draft(project_id: str, base_revision: int, items: list[dict]) -> dict:
+    if not items or any(not (set(item) - {"index"}) for item in items):
+        raise EditorServiceError(
+            422, "DRAFT_INVALID", "字幕草稿没有可保存的更改"
+        )
     conn = get_db()
     try:
-        revision = _project_revision(conn, project_id)
-        if revision != base_revision:
-            raise EditorServiceError(409, "EDIT_REVISION_CONFLICT", "正式字幕已发生变化，请先刷新")
+        # A draft is a recovery artifact, not an official edit. Preserve it
+        # even if the official revision advanced; commit still enforces the
+        # original base revision and rebase still requires explicit consent.
+        _project_revision(conn, project_id)
         conn.execute(
             """INSERT INTO segment_drafts(project_id,base_revision,draft_json,updated_at)
                VALUES (?,?,?,?) ON CONFLICT(project_id) DO UPDATE SET
                base_revision=excluded.base_revision,draft_json=excluded.draft_json,updated_at=excluded.updated_at""",
-            (project_id, base_revision, json.dumps(items, ensure_ascii=False), _now()),
+            (
+                project_id,
+                base_revision,
+                json.dumps(items, ensure_ascii=False),
+                _now_milliseconds(),
+            ),
         )
         conn.commit()
         return {"project_id": project_id, "base_revision": base_revision, "items": items}
@@ -529,14 +615,36 @@ def get_draft(project_id: str) -> dict | None:
         row = conn.execute("SELECT * FROM segment_drafts WHERE project_id=?", (project_id,)).fetchone()
         if not row:
             return None
+        invalid = False
+        try:
+            raw_items = json.loads(row["draft_json"] or "[]")
+            if not isinstance(raw_items, list):
+                raise ValueError("draft items must be a list")
+            items = [
+                SegmentOperationItem.model_validate(item).model_dump(exclude_unset=True)
+                for item in raw_items
+            ]
+        except (TypeError, ValueError, ValidationError):
+            items = []
+            invalid = True
         return {
             "project_id": project_id,
             "base_revision": row["base_revision"],
-            "items": json.loads(row["draft_json"] or "[]"),
+            "items": items,
             "updated_at": row["updated_at"],
+            "invalid": invalid,
         }
     finally:
         conn.close()
+
+
+def commit_draft(project_id: str, *, rebase: bool = False) -> dict:
+    return execute_operation(
+        project_id,
+        None,
+        commit_saved_draft=True,
+        rebase_draft=rebase,
+    )
 
 
 def discard_draft(project_id: str) -> None:

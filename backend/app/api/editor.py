@@ -1,6 +1,7 @@
 """Transactional subtitle editor API."""
 
 from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
 
 from ..models.schemas import (
     EditorHistoryRequest,
@@ -10,6 +11,7 @@ from ..models.schemas import (
 )
 from ..services.editor import (
     EditorServiceError,
+    commit_draft,
     discard_draft,
     execute_operation,
     get_draft,
@@ -21,9 +23,13 @@ from ..services.editor import (
 router = APIRouter(prefix="/api/projects", tags=["editor"])
 
 
-def _run(callable_, *args):
+class DraftRebaseRequest(BaseModel):
+    confirm: bool = False
+
+
+def _run(callable_, *args, **kwargs):
     try:
-        return callable_(*args)
+        return callable_(*args, **kwargs)
     except EditorServiceError as error:
         raise HTTPException(error.status_code, detail=error.as_detail()) from error
 
@@ -56,20 +62,20 @@ def write_segment_draft(project_id: str, request: SegmentDraftUpdate):
 
 @router.post("/{project_id}/draft/commit", response_model=EditorOperationResponse)
 def commit_segment_draft(project_id: str):
-    draft = _run(get_draft, project_id)
-    if not draft:
-        raise HTTPException(409, detail={
-            "code": "DRAFT_EMPTY", "message": "没有待保存的字幕草稿",
-            "suggestion": "", "details": {}, "recoverable": True,
+    return _run(commit_draft, project_id)
+
+
+@router.post("/{project_id}/draft/rebase", response_model=EditorOperationResponse)
+def rebase_segment_draft(project_id: str, request: DraftRebaseRequest):
+    if not request.confirm:
+        raise HTTPException(400, detail={
+            "code": "CONFIRMATION_REQUIRED",
+            "message": "将旧草稿应用到当前字幕需要显式确认",
+            "suggestion": "请先检查草稿行号和当前字幕内容",
+            "details": {},
+            "recoverable": True,
         })
-    request = SegmentOperationRequest(
-        expected_revision=draft["base_revision"],
-        operation="update_many",
-        items=draft["items"],
-    )
-    result = _run(execute_operation, project_id, request)
-    discard_draft(project_id)
-    return result
+    return _run(commit_draft, project_id, rebase=True)
 
 
 @router.delete("/{project_id}/draft")

@@ -16,8 +16,9 @@ if "SUBTITLE_FACTORY_DATA_DIR" not in os.environ:
         prefix="subtitle-factory-security-tests-",
     )
 
-from app import security
+from app import main as app_main, security
 from app.main import app
+from app.utils.task_manager import TaskManager, task_manager
 
 
 class LoopbackSecurityTests(unittest.TestCase):
@@ -28,6 +29,7 @@ class LoopbackSecurityTests(unittest.TestCase):
 
     def tearDown(self):
         self.client.close()
+        task_manager.end_exclusive_maintenance("database_restore")
         self.token_patch.stop()
 
     def test_api_requires_bearer_token_and_returns_structured_error(self):
@@ -79,6 +81,29 @@ class LoopbackSecurityTests(unittest.TestCase):
             self.client.get(signed_url.replace("dQw4w9WgXcQ", "aaaaaaaaaaa")).status_code,
             401,
         )
+
+    def test_restore_maintenance_gate_blocks_new_mutations_but_keeps_reads_visible(self):
+        manager = TaskManager(max_workers=1)
+        with patch.object(app_main, "task_manager", manager):
+            acquired, active = manager.begin_exclusive_maintenance("database_restore")
+            self.assertTrue(acquired, active)
+            headers = {"Authorization": "Bearer test-session-token"}
+            denied = self.client.post(
+                "/api/projects",
+                json={"source_type": "local", "title": "Unauthorized mutation"},
+            )
+            self.assertEqual(denied.status_code, 401, denied.text)
+            self.assertEqual(denied.json()["error"]["code"], "UNAUTHORIZED_LOCAL_SESSION")
+            read = self.client.get("/api/projects", headers=headers)
+            self.assertEqual(read.status_code, 200, read.text)
+            blocked = self.client.post(
+                "/api/projects",
+                headers=headers,
+                json={"source_type": "local", "title": "Must not be created"},
+            )
+            self.assertEqual(blocked.status_code, 409, blocked.text)
+            self.assertEqual(blocked.json()["error"]["code"], "DATABASE_RESTORE_PENDING")
+        manager.shutdown()
 
 
 if __name__ == "__main__":

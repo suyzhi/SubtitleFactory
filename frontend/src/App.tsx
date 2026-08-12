@@ -22,6 +22,11 @@ import {
 } from './subtitleTableVirtualization';
 import { deriveProcessSteps, emptyProcess } from './processSteps';
 import { loadAppBootstrap } from './appBootstrap';
+import {
+  clearRecoveredSegmentDraft,
+  readRecoveredSegmentDraft,
+  writeRecoveredSegmentDraft,
+} from './draftRecovery';
 import './App.css';
 
 const PROFESSIONAL_UI_MARKER = 'subtitle-factory-ui:professional-v2';
@@ -134,6 +139,7 @@ function App() {
   const [activeProject, setActiveProject] = useState<Project | null>(null);
   const [segments, setSegments] = useState<SubtitleSegment[]>([]);
   const [draftItems, setDraftItems] = useState<Record<number, SegmentUpdate>>({});
+  const [draftIsStale, setDraftIsStale] = useState(false);
   const [editorSaveState, setEditorSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const [youtubeUrl, setYoutubeUrl] = useState('');
   const [config, setConfig] = useState<ProcessingConfig>(() => ({
@@ -238,7 +244,15 @@ function App() {
   const ownsWindowFullscreen = useRef(false);
   const editorRevision = useRef(0);
   const editorQueue = useRef<Promise<unknown>>(Promise.resolve());
+  const editorWriteFailed = useRef(false);
+  const draftWriteQueue = useRef<Promise<unknown>>(Promise.resolve());
+  const draftWriteGeneration = useRef<Record<string, number>>({});
+  const draftMutationLock = useRef(false);
+  const draftMutationPromise = useRef<Promise<void>>(Promise.resolve());
   const draftItemsRef = useRef<Record<number, SegmentUpdate>>({});
+  const draftBaseRevisionRef = useRef<number | null>(null);
+  const activeProjectIdRef = useRef<string | null>(null);
+  const projectSelectionIntent = useRef(0);
   const styleSaveTimer = useRef<number | null>(null);
   const webFallbackAttempted = useRef(false);
   const pendingSearchJump = useRef<SegmentSearchHit | null>(null);
@@ -603,9 +617,19 @@ function App() {
   // ── Poll task status ──
   useEffect(() => {
     if (!pollInterval || !currentTask) return;
+    let cancelled = false;
+    let requestedSequence = 0;
+    let appliedSequence = 0;
     const id = window.setInterval(async () => {
+      const sequence = ++requestedSequence;
       try {
         const status = await api.getTaskStatus(currentTask.id);
+        if (
+          cancelled
+          || sequence < appliedSequence
+          || (status.project_id && activeProjectIdRef.current !== status.project_id)
+        ) return;
+        appliedSequence = sequence;
         setCurrentTask(status);
         syncProcessFromTask(status);
         ingestTaskLogs(status);
@@ -623,7 +647,10 @@ function App() {
         }
 
         if (status.type === 'transcribe' && (status.status === 'running' || status.status === 'paused') && activeProject) {
-          api.getSegments(activeProject.id).then(result => setSegments(result.segments)).catch(() => {});
+          const projectId = activeProject.id;
+          api.getSegments(projectId).then(result => {
+            if (activeProjectIdRef.current === projectId) setSegments(result.segments);
+          }).catch(() => {});
         }
 
         // Update batch progress details
@@ -681,19 +708,30 @@ function App() {
             window.setTimeout(() => setToast(''), 3600);
           }
           if (activeProject) {
-            api.getSegments(activeProject.id)
-              .then(result => setSegments(result.segments))
+            const projectId = activeProject.id;
+            api.getSegments(projectId)
+              .then(result => {
+                if (activeProjectIdRef.current === projectId) setSegments(result.segments);
+              })
               .catch(() => {});
-            api.getProject(activeProject.id).then(project => { setActiveProject(project); editorRevision.current = Number(project.edit_revision || 0); }).catch(() => {});
+            api.getProject(projectId).then(project => {
+              if (activeProjectIdRef.current !== projectId) return;
+              setActiveProject(project);
+              editorRevision.current = Number(project.edit_revision || 0);
+            }).catch(() => {});
             api.listProjects().then(result => setProjects(result.projects)).catch(() => {});
           }
         }
       } catch (e: any) {
+        if (cancelled) return;
         addLog('error', '系统', `状态查询失败: ${e.message}`);
         setPollInterval(null);
       }
     }, pollInterval);
-    return () => clearInterval(id);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
   }, [pollInterval, currentTask, activeProject, addLog, ingestTaskLogs, syncProcessFromTask]);
 
   useEffect(() => {
@@ -749,18 +787,42 @@ function App() {
   const refreshSegments = useCallback(async (projectId: string) => {
     try {
       const r = await api.getSegments(projectId);
-      setSegments(r.segments);
+      if (activeProjectIdRef.current === projectId) setSegments(r.segments);
     } catch { }
   }, []);
 
+  const refreshActiveProject = useCallback(async (projectId: string) => {
+    try {
+      const project = await api.getProject(projectId);
+      if (activeProjectIdRef.current !== projectId) return;
+      setActiveProject(project);
+      editorRevision.current = Number(project.edit_revision || 0);
+      await refreshSegments(projectId);
+    } catch { /* the initiating panel already reports its own operation error */ }
+  }, [refreshSegments]);
+
   // ── Select project ──
-  const selectProject = useCallback(async (p: Project) => {
+  const selectProject = useCallback(async (p: Project, requestedIntent?: number) => {
+    const selectionIntent = requestedIntent ?? ++projectSelectionIntent.current;
+    if (selectionIntent !== projectSelectionIntent.current) return;
+    // Finish writes for the previous project before changing the single active
+    // editor revision. This prevents a late response from project A from being
+    // interpreted with project B's revision or replacing project B's rows.
+    await Promise.all([
+      editorQueue.current,
+      draftWriteQueue.current,
+      draftMutationPromise.current,
+    ]);
+    if (selectionIntent !== projectSelectionIntent.current) return;
+    activeProjectIdRef.current = p.id;
     setActiveProject(p);
     setForceLocalPlayback(false);
     webFallbackAttempted.current = false;
     editorRevision.current = Number(p.edit_revision || 0);
     draftItemsRef.current = {};
+    draftBaseRevisionRef.current = null;
     setDraftItems({});
+    setDraftIsStale(false);
     setEditorSaveState('idle');
     setShowProjectWorkspace(true);
     setProjectWorkspace(p.segments_count > 0 ? 'subtitles' : 'preview');
@@ -782,13 +844,17 @@ function App() {
     await Promise.all([
       refreshSegments(p.id),
       api.getProjectStyle(p.id).then(result => {
+        if (activeProjectIdRef.current !== p.id) return;
         setSubtitleStyle(result.settings
           ? { ...loadSubtitleStyle(), ...result.settings } as SubtitleStyleSettings
           : loadSubtitleStyle());
-      }).catch(() => setSubtitleStyle(loadSubtitleStyle())),
+      }).catch(() => {
+        if (activeProjectIdRef.current === p.id) setSubtitleStyle(loadSubtitleStyle());
+      }),
     ]);
     try {
       const latestTask = await api.getLatestProjectTask(p.id);
+      if (activeProjectIdRef.current !== p.id) return;
       if (latestTask) {
         setCurrentTask(latestTask);
         syncProcessFromTask(latestTask);
@@ -796,25 +862,84 @@ function App() {
         if (['pending', 'running', 'paused'].includes(latestTask.status)) setPollInterval(1000);
       }
     } catch { /* projects created by older builds may not have task history */ }
-    addLog('info', '项目', `打开项目: ${p.title}`);
+    if (activeProjectIdRef.current === p.id) addLog('info', '项目', `打开项目: ${p.title}`);
   }, [refreshSegments, addLog, ingestTaskLogs, refreshProcessSteps, syncProcessFromTask]);
+
+  const selectProjectById = useCallback(async (projectId: string) => {
+    const selectionIntent = ++projectSelectionIntent.current;
+    try {
+      const project = await api.getProject(projectId);
+      if (selectionIntent !== projectSelectionIntent.current) return;
+      await selectProject(project, selectionIntent);
+    } catch (error) {
+      if (selectionIntent === projectSelectionIntent.current) {
+        setToast(error instanceof Error ? error.message : String(error));
+      }
+    }
+  }, [selectProject]);
 
   useEffect(() => {
     if (!activeProject?.id) return;
+    const projectId = activeProject.id;
     let cancelled = false;
-    void api.getSegmentDraft(activeProject.id).then(({ draft }) => {
-      if (cancelled || !draft?.items.length) return;
-      const next = Object.fromEntries(draft.items.map(item => {
-        const { index, ...data } = item;
-        return [index, data];
-      }));
-      draftItemsRef.current = next;
-      setDraftItems(next);
-      if (draft.base_revision !== editorRevision.current) {
+    void api.getSegmentDraft(projectId).then(async ({ draft }) => {
+      if (cancelled || activeProjectIdRef.current !== projectId) return;
+      const localDraft = readRecoveredSegmentDraft(projectId);
+      if (draft?.invalid && !localDraft) {
+        draftItemsRef.current = { 0: {} };
+        draftBaseRevisionRef.current = draft.base_revision;
+        setDraftItems({ 0: {} });
+        setDraftIsStale(true);
         setEditorSaveState('error');
-        setToast('检测到旧版字幕草稿；正式字幕已变化，请保存或放弃草稿前先检查内容');
+        setToast('字幕草稿文件已损坏；正式字幕没有改变，请放弃该草稿后重新编辑');
         return;
       }
+      const backendUpdatedAt = draft?.updated_at
+        ? Date.parse(draft.updated_at.replace(' ', 'T')) || 0
+        : 0;
+      const useLocal = !!localDraft && (
+        !!draft?.invalid
+        || !draft?.items.length
+        || localDraft.updatedAt > backendUpdatedAt
+      );
+      if (localDraft && !useLocal) clearRecoveredSegmentDraft(projectId);
+      const baseRevision = useLocal ? localDraft.baseRevision : draft?.base_revision;
+      const next = useLocal
+        ? localDraft.items
+        : Object.fromEntries((draft?.items || []).map(item => {
+            const { index, ...data } = item;
+            return [index, data];
+          }));
+      if (!Object.keys(next).length || baseRevision === undefined) return;
+      draftItemsRef.current = next;
+      draftBaseRevisionRef.current = baseRevision;
+      setDraftItems(next);
+      if (useLocal) {
+        const generation = (draftWriteGeneration.current[projectId] || 0) + 1;
+        draftWriteGeneration.current[projectId] = generation;
+        const persist = () => api.saveSegmentDraft(projectId, baseRevision,
+          Object.entries(next).map(([index, data]) => ({ index: Number(index), ...data })));
+        const queued = draftWriteQueue.current.then(persist, persist);
+        draftWriteQueue.current = queued.then(() => undefined, () => undefined);
+        try {
+          await queued;
+          if (draftWriteGeneration.current[projectId] === generation) {
+            clearRecoveredSegmentDraft(projectId);
+          }
+        } catch {
+          // Keep the local recovery copy until the sidecar accepts it.
+        }
+      }
+      if (cancelled || activeProjectIdRef.current !== projectId) return;
+      if (baseRevision !== editorRevision.current) {
+        setDraftIsStale(true);
+        setEditorSaveState('error');
+        setToast(useLocal
+          ? '检测到异常退出前的旧字幕草稿；已保留但未自动套用，请确认后恢复或放弃'
+          : '检测到旧版字幕草稿；已保留但未自动套用，请确认后恢复或放弃');
+        return;
+      }
+      setDraftIsStale(false);
       setSegments(current => current.map(segment => ({ ...segment, ...(next[segment.index] || {}) })));
       setEditorSaveState('saved');
     }).catch(() => undefined);
@@ -838,11 +963,13 @@ function App() {
     interval: number = 1000
   ) => {
     if (taskStartLock.current) return;
+    const projectId = activeProjectIdRef.current;
     taskStartLock.current = true;
     setTaskStarting(true);
     setStepStatus(stepId, 'running', 0);
     try {
       const { task_id } = await fn();
+      if (activeProjectIdRef.current !== projectId) return;
       lastTaskMessage.current = '';
       lastTaskBatch.current = '';
       lastTaskStep.current = '';
@@ -851,11 +978,13 @@ function App() {
       lastBackendLogCount.current = 0;
       addLog('info', name, `${name} 任务已创建`);
       const status = await api.getTaskStatus(task_id);
+      if (activeProjectIdRef.current !== projectId) return;
       setCurrentTask(status);
       syncProcessFromTask(status);
       ingestTaskLogs(status);
       setPollInterval(interval);
     } catch (e: any) {
+      if (activeProjectIdRef.current !== projectId) return;
       addLog('error', name, `${name} 失败: ${e.message}`);
       setStepStatus(stepId, 'failed', 0, e.message);
       const suggestionMap: Record<string, string> = {
@@ -992,6 +1121,7 @@ function App() {
         if (project) await selectProject(project);
         if (result.task_id) {
           const status = await api.getTaskStatus(result.task_id);
+          if (activeProjectIdRef.current !== created.project_id) continue;
           backendLogTaskId.current = result.task_id;
           lastBackendLogCount.current = 0;
           setCurrentTask(status);
@@ -1104,10 +1234,15 @@ function App() {
   const retryFailedCleanBatch = useCallback(async (batchIndex: number) => {
     if (!currentTask || taskStarting || ['running', 'pending', 'paused'].includes(currentTask.status)) return;
     const originalTaskId = currentTask.id;
+    const projectId = activeProjectIdRef.current;
     setTaskStarting(true);
     try {
       const result = await api.retryFailedCleanBatch(originalTaskId, batchIndex);
       const status = await api.getTaskStatus(result.task_id);
+      if (
+        activeProjectIdRef.current !== projectId
+        || (status.project_id && status.project_id !== projectId)
+      ) return;
       setCurrentTask(status);
       syncProcessFromTask(status);
       ingestTaskLogs(status);
@@ -1143,20 +1278,36 @@ function App() {
     startTask('AI 翻译', 'translate', () => api.startTranslate(activeProject.id, config.target_language));
   }, [activeProject, config.target_language, startTask]);
 
+  const updateTargetLanguage = useCallback(async (targetLanguage: string) => {
+    setConfig(current => ({ ...current, target_language: targetLanguage }));
+    const projectId = activeProjectIdRef.current;
+    if (!projectId) return;
+    try {
+      const updated = await api.updateProjectTargetLanguage(projectId, targetLanguage);
+      if (activeProjectIdRef.current === projectId) setActiveProject(updated);
+    } catch (error) {
+      if (activeProjectIdRef.current === projectId) {
+        setToast(error instanceof Error ? error.message : String(error));
+      }
+    }
+  }, []);
+
   // ── Export ──
   const doExport = useCallback(async (fmt: ExportFormat) => {
     if (!activeProject || exportActionLock.current) return;
+    const projectId = activeProject.id;
     exportActionLock.current = true;
     setTaskStarting(true);
     setStepStatus('export', 'running', 10);
     try {
       if (fmt === 'mp4' || fmt === 'mkv') {
-        const r = await api.exportSubtitles(activeProject.id, {
+        const r = await api.exportSubtitles(projectId, {
           format: fmt, bilingual: config.bilingual,
           primary_language: subtitleStyle.mode === 'bilingual_translated_first' ? 'translated' : 'original', style: subtitleStyle,
         });
         if (r.task_id) {
           const s = await api.getTaskStatus(r.task_id);
+          if (activeProjectIdRef.current !== projectId) return;
           backendLogTaskId.current = r.task_id;
           lastBackendLogCount.current = 0;
           setCurrentTask(s);
@@ -1166,20 +1317,23 @@ function App() {
           addLog('info', '压制视频', `${fmt.toUpperCase()} 视频导出任务已创建`);
         }
       } else {
-        const result = await api.exportSubtitles(activeProject.id, {
+        const result = await api.exportSubtitles(projectId, {
           format: fmt, bilingual: config.bilingual,
           primary_language: subtitleStyle.mode === 'bilingual_translated_first' ? 'translated' : 'original', style: subtitleStyle,
         });
+        if (activeProjectIdRef.current !== projectId) return;
         setStepStatus('export', 'success', 100);
         const saved = await api.downloadExport(
-          activeProject.id,
+          projectId,
           fmt,
           result.path,
           projectExportFilename(activeProject.title, fmt),
         );
+        if (activeProjectIdRef.current !== projectId) return;
         addLog('info', '导出', saved ? `${fmt.toUpperCase()} 已保存` : `已取消保存 ${fmt.toUpperCase()}`);
       }
     } catch (e: any) {
+      if (activeProjectIdRef.current !== projectId) return;
       addLog('error', '导出', `${fmt} 导出失败: ${e.message}`);
       setStepStatus('export', 'failed', 0, e.message, '检查文件权限和 ffmpeg');
     } finally {
@@ -1189,18 +1343,28 @@ function App() {
   }, [activeProject, config.bilingual, subtitleStyle, addLog, ingestTaskLogs, setStepStatus]);
 
   const acceptEditorResult = useCallback((projectId: string, result: Awaited<ReturnType<typeof api.applySegmentOperation>>) => {
+    setProjects(current => current.map(project => project.id === projectId
+      ? { ...project, edit_revision: result.revision, segments_count: result.segments.length }
+      : project));
+    if (activeProjectIdRef.current !== projectId) return;
     editorRevision.current = result.revision;
     setSegments(result.segments);
     setActiveProject(current => current?.id === projectId
       ? { ...current, edit_revision: result.revision, segments_count: result.segments.length }
       : current);
-    setEditorSaveState('saved');
+    if (Object.keys(draftItemsRef.current).length > 0) {
+      setDraftIsStale(true);
+      setEditorSaveState('error');
+    } else {
+      setEditorSaveState('saved');
+    }
   }, []);
 
   const runEditorOperation = useCallback((data: Omit<SegmentOperationRequest, 'expected_revision'>) => {
     if (!activeProject) return Promise.reject(new Error('请先选择项目'));
     const projectId = activeProject.id;
     const execute = async () => {
+      editorWriteFailed.current = false;
       setEditorSaveState('saving');
       try {
         const result = await api.applySegmentOperation(projectId, {
@@ -1209,13 +1373,15 @@ function App() {
         acceptEditorResult(projectId, result);
         return result;
       } catch (error: any) {
-        setEditorSaveState('error');
+        editorWriteFailed.current = true;
+        if (activeProjectIdRef.current === projectId) setEditorSaveState('error');
         addLog('error', '编辑', `字幕操作失败: ${error.message}`);
-        setToast(error.message || '字幕操作失败');
+        if (activeProjectIdRef.current === projectId) setToast(error.message || '字幕操作失败');
         if (error.code === 'EDIT_REVISION_CONFLICT') {
           const [project, latest] = await Promise.all([
             api.getProject(projectId), api.getSegments(projectId),
           ]);
+          if (activeProjectIdRef.current !== projectId) throw error;
           editorRevision.current = Number(project.edit_revision || 0);
           setActiveProject(project);
           setSegments(latest.segments);
@@ -1232,19 +1398,43 @@ function App() {
   // ── Update segment / persist manual drafts ──
   const handleUpdateSegment = useCallback(async (idx: number, data: SegmentUpdate) => {
     if (!activeProject) return;
+    if (draftMutationLock.current) {
+      setToast('正在保存或放弃草稿，请稍候');
+      return;
+    }
+    if (draftIsStale) {
+      setToast('旧草稿与当前字幕版本不同；请先预览并确认恢复，或放弃旧草稿');
+      return;
+    }
+    const projectId = activeProject.id;
     const manualDraft = appSettings.auto_save === false || Object.keys(draftItemsRef.current).length > 0;
     if (manualDraft) {
       const next = { ...draftItemsRef.current, [idx]: { ...(draftItemsRef.current[idx] || {}), ...data } };
+      const baseRevision = draftBaseRevisionRef.current ?? editorRevision.current;
+      const generation = (draftWriteGeneration.current[projectId] || 0) + 1;
+      draftWriteGeneration.current[projectId] = generation;
+      draftBaseRevisionRef.current = baseRevision;
       draftItemsRef.current = next;
+      if (!writeRecoveredSegmentDraft(projectId, baseRevision, next)) {
+        addLog('warning', '编辑', '浏览器恢复副本写入失败；仍会继续写入本机数据库');
+      }
       setDraftItems(next);
       setSegments(current => current.map(segment => segment.index === idx ? { ...segment, ...data } : segment));
       setEditorSaveState('saving');
-      try {
-        await api.saveSegmentDraft(activeProject.id, editorRevision.current,
+      const persist = async () => {
+        await api.saveSegmentDraft(projectId, baseRevision,
           Object.entries(next).map(([index, value]) => ({ index: Number(index), ...value })));
-        setEditorSaveState('saved');
+      };
+      const queued = draftWriteQueue.current.then(persist, persist);
+      draftWriteQueue.current = queued.then(() => undefined, () => undefined);
+      try {
+        await queued;
+        if (draftWriteGeneration.current[projectId] === generation) {
+          clearRecoveredSegmentDraft(projectId);
+          if (activeProjectIdRef.current === projectId) setEditorSaveState('saved');
+        }
       } catch (error: any) {
-        setEditorSaveState('error');
+        if (activeProjectIdRef.current === projectId) setEditorSaveState('error');
         addLog('error', '编辑', `草稿保存失败: ${error.message}`);
       }
       return;
@@ -1254,32 +1444,106 @@ function App() {
       operation: 'update_many', items: [{ index: idx, ...data }],
       include_locked: data.locked !== undefined,
     }).catch(() => undefined);
-  }, [activeProject, appSettings.auto_save, addLog, runEditorOperation]);
+  }, [activeProject, appSettings.auto_save, addLog, draftIsStale, runEditorOperation]);
 
   const commitDraft = useCallback(async () => {
-    if (!activeProject || !Object.keys(draftItemsRef.current).length) return;
+    if (!activeProject || !Object.keys(draftItemsRef.current).length || draftMutationLock.current) return;
+    const projectId = activeProject.id;
+    draftMutationLock.current = true;
+    let releaseMutation: () => void = () => {};
+    draftMutationPromise.current = new Promise(resolve => { releaseMutation = resolve; });
     setEditorSaveState('saving');
     try {
-      const result = await api.commitSegmentDraft(activeProject.id);
+      if (draftItemsRef.current[0]) {
+        throw new Error('损坏的草稿不能保存，请放弃后重新编辑');
+      }
+      if (draftIsStale && !window.confirm('当前正式字幕已在草稿保存后发生变化。\n\n确认把这份旧草稿按行号应用到当前字幕吗？此操作可撤销。')) {
+        setEditorSaveState('error');
+        return;
+      }
+      await Promise.all([editorQueue.current, draftWriteQueue.current]);
+      if (activeProjectIdRef.current !== projectId) return;
+      const recovered = readRecoveredSegmentDraft(projectId);
+      if (recovered) {
+        await api.saveSegmentDraft(projectId, recovered.baseRevision,
+          Object.entries(recovered.items).map(([index, data]) => ({ index: Number(index), ...data })));
+        clearRecoveredSegmentDraft(projectId);
+      }
+      if (activeProjectIdRef.current !== projectId) return;
+      const result = draftIsStale
+        ? await api.rebaseSegmentDraft(projectId)
+        : await api.commitSegmentDraft(projectId);
+      clearRecoveredSegmentDraft(projectId);
+      if (activeProjectIdRef.current !== projectId) return;
       draftItemsRef.current = {};
+      draftBaseRevisionRef.current = null;
       setDraftItems({});
-      acceptEditorResult(activeProject.id, result);
+      setDraftIsStale(false);
+      acceptEditorResult(projectId, result);
       setToast('字幕草稿已保存');
     } catch (error: any) {
-      setEditorSaveState('error');
-      setToast(error.message);
+      if (activeProjectIdRef.current === projectId) {
+        setEditorSaveState('error');
+        if (error?.code === 'EDIT_REVISION_CONFLICT') {
+          setDraftIsStale(true);
+          await refreshActiveProject(projectId);
+          setToast('正式字幕已发生变化；草稿仍安全保留，请预览后确认恢复或放弃');
+        } else {
+          setToast(error.message);
+        }
+      }
+    } finally {
+      draftMutationLock.current = false;
+      releaseMutation();
     }
-  }, [acceptEditorResult, activeProject]);
+  }, [acceptEditorResult, activeProject, draftIsStale, refreshActiveProject]);
 
   const discardDraft = useCallback(async () => {
-    if (!activeProject) return;
-    await api.discardSegmentDraft(activeProject.id);
-    draftItemsRef.current = {};
-    setDraftItems({});
-    await refreshSegments(activeProject.id);
-    setEditorSaveState('idle');
-    setToast('字幕草稿已放弃');
+    if (!activeProject || draftMutationLock.current) return;
+    const projectId = activeProject.id;
+    draftMutationLock.current = true;
+    let releaseMutation: () => void = () => {};
+    draftMutationPromise.current = new Promise(resolve => { releaseMutation = resolve; });
+    try {
+      await Promise.all([editorQueue.current, draftWriteQueue.current]);
+      if (activeProjectIdRef.current !== projectId) return;
+      await api.discardSegmentDraft(projectId);
+      clearRecoveredSegmentDraft(projectId);
+      if (activeProjectIdRef.current !== projectId) return;
+      draftItemsRef.current = {};
+      draftBaseRevisionRef.current = null;
+      setDraftItems({});
+      setDraftIsStale(false);
+      await refreshSegments(projectId);
+      setEditorSaveState('idle');
+      setToast('字幕草稿已放弃');
+    } catch (error: any) {
+      if (activeProjectIdRef.current === projectId) {
+        setEditorSaveState('error');
+        setToast(error.message);
+      }
+    } finally {
+      draftMutationLock.current = false;
+      releaseMutation();
+    }
   }, [activeProject, refreshSegments]);
+
+  const previewDraft = useCallback(() => {
+    if (!activeProject || !Object.keys(draftItemsRef.current).length) return;
+    if (draftItemsRef.current[0]) {
+      setToast('损坏的草稿无法预览；正式字幕未改变，可以安全放弃该草稿');
+      return;
+    }
+    setSegments(current => current.map(segment => ({
+      ...segment,
+      ...(draftItemsRef.current[segment.index] || {}),
+    })));
+    setProjectWorkspace('subtitles');
+    setShowProjectWorkspace(true);
+    setToast(draftIsStale
+      ? '正在预览旧草稿；数据库尚未改变，确认恢复后才会写入'
+      : '正在预览本机草稿');
+  }, [activeProject, draftIsStale]);
 
   const replaceSegments = useCallback(async (
     search: string, replacement: string, fields: Array<'clean_text' | 'translated_text'>,
@@ -1300,19 +1564,82 @@ function App() {
 
   const undoEditor = useCallback(async () => {
     if (!activeProject) return;
+    if (draftMutationLock.current) {
+      setToast('正在保存或放弃草稿，请稍候');
+      return;
+    }
+    const projectId = activeProject.id;
+    const execute = async () => {
+      if (activeProjectIdRef.current !== projectId) return;
+      const result = await api.undoEditorOperation(projectId, editorRevision.current);
+      acceptEditorResult(projectId, result);
+    };
+    const queued = editorQueue.current.then(execute, execute);
+    editorQueue.current = queued.then(() => undefined, () => undefined);
     try {
-      const result = await api.undoEditorOperation(activeProject.id, editorRevision.current);
-      acceptEditorResult(activeProject.id, result);
-    } catch (error: any) { setToast(error.message); }
+      await queued;
+    } catch (error: any) {
+      if (activeProjectIdRef.current === projectId) setToast(error.message);
+    }
   }, [acceptEditorResult, activeProject]);
 
   const redoEditor = useCallback(async () => {
     if (!activeProject) return;
+    if (draftMutationLock.current) {
+      setToast('正在保存或放弃草稿，请稍候');
+      return;
+    }
+    const projectId = activeProject.id;
+    const execute = async () => {
+      if (activeProjectIdRef.current !== projectId) return;
+      const result = await api.redoEditorOperation(projectId, editorRevision.current);
+      acceptEditorResult(projectId, result);
+    };
+    const queued = editorQueue.current.then(execute, execute);
+    editorQueue.current = queued.then(() => undefined, () => undefined);
     try {
-      const result = await api.redoEditorOperation(activeProject.id, editorRevision.current);
-      acceptEditorResult(activeProject.id, result);
-    } catch (error: any) { setToast(error.message); }
+      await queued;
+    } catch (error: any) {
+      if (activeProjectIdRef.current === projectId) setToast(error.message);
+    }
   }, [acceptEditorResult, activeProject]);
+
+  useEffect(() => {
+    const handleEditorShortcut = (event: KeyboardEvent) => {
+      if (!(event.metaKey || event.ctrlKey) || event.altKey || event.repeat) return;
+      const key = event.key.toLowerCase();
+      if (key === 's') {
+        event.preventDefault();
+        if (showAISettings || !showProjectWorkspace || !activeProjectIdRef.current) return;
+        const target = event.target;
+        if (target instanceof HTMLElement && (
+          target.isContentEditable || target.tagName === 'INPUT' || target.tagName === 'TEXTAREA'
+        )) target.blur();
+        window.setTimeout(() => {
+          if (Object.keys(draftItemsRef.current).length > 0) {
+            void commitDraft();
+            return;
+          }
+          void editorQueue.current.then(() => {
+            setToast(editorWriteFailed.current ? '字幕尚未保存，请检查错误后重试' : '当前字幕已保存');
+            window.setTimeout(() => setToast(''), 1800);
+          });
+        }, 0);
+        return;
+      }
+      if (key !== 'z') return;
+      if (showAISettings || !showProjectWorkspace) return;
+      const target = event.target;
+      if (target instanceof HTMLElement && (
+        target.isContentEditable || target.tagName === 'INPUT' || target.tagName === 'TEXTAREA'
+      )) return;
+      event.preventDefault();
+      if (event.shiftKey) void redoEditor();
+      else void undoEditor();
+    };
+    window.addEventListener('keydown', handleEditorShortcut);
+    return () => window.removeEventListener('keydown', handleEditorShortcut);
+  }, [commitDraft, redoEditor, showAISettings, showProjectWorkspace, undoEditor]);
 
   const importSubtitleFile = useCallback(() => {
     if (!activeProject) return;
@@ -1370,11 +1697,13 @@ function App() {
   }, []);
 
   const openLibrarySearchHit = useCallback(async (hit: SegmentSearchHit) => {
+    const selectionIntent = ++projectSelectionIntent.current;
     try {
       pendingSearchJump.current = hit;
       const project = projects.find(item => item.id === hit.project_id)
         || await api.getProject(hit.project_id);
-      await selectProject(project);
+      if (selectionIntent !== projectSelectionIntent.current) return;
+      await selectProject(project, selectionIntent);
     } catch (error) {
       pendingSearchJump.current = null;
       setToast(error instanceof Error ? error.message : String(error));
@@ -1404,10 +1733,13 @@ function App() {
 
   const toggleTaskPause = useCallback(async () => {
     if (!currentTask) return;
+    const taskId = currentTask.id;
+    const projectId = activeProjectIdRef.current;
     try {
       const next = currentTask.status === 'paused'
-        ? await api.resumeTask(currentTask.id)
-        : await api.pauseTask(currentTask.id);
+        ? await api.resumeTask(taskId)
+        : await api.pauseTask(taskId);
+      if (activeProjectIdRef.current !== projectId || next.id !== taskId) return;
       setCurrentTask(next);
       syncProcessFromTask(next);
       addLog('info', next.type, next.status === 'paused' ? '任务已暂停' : '任务已继续');
@@ -1418,8 +1750,11 @@ function App() {
 
   const cancelCurrentTask = useCallback(async () => {
     if (!currentTask || !['pending', 'running', 'paused'].includes(currentTask.status)) return;
+    const taskId = currentTask.id;
+    const projectId = activeProject?.id || null;
     try {
-      const next = await api.cancelTask(currentTask.id);
+      const next = await api.cancelTask(taskId);
+      if (activeProjectIdRef.current !== projectId || next.id !== taskId) return;
       setCurrentTask(next);
       ingestTaskLogs(next);
       setPollInterval(null);
@@ -1427,10 +1762,14 @@ function App() {
       addLog('warning', next.type, '任务已终止');
       setToast('任务已安全终止');
       window.setTimeout(() => setToast(''), 2600);
-      if (activeProject) {
-        api.getProject(activeProject.id).then(setActiveProject).catch(() => {});
+      if (projectId) {
+        api.getProject(projectId).then(project => {
+          if (activeProjectIdRef.current === projectId) setActiveProject(project);
+        }).catch(() => {});
         api.listProjects().then(listing => setProjects(listing.projects)).catch(() => {});
-        api.getSegments(activeProject.id).then(result => setSegments(result.segments)).catch(() => {});
+        api.getSegments(projectId).then(result => {
+          if (activeProjectIdRef.current === projectId) setSegments(result.segments);
+        }).catch(() => {});
       }
     } catch (error: any) {
       addLog('error', currentTask.type, `终止失败：${error.message}`);
@@ -1449,6 +1788,7 @@ function App() {
       styleSaveTimer.current = null;
       void api.saveProjectStyle(projectId, style as unknown as Record<string, unknown>)
         .catch(error => {
+          if (activeProjectIdRef.current !== projectId) return;
           setToast(`样式保存失败：${error.message}`);
           window.setTimeout(() => setToast(''), 3000);
         });
@@ -1542,8 +1882,14 @@ function App() {
   }, []);
 
   const resetActiveProject = useCallback(() => {
+    projectSelectionIntent.current += 1;
+    activeProjectIdRef.current = null;
     setActiveProject(null);
     setSegments([]);
+    draftItemsRef.current = {};
+    draftBaseRevisionRef.current = null;
+    setDraftItems({});
+    setDraftIsStale(false);
     setCurrentTask(null);
     setPollInterval(null);
     setProcessSteps(emptyProcess());
@@ -1567,6 +1913,13 @@ function App() {
     if (activeTask) {
       terminate = window.confirm('这个项目正在处理。移入回收站会先终止当前任务，是否继续？');
       if (!terminate) return;
+    }
+    if (activeProject?.id === project.id) {
+      await Promise.all([
+        editorQueue.current,
+        draftWriteQueue.current,
+        draftMutationPromise.current,
+      ]);
     }
     try {
       await api.trashProject(project.id, terminate);
@@ -1646,9 +1999,11 @@ function App() {
       || taskStarting
       || Boolean(currentTask && ['running', 'pending', 'paused'].includes(currentTask.status))
     ) return;
+    const projectId = activeProject.id;
     setTaskStarting(true);
     try {
-      const result = await api.updateProjectMediaMode(activeProject.id, mediaMode);
+      const result = await api.updateProjectMediaMode(projectId, mediaMode);
+      if (activeProjectIdRef.current !== projectId) return;
       setActiveProject(result.project);
       setProjects(current => current.map(project => project.id === result.project.id ? result.project : project));
       setForceLocalPlayback(false);
@@ -1657,12 +2012,14 @@ function App() {
       window.setTimeout(() => setToast(''), 3200);
       if (result.task_id) {
         const status = await api.getTaskStatus(result.task_id);
+        if (activeProjectIdRef.current !== projectId) return;
         setCurrentTask(status);
         syncProcessFromTask(status);
         ingestTaskLogs(status);
         setPollInterval(1000);
       }
     } catch (error: any) {
+      if (activeProjectIdRef.current !== projectId) return;
       setToast(`媒体模式切换失败：${error.message}`);
       window.setTimeout(() => setToast(''), 4200);
     } finally {
@@ -1675,19 +2032,23 @@ function App() {
     label: string,
   ) => {
     if (!activeProject || activeProject.source_type !== 'youtube' || taskStarting) return;
+    const projectId = activeProject.id;
     setTaskStarting(true);
     setStepStatus('download', 'running', 0);
     try {
-      const result = await api.materializeProjectVideo(activeProject.id, reason);
+      const result = await api.materializeProjectVideo(projectId, reason);
+      if (activeProjectIdRef.current !== projectId) return;
       if (result.task_id) {
         const status = await api.getTaskStatus(result.task_id);
+        if (activeProjectIdRef.current !== projectId) return;
         setCurrentTask(status);
         syncProcessFromTask(status);
         ingestTaskLogs(status);
         setPollInterval(1000);
         return;
       }
-      const project = result.project || await api.getProject(activeProject.id);
+      const project = result.project || await api.getProject(projectId);
+      if (activeProjectIdRef.current !== projectId) return;
       setActiveProject(project);
       setProjects(current => current.map(item => item.id === project.id ? project : item));
       setStepStatus('download', 'success', 100);
@@ -1695,6 +2056,7 @@ function App() {
       setToast(result.message || `${label}已完成`);
       window.setTimeout(() => setToast(''), 3200);
     } catch (error: any) {
+      if (activeProjectIdRef.current !== projectId) return;
       setStepStatus('download', 'failed', 0, error.message);
       setToast(`${label}失败：${error.message}`);
       window.setTimeout(() => setToast(''), 4200);
@@ -1899,7 +2261,18 @@ function App() {
     {youtubeEnabled && activeProject?.media_mode === 'web'
       ? <p>视频由网页播放器呈现，字幕、时间轴、倍速、循环和样式预览保持一致；本机只准备转写音频。网页受限或导出成片时会按需下载视频。</p>
       : <p>完整视频保存在本机，可离线播放并选择音轨或截取范围。</p>}
-    {activeProject?.video_path && activeProject.media_mode !== 'web' && <MediaSelectionPanel projectId={activeProject.id} onChanged={() => { setActiveProject(current => current ? { ...current, audio_path: null, audio_available: false } : current); setToast('音轨或范围已更新，请重新提取音频'); }}/>}
+    {activeProject?.video_path && activeProject.media_mode !== 'web' && <MediaSelectionPanel
+      projectId={activeProject.id}
+      onChanged={() => {
+        const projectId = activeProject.id;
+        setActiveProject(current => current?.id === projectId
+          ? { ...current, audio_path: null, audio_available: false }
+          : current);
+        if (activeProjectIdRef.current === projectId) {
+          setToast('音轨或范围已更新，请重新提取音频');
+        }
+      }}
+    />}
     <div className="media-mode-actions">
       {youtubeEnabled && <button className="button primary" disabled={!activeProject?.source_url || isProcessing} onClick={retryDownload}>
         {activeProject?.media_mode === 'web' ? '重新准备音频' : '重新下载视频'}
@@ -1955,7 +2328,7 @@ function App() {
       <GlobalTaskDrawer open={showTaskDrawer} onClose={() => setShowTaskDrawer(false)} onOpenProject={projectId => {
         const project = projects.find(item => item.id === projectId)
           || playlistBatches.flatMap(batch => batch.items).find(item => item.project_id === projectId)?.project;
-        if (project) void selectProject(project); else void api.getProject(projectId).then(selectProject).catch(() => undefined);
+        if (project) void selectProject(project); else void selectProjectById(projectId);
         setShowTaskDrawer(false);
       }} onOpenSettings={() => { setShowTaskDrawer(false); setShowAISettings(true); }}/>
       {youtubeEnabled && playlistDialogUrl && <Suspense fallback={<DeferredPanel kind="overlay" label="正在打开播放列表工具…"/>}>
@@ -2119,20 +2492,20 @@ function App() {
               {([['subtitles', '字幕'], ['style', '样式'], ['export', '导出'], ['logs', '日志']] as const).map(([id, label]) => <button key={id} role="tab" aria-selected={bottomTab === id} className={bottomTab === id ? 'active' : ''} onClick={() => { setBottomTab(id); if (id === 'style') setInspectorMode('style'); }}>{label}{id === 'subtitles' && <span>{segments.length}</span>}{id === 'logs' && processLogs.length > 0 && <span>{processLogs.length}</span>}</button>)}
               <button className="focus-subtitles" onClick={() => setSubtitleFocus(value => !value)}>{subtitleFocus ? '显示播放器' : '专注字幕'}</button>
             </nav>
-            {bottomTab === 'subtitles' && <div className="subtitle-language-bar"><span>目标语言</span><LanguagePicker mode="target" allowCustom allowNone value={config.target_language} onChange={target_language => { setConfig({ ...config, target_language }); if (activeProject) void api.updateProjectTargetLanguage(activeProject.id, target_language).then(setActiveProject); }}/><button className="button primary" disabled={!hasSegments || isProcessing || config.target_language === 'none'} onClick={doTranslate}>开始翻译</button></div>}
+            {bottomTab === 'subtitles' && <div className="subtitle-language-bar"><span>目标语言</span><LanguagePicker mode="target" allowCustom allowNone value={config.target_language} onChange={targetLanguage => void updateTargetLanguage(targetLanguage)}/><button className="button primary" disabled={!hasSegments || isProcessing || config.target_language === 'none'} onClick={doTranslate}>开始翻译</button></div>}
             <div className="workspace-tab-content" key={bottomTab}>
-              {bottomTab === 'subtitles' && (activeProject ? <SubtitleTable segments={segments} currentTime={currentTime} activeIdx={activeSegmentIndex} onSeek={handleSeek} onUpdate={handleUpdateSegment} onReplaceAll={replaceSegments} onSplit={splitSegment} onMerge={mergeSegments} onUndo={undoEditor} onRedo={redoEditor} saveState={editorSaveState} draftCount={Object.keys(draftItems).length} onCommitDraft={commitDraft} onDiscardDraft={discardDraft} onAutoScrollChange={setAutoScrollTable} autoScroll={autoScrollTable} disabled={isProcessing}/> : <div className="transcript-empty">选择项目后，字幕会在这里按时间排列并可直接编辑。</div>)}
+              {bottomTab === 'subtitles' && (activeProject ? <SubtitleTable segments={segments} currentTime={currentTime} activeIdx={activeSegmentIndex} onSeek={handleSeek} onUpdate={handleUpdateSegment} onReplaceAll={replaceSegments} onSplit={splitSegment} onMerge={mergeSegments} onUndo={undoEditor} onRedo={redoEditor} saveState={editorSaveState} draftCount={Object.keys(draftItems).length} draftIsStale={draftIsStale} onPreviewDraft={previewDraft} onCommitDraft={commitDraft} onDiscardDraft={discardDraft} onAutoScrollChange={setAutoScrollTable} autoScroll={autoScrollTable} disabled={isProcessing}/> : <div className="transcript-empty">选择项目后，字幕会在这里按时间排列并可直接编辑。</div>)}
               {bottomTab === 'style' && <div className="style-overview"><div className="style-preview-card" style={{ fontFamily: subtitleStyle.fontFamily }}><span style={{ color: subtitleStyle.originalTextColor, fontSize: Math.min(24, subtitleStyle.originalFontSize) }}>为每一句话找到恰好的位置。</span><small style={{ color: subtitleStyle.translatedTextColor }}>Give every line its perfect place.</small></div><div><h3>字幕样式</h3><p>调整字体、字号、双语顺序、颜色、背景与垂直位置。更改会立即显示在播放器中。</p><button className="button primary" onClick={() => setInspectorMode('style')}>打开样式检查器</button></div></div>}
               {bottomTab === 'export' && <div className="export-workspace"><header><div><h3>导出项目</h3><p>字幕文件会立即下载；视频导出将在后台压制。</p></div><label><input type="checkbox" checked={config.bilingual} onChange={event => setConfig({ ...config, bilingual: event.target.checked })}/> 包含双语</label></header><div className="export-cards">{(['srt', 'vtt', 'ass', 'srt-bilingual', 'mp4', 'mkv'] as ExportFormat[]).map(format => <button key={format} disabled={!hasSegments || isProcessing} onClick={() => void doExport(format)}><strong>{format === 'srt-bilingual' ? '双语 SRT' : format.toUpperCase()}</strong><small>{format === 'mp4' || format === 'mkv' ? '带字幕视频' : '字幕文件'}</small><span>↗</span></button>)}</div></div>}
               {bottomTab === 'logs' && <div className="logs-workspace"><ProcessLogViewer logs={processLogs} collapsed={false} onToggle={() => undefined} onClear={() => setProcessLogs([])}/></div>}
             </div>
           </section>
           {projectWorkspace === 'subtitles' && <section className="task-page subtitle-task-page">
-            <header className="task-page-toolbar"><div><h2>逐句校对</h2><p>播放器不再挤占编辑空间；点击时间码可跳回预览页核对画面。</p></div><div className="toolbar-cluster"><label>目标语言<LanguagePicker mode="target" allowCustom allowNone value={config.target_language} onChange={target_language => { setConfig({ ...config, target_language }); if (activeProject) void api.updateProjectTargetLanguage(activeProject.id, target_language).then(setActiveProject); }}/></label><button className="button secondary" onClick={importSubtitleFile}>导入字幕</button><button className="button secondary" onClick={() => setProjectWorkspace('preview')}>打开预览</button><button className="button primary" disabled={!hasSegments || isProcessing || config.target_language === 'none'} onClick={doTranslate}>开始翻译</button></div></header>
-            <div className="subtitle-page-table"><SubtitleTable segments={segments} currentTime={currentTime} activeIdx={activeSegmentIndex} entryFocusIdx={subtitleEntryFocusIndex} entryFocusRequest={subtitleFocusRequest} onSeek={time => { handleSeek(time); setProjectWorkspace('preview'); }} onUpdate={handleUpdateSegment} onReplaceAll={replaceSegments} onSplit={splitSegment} onMerge={mergeSegments} onUndo={undoEditor} onRedo={redoEditor} saveState={editorSaveState} draftCount={Object.keys(draftItems).length} onCommitDraft={commitDraft} onDiscardDraft={discardDraft} onAutoScrollChange={setAutoScrollTable} autoScroll={autoScrollTable} disabled={isProcessing}/></div>
+            <header className="task-page-toolbar"><div><h2>逐句校对</h2><p>播放器不再挤占编辑空间；点击时间码可跳回预览页核对画面。</p></div><div className="toolbar-cluster"><label>目标语言<LanguagePicker mode="target" allowCustom allowNone value={config.target_language} onChange={targetLanguage => void updateTargetLanguage(targetLanguage)}/></label><button className="button secondary" onClick={importSubtitleFile}>导入字幕</button><button className="button secondary" onClick={() => setProjectWorkspace('preview')}>打开预览</button><button className="button primary" disabled={!hasSegments || isProcessing || config.target_language === 'none'} onClick={doTranslate}>开始翻译</button></div></header>
+            <div className="subtitle-page-table"><SubtitleTable segments={segments} currentTime={currentTime} activeIdx={activeSegmentIndex} entryFocusIdx={subtitleEntryFocusIndex} entryFocusRequest={subtitleFocusRequest} onSeek={time => { handleSeek(time); setProjectWorkspace('preview'); }} onUpdate={handleUpdateSegment} onReplaceAll={replaceSegments} onSplit={splitSegment} onMerge={mergeSegments} onUndo={undoEditor} onRedo={redoEditor} saveState={editorSaveState} draftCount={Object.keys(draftItems).length} draftIsStale={draftIsStale} onPreviewDraft={previewDraft} onCommitDraft={commitDraft} onDiscardDraft={discardDraft} onAutoScrollChange={setAutoScrollTable} autoScroll={autoScrollTable} disabled={isProcessing}/></div>
           </section>}
           {projectWorkspace === 'quality' && activeProject && <section className="task-page quality-task-page"><div className="quality-page-grid"><QualityPanel projectId={activeProject.id} segments={segments} revision={editorRevision.current} onEditorResult={result => acceptEditorResult(activeProject.id, result)} onSeek={time => { handleSeek(time); setProjectWorkspace('preview'); }}/><GlossaryPanel projectId={activeProject.id}/></div></section>}
-          {projectWorkspace === 'smart' && activeProject && <section className="task-page smart-task-page"><SmartToolsPanel projectId={activeProject.id} revision={editorRevision.current} duration={videoDuration} onEditorResult={result => acceptEditorResult(activeProject.id, result)} onProjectChanged={() => { void api.getProject(activeProject.id).then(project => { setActiveProject(project); editorRevision.current = Number(project.edit_revision || 0); return refreshSegments(project.id); }); }}/></section>}
+          {projectWorkspace === 'smart' && activeProject && <section className="task-page smart-task-page"><SmartToolsPanel projectId={activeProject.id} revision={editorRevision.current} duration={videoDuration} onEditorResult={result => acceptEditorResult(activeProject.id, result)} onProjectChanged={() => void refreshActiveProject(activeProject.id)}/></section>}
           {projectWorkspace === 'process' && <section className="task-page process-task-page">
             <div className="process-overview"><header><div><h2>从素材到成片</h2><p>一次只配置一个步骤，已完成的内容可以随时回看或重做。</p></div><div className="process-total"><span style={{'--progress': `${totalProgress}%`} as React.CSSProperties}>{totalProgress}%</span><small>整体进度</small></div></header><div className="process-step-list">{compactSteps.map((step, index) => <button key={step.id} className={`${step.state.status} ${activeProcessStep === step.id ? 'selected' : ''}`} onClick={() => setSelectedStep(step.id)}><i>{step.state.status === 'success' ? '✓' : index + 1}</i><span><strong>{step.label}</strong><small>{step.id === 'download' ? '获取素材并提取音频' : step.id === 'transcribe' ? '本地语音识别' : step.id === 'clean' ? '修正错词与断句' : step.id === 'translate' ? '生成目标语言字幕' : '输出字幕或成片'}</small></span><em>{step.state.status === 'success' ? '已完成' : step.state.status === 'running' ? `${Math.round(step.state.progress)}%` : step.state.status === 'failed' ? '需处理' : '待开始'}</em></button>)}</div>{currentTask && isProcessing && <div className="process-live-controls"><span>{currentTask.message}</span><button onClick={toggleTaskPause}>{currentTask.status === 'paused' ? '继续' : '暂停'}</button><button className="danger" onClick={cancelCurrentTask}>停止</button></div>}</div>
             <aside className="process-settings"><header><small>步骤设置</small><h2>{compactSteps.find(step => step.id === activeProcessStep)?.label}</h2></header>{renderProcessSettings()}</aside>
@@ -2212,7 +2585,8 @@ function fmtTime(seconds: number): string {
 
 export function SubtitleTable({
   segments, currentTime, activeIdx, onSeek, onUpdate, onReplaceAll, onSplit, onMerge,
-  onUndo, onRedo, saveState, draftCount, onCommitDraft, onDiscardDraft,
+  onUndo, onRedo, saveState, draftCount, draftIsStale, onPreviewDraft,
+  onCommitDraft, onDiscardDraft,
   onAutoScrollChange, autoScroll, entryFocusIdx, entryFocusRequest, disabled
 }: {
   segments: SubtitleSegment[];
@@ -2229,6 +2603,8 @@ export function SubtitleTable({
   onRedo: () => void | Promise<void>;
   saveState: 'idle' | 'saving' | 'saved' | 'error';
   draftCount: number;
+  draftIsStale?: boolean;
+  onPreviewDraft?: () => void;
   onCommitDraft: () => void | Promise<void>;
   onDiscardDraft: () => void | Promise<void>;
   onAutoScrollChange?: (v: boolean) => void;
@@ -2372,7 +2748,11 @@ export function SubtitleTable({
     window.clearTimeout(programmaticTimer.current);
     if (virtualized) updateWindow(top);
     element.scrollTo({ top, behavior: reduced ? 'auto' : 'smooth' });
-    programmaticTimer.current = window.setTimeout(() => { programmaticScroll.current = false; }, 450);
+    // `scrollend` clears this as soon as the browser settles. The long fallback
+    // is deliberately not an animation-duration guess: explicit wheel,
+    // pointer, or touch intent cancels it immediately, while a slow smooth
+    // scroll must not turn off the user's auto-scroll preference by mistake.
+    programmaticTimer.current = window.setTimeout(() => { programmaticScroll.current = false; }, 5000);
   }, [estimatedRowHeight, rowOffsets, updateWindow, virtualized, visibleSegments]);
 
   useLayoutEffect(() => {
@@ -2409,6 +2789,22 @@ export function SubtitleTable({
 
   useEffect(() => () => {
     window.clearTimeout(userScrollTimer.current);
+    window.clearTimeout(programmaticTimer.current);
+  }, []);
+
+  useEffect(() => {
+    const element = tableRef.current;
+    if (!element) return;
+    const finishProgrammaticScroll = () => {
+      programmaticScroll.current = false;
+      window.clearTimeout(programmaticTimer.current);
+    };
+    element.addEventListener('scrollend', finishProgrammaticScroll);
+    return () => element.removeEventListener('scrollend', finishProgrammaticScroll);
+  }, []);
+
+  const markUserScrollIntent = useCallback(() => {
+    programmaticScroll.current = false;
     window.clearTimeout(programmaticTimer.current);
   }, []);
 
@@ -2483,7 +2879,7 @@ export function SubtitleTable({
           <span className={`editor-save-state ${saveState}`}>{saveState === 'saving' ? '保存中…' : saveState === 'error' ? '保存失败' : saveState === 'saved' ? '已保存' : ''}</span>
         </div>
       </div>
-      {draftCount > 0 && <div className="subtitle-draft-bar" role="status"><span>{draftCount} 条未提交草稿已安全保存在本机</span><button onClick={() => void onDiscardDraft()}>放弃</button><button className="primary" onClick={() => void onCommitDraft()}>保存全部</button></div>}
+      {draftCount > 0 && <div className="subtitle-draft-bar" role="status"><span>{draftIsStale ? `${draftCount} 条旧草稿已保留；正式字幕已变化` : `${draftCount} 条未提交草稿已安全保存在本机`}</span>{onPreviewDraft && <button onClick={onPreviewDraft}>预览</button>}<button onClick={() => void onDiscardDraft()}>放弃</button><button className="primary" onClick={() => void onCommitDraft()}>{draftIsStale ? '确认恢复' : '保存全部'}</button></div>}
       <div className="subtitle-findbar">
         <input value={searchText} onChange={event => setSearchText(event.target.value)} placeholder="搜索字幕" />
         <input value={replaceText} onChange={event => setReplaceText(event.target.value)} placeholder="替换为" />
@@ -2492,7 +2888,9 @@ export function SubtitleTable({
         <label><input type="checkbox" checked={replaceOriginal} onChange={event => setReplaceOriginal(event.target.checked)}/> 原文/整理</label><label><input type="checkbox" checked={replaceTranslation} onChange={event => setReplaceTranslation(event.target.checked)}/> 译文</label><label><input type="checkbox" checked={replaceMatchCase} onChange={event => setReplaceMatchCase(event.target.checked)}/> 区分大小写</label><label><input type="checkbox" checked={replaceIncludeLocked} onChange={event => setReplaceIncludeLocked(event.target.checked)}/> 覆盖锁定项</label>
       </div>
       {replacePreview && <div className="replace-preview" role="dialog" aria-label="确认全部替换"><div><strong>预览全部替换</strong><span>将在{replaceOriginal ? '原文/整理' : ''}{replaceOriginal && replaceTranslation ? '和' : ''}{replaceTranslation ? '译文' : ''}中修改 {replaceMatchCount} 条字幕，{replaceIncludeLocked ? '包括锁定字幕' : '锁定字幕不会改变'}。此操作可撤销。</span></div><button onClick={() => setReplacePreview(false)}>取消</button><button className="primary" onClick={() => void onReplaceAll(searchText, replaceText, [...(replaceOriginal ? ['clean_text' as const] : []), ...(replaceTranslation ? ['translated_text' as const] : [])], { matchCase: replaceMatchCase, includeLocked: replaceIncludeLocked }).then(() => setReplacePreview(false)).catch(() => undefined)}>确认替换</button></div>}
-      <div className="subtitle-table-scroll" ref={tableRef} onScroll={handleScroll}>
+      <div className="subtitle-table-scroll" ref={tableRef} onScroll={handleScroll}
+        onWheelCapture={markUserScrollIntent} onPointerDownCapture={markUserScrollIntent}
+        onTouchStart={markUserScrollIntent}>
         <table className="subtitle-table">
           <thead>
             <tr>

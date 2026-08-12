@@ -148,6 +148,122 @@ class EditorAPITests(unittest.TestCase):
             self.client.get(f"/api/projects/{self.project_id}/draft").json()["draft"]
         )
 
+    def test_stale_draft_requires_explicit_rebase_and_commit_clears_atomically(self):
+        saved = self.client.put(
+            f"/api/projects/{self.project_id}/draft",
+            json={
+                "base_revision": 0,
+                "items": [{"index": 2, "clean_text": "Recovered draft"}],
+            },
+        )
+        self.assertEqual(saved.status_code, 200, saved.text)
+
+        official = self.operate(
+            operation="update_many",
+            items=[{"index": 1, "clean_text": "Official change"}],
+        )
+        self.assertEqual(official.status_code, 200, official.text)
+
+        # Editing recovery data must remain durable even after the official
+        # track moves on. It is stored as stale, never silently applied.
+        updated_draft = self.client.put(
+            f"/api/projects/{self.project_id}/draft",
+            json={
+                "base_revision": 0,
+                "items": [{"index": 2, "clean_text": "Latest recovered draft"}],
+            },
+        )
+        self.assertEqual(updated_draft.status_code, 200, updated_draft.text)
+
+        stale = self.client.post(f"/api/projects/{self.project_id}/draft/commit")
+        self.assertEqual(stale.status_code, 409, stale.text)
+        self.assertEqual(stale.json()["detail"]["code"], "EDIT_REVISION_CONFLICT")
+        self.assertIsNotNone(
+            self.client.get(f"/api/projects/{self.project_id}/draft").json()["draft"]
+        )
+
+        unconfirmed = self.client.post(
+            f"/api/projects/{self.project_id}/draft/rebase", json={"confirm": False},
+        )
+        self.assertEqual(unconfirmed.status_code, 400, unconfirmed.text)
+        rebased = self.client.post(
+            f"/api/projects/{self.project_id}/draft/rebase", json={"confirm": True},
+        )
+        self.assertEqual(rebased.status_code, 200, rebased.text)
+        self.assertEqual(
+            [item["clean_text"] for item in self.segments()[:2]],
+            ["Official change", "Latest recovered draft"],
+        )
+        self.assertIsNone(
+            self.client.get(f"/api/projects/{self.project_id}/draft").json()["draft"]
+        )
+
+        undone = self.client.post(
+            f"/api/projects/{self.project_id}/editor/undo",
+            json={"expected_revision": self.revision()},
+        )
+        self.assertEqual(undone.status_code, 200, undone.text)
+        self.assertEqual(self.segments()[1]["clean_text"], "Second line")
+
+    def test_draft_commit_preserves_locked_or_corrupt_recovery_data(self):
+        locked = self.client.put(
+            f"/api/projects/{self.project_id}/draft",
+            json={
+                "base_revision": 0,
+                "items": [{"index": 3, "clean_text": "Must not overwrite"}],
+            },
+        )
+        self.assertEqual(locked.status_code, 200, locked.text)
+        rejected = self.client.post(f"/api/projects/{self.project_id}/draft/commit")
+        self.assertEqual(rejected.status_code, 409, rejected.text)
+        self.assertEqual(rejected.json()["detail"]["code"], "DRAFT_LOCKED_CONFLICT")
+        self.assertEqual(self.segments()[2]["clean_text"], "Locked world")
+        self.assertIsNotNone(
+            self.client.get(f"/api/projects/{self.project_id}/draft").json()["draft"]
+        )
+
+        explicitly_unlocked = self.client.put(
+            f"/api/projects/{self.project_id}/draft",
+            json={
+                "base_revision": 0,
+                "items": [{
+                    "index": 3,
+                    "clean_text": "Explicitly unlocked draft",
+                    "locked": False,
+                }],
+            },
+        )
+        self.assertEqual(explicitly_unlocked.status_code, 200, explicitly_unlocked.text)
+        committed = self.client.post(f"/api/projects/{self.project_id}/draft/commit")
+        self.assertEqual(committed.status_code, 200, committed.text)
+        self.assertEqual(self.segments()[2]["clean_text"], "Explicitly unlocked draft")
+        self.assertFalse(self.segments()[2]["locked"])
+
+        replacement = self.client.put(
+            f"/api/projects/{self.project_id}/draft",
+            json={
+                "base_revision": self.revision(),
+                "items": [{"index": 2, "clean_text": "Recovery remains intact"}],
+            },
+        )
+        self.assertEqual(replacement.status_code, 200, replacement.text)
+
+        db = database.get_db()
+        db.execute(
+            "UPDATE segment_drafts SET draft_json='{}' WHERE project_id=?",
+            (self.project_id,),
+        )
+        db.commit()
+        db.close()
+        corrupt = self.client.post(f"/api/projects/{self.project_id}/draft/commit")
+        self.assertEqual(corrupt.status_code, 422, corrupt.text)
+        self.assertEqual(corrupt.json()["detail"]["code"], "DRAFT_INVALID")
+        corrupt_draft = self.client.get(
+            f"/api/projects/{self.project_id}/draft"
+        ).json()["draft"]
+        self.assertTrue(corrupt_draft["invalid"])
+        self.assertEqual(corrupt_draft["items"], [])
+
 
 class VersionedMigrationTests(unittest.TestCase):
     def test_migrations_are_idempotent_and_create_safety_backups(self):

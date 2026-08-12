@@ -116,6 +116,24 @@ describe('SubtitlePlayer frame controls', () => {
   it('supports R, comma and period keyboard shortcuts', async () => {
     const { container } = render(<SubtitlePlayer {...baseProps}/>);
     const wrapper = container.querySelector('.pro-player') as HTMLElement;
+    const video = container.querySelector('video') as HTMLVideoElement;
+    let current = 0;
+    Object.defineProperty(video, 'duration', { configurable: true, value: 1 });
+    Object.defineProperty(video, 'currentTime', {
+      configurable: true,
+      get: () => current,
+      set: value => {
+        current = Number(value);
+        queueMicrotask(() => video.dispatchEvent(new Event('seeked')));
+      },
+    });
+    Object.defineProperty(video, 'requestVideoFrameCallback', {
+      configurable: true,
+      value: (callback: () => void) => {
+        callback();
+        return 1;
+      },
+    });
     (HTMLMediaElement.prototype.pause as ReturnType<typeof vi.fn>).mockClear();
     (HTMLMediaElement.prototype.play as ReturnType<typeof vi.fn>).mockClear();
     fireEvent.keyDown(wrapper, { key: ',' });

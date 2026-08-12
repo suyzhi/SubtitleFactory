@@ -185,8 +185,13 @@ describe('subtitle table layout and positioning', () => {
     expect(scrollTo).toHaveBeenCalled();
     expect(scrollTo.mock.calls.at(-1)?.[0].top).toBeGreaterThan(10_000);
 
-    fireEvent.scroll(container.querySelector('.subtitle-table-scroll') as HTMLElement);
+    const scroller = container.querySelector('.subtitle-table-scroll') as HTMLElement;
+    fireEvent.scroll(scroller);
     expect(props.onAutoScrollChange).not.toHaveBeenCalled();
+
+    fireEvent.wheel(scroller);
+    fireEvent.scroll(scroller);
+    expect(props.onAutoScrollChange).toHaveBeenCalledWith(false);
 
     scrollTo.mockClear();
     rerender(<SubtitleTable {...props} entryFocusIdx={400} entryFocusRequest={2}/>);

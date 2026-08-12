@@ -58,6 +58,13 @@ function bytes(value?: number) {
   return `${current >= 10 || index === 0 ? current.toFixed(0) : current.toFixed(1)} ${units[index]}`;
 }
 
+function backupKind(kind: string) {
+  return ({
+    manual: '手动', daily: '每日', weekly: '每周',
+    pre_restore: '恢复前安全', schema: '数据迁移',
+  } as Record<string, string>)[kind] || '系统';
+}
+
 function runtimeCopy(item: Record<string, unknown> | undefined) {
   if (!item) return { ok: false, title: '尚未检查', detail: '打开设置后刷新运行状态' };
   const ok = Boolean(item.ok ?? item.available ?? (item.status === 'ready'));
@@ -85,7 +92,9 @@ export default function SettingsCenter(props: Props) {
   const [pathChecks, setPathChecks] = useState<Record<string, PathValidationResult>>({});
   const [preparingModel, setPreparingModel] = useState('');
   const [modelTasks, setModelTasks] = useState<Record<string, TaskStatus>>({});
-  const [backupState, setBackupState] = useState<{directory: string; backups: api.BackupRecord[]}>({ directory: '', backups: [] });
+  const [backupState, setBackupState] = useState<api.BackupsResponse>({
+    directory: '', backups: [], pending_restore: null, last_restore: null,
+  });
   const [validatingModel, setValidatingModel] = useState('');
   const [favoriteLanguage, setFavoriteLanguage] = useState('fr');
   const [providerCards,setProviderCards]=useState<api.AIProviderCard[]>([]);
@@ -163,9 +172,18 @@ export default function SettingsCenter(props: Props) {
     finally { setBusy(false); }
   };
   const restoreSelectedBackup = async (name: string) => {
-    if (!window.confirm(`恢复“${name}”会替换当前数据库，继续吗？恢复前会自动再创建安全备份。`)) return;
+    if (!window.confirm(`恢复“${name}”会把数据库回到该备份的时间点。\n\n字幕工厂会先验证备份并保存当前数据库，然后安全重启；不会在当前进程中直接覆盖正在使用的 SQLite。继续吗？`)) return;
     setBusy(true);
-    try { await api.restoreBackup(name); setMessage('备份已恢复，请重新启动字幕工厂'); }
+    setError('');
+    try {
+      await api.restoreBackup(name);
+      setMessage('备份已验证，正在安全重启并应用恢复…');
+      const restarting = await api.restartDesktopApp();
+      if (!restarting) {
+        setBackupState(await api.getBackups());
+        setMessage('备份已排队；当前是浏览器调试模式，请立即手动重启字幕工厂。重启前不要开始新任务');
+      }
+    }
     catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); }
     finally { setBusy(false); }
   };
@@ -630,10 +648,12 @@ export default function SettingsCenter(props: Props) {
                 {renderPath('下载目录', 'download_directory', 'download_directory', 'App 默认数据目录', true)}
                 {renderPath('FFmpeg 自定义路径', 'ffmpeg_path', 'ffmpeg', '通常无需设置')}
               </SettingsSection>}
-              <SettingsSection title="数据库备份" description="默认保留 7 份每日备份和 4 份每周备份；恢复前会再创建安全备份。" action={<button className="button secondary" disabled={busy} onClick={() => void backupNow()}>立即备份</button>}>
+              <SettingsSection title="数据库备份" description="默认保留 7 份每日备份和 4 份每周备份；恢复会在安全重启时原子应用。" action={<button className="button secondary" disabled={busy} onClick={() => void backupNow()}>立即备份</button>}>
+                {backupState.pending_restore && <div className="settings-notice warning">已排队恢复 {backupState.pending_restore.source_name || '数据库备份'}，下次启动前应用。</div>}
+                {backupState.last_restore && !backupState.pending_restore && <div className="settings-notice">上次恢复：{backupState.last_restore.source_name || '数据库备份'} · {backupState.last_restore.applied_at || '已完成'}</div>}
                 <div className="backup-list">
                   {!backupState.backups.length && <span className="settings-empty">尚无备份</span>}
-                  {backupState.backups.slice(0, 8).map(backup => <div className="backup-row" key={backup.name}><span><strong>{backup.name}</strong><small>{backup.modified_at} · {bytes(backup.size)}</small></span><button className="button secondary" disabled={busy} onClick={() => void restoreSelectedBackup(backup.name)}>恢复</button></div>)}
+                  {backupState.backups.slice(0, 8).map(backup => <div className="backup-row" key={backup.name}><span><strong>{backup.name}</strong><small>{backupKind(backup.kind)} · {backup.modified_at} · {bytes(backup.size)}{backup.hash ? ' · 有校验记录' : ''}</small></span><button className="button secondary" disabled={busy} onClick={() => void restoreSelectedBackup(backup.name)}>验证并恢复</button></div>)}
                 </div>
                 <button className="button secondary" disabled={!backupState.directory} onClick={() => void api.revealLocalPath(backupState.directory)}>在 Finder 中打开备份目录</button>
               </SettingsSection>

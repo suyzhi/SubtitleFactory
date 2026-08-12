@@ -550,7 +550,12 @@ export async function redoEditorOperation(projectId: string, expectedRevision: n
 }
 
 export async function getSegmentDraft(projectId: string): Promise<{
-  draft: { base_revision: number; items: Array<SegmentUpdate & { index: number }>; updated_at: string } | null;
+  draft: {
+    base_revision: number;
+    items: Array<SegmentUpdate & { index: number }>;
+    updated_at: string;
+    invalid?: boolean;
+  } | null;
 }> {
   return request(`/api/projects/${projectId}/draft`);
 }
@@ -565,6 +570,12 @@ export async function saveSegmentDraft(
 
 export async function commitSegmentDraft(projectId: string): Promise<EditorOperationResponse> {
   return request(`/api/projects/${projectId}/draft/commit`, { method: 'POST' });
+}
+
+export async function rebaseSegmentDraft(projectId: string): Promise<EditorOperationResponse> {
+  return request(`/api/projects/${projectId}/draft/rebase`, {
+    method: 'POST', body: JSON.stringify({ confirm: true }),
+  });
 }
 
 export async function discardSegmentDraft(projectId: string): Promise<void> {
@@ -786,11 +797,42 @@ export async function saveProjectStyle(projectId: string, settings: Record<strin
   await request(`/api/projects/${projectId}/style`, { method: 'PUT', body: JSON.stringify({ settings }) });
 }
 
-export interface BackupRecord { name: string; path: string; size: number; modified_at: string; }
-export async function getBackups(): Promise<{directory: string; backups: BackupRecord[]}> { return request('/api/maintenance/backups'); }
+export interface BackupRecord {
+  name: string;
+  kind: string;
+  path: string;
+  size: number;
+  hash?: string | null;
+  created_at?: string;
+  modified_at: string;
+}
+export interface RestoreReceipt {
+  source_name?: string;
+  source_hash?: string;
+  staged_at?: string;
+  applied_at?: string;
+  status?: 'applied';
+}
+export interface BackupsResponse {
+  directory: string;
+  backups: BackupRecord[];
+  pending_restore: RestoreReceipt | null;
+  last_restore: RestoreReceipt | null;
+}
+export interface RestoreBackupResult extends RestoreReceipt {
+  pending: true;
+  requires_restart: true;
+  safety_backup?: string;
+}
+export async function getBackups(): Promise<BackupsResponse> { return request('/api/maintenance/backups'); }
 export async function createBackup(): Promise<BackupRecord> { return request('/api/maintenance/backups', { method: 'POST' }); }
-export async function restoreBackup(name: string): Promise<void> {
-  await request('/api/maintenance/backups/restore', { method: 'POST', body: JSON.stringify({ name, confirm: true }) });
+export async function restoreBackup(name: string): Promise<RestoreBackupResult> {
+  return request('/api/maintenance/backups/restore', { method: 'POST', body: JSON.stringify({ name, confirm: true }) });
+}
+export async function restartDesktopApp(): Promise<boolean> {
+  if (!isTauriDesktop()) return false;
+  await invoke('restart_app');
+  return true;
 }
 export async function revealLocalPath(path: string): Promise<void> {
   if ((window as any).__TAURI_INTERNALS__) await invoke('reveal_path', { path });

@@ -28,6 +28,14 @@ vi.mock('../api/backend', async importOriginal => {
       model_id: 'medasr-ctc-en-int8-2025-12-25', removed: true,
       removed_bytes: 154_111_131, message: '模型文件已移除，可随时重新下载',
     }),
+    getBackups: vi.fn().mockResolvedValue({
+      directory: '/managed/backups', backups: [],
+      pending_restore: null, last_restore: null,
+    }),
+    restoreBackup: vi.fn().mockResolvedValue({
+      pending: true, requires_restart: true, source_name: 'manual.db',
+    }),
+    restartDesktopApp: vi.fn().mockResolvedValue(true),
   };
 });
 
@@ -274,6 +282,27 @@ describe('SettingsCenter model catalog', () => {
     expect(await screen.findByText('AI 凭据暂时无法读取；本地转写和其他设置仍可使用。')).toBeInTheDocument();
     expect(api.getAIProviders).toHaveBeenCalledTimes(callsBefore + 2);
     expect(screen.getByRole('button', { name: '保存更改' })).toBeEnabled();
+  });
+
+  it('verifies a backup and requests a safe restart instead of live database replacement', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValueOnce(true);
+    vi.mocked(api.getBackups).mockResolvedValueOnce({
+      directory: '/managed/backups',
+      backups: [{
+        name: 'manual-20260812.db', kind: 'manual', path: '/managed/backups/manual-20260812.db',
+        size: 4096, hash: 'a'.repeat(64), modified_at: '2026-08-12 14:00:00',
+      }],
+      pending_restore: null,
+      last_restore: null,
+    });
+    render(<SettingsCenter {...settingsProps()}/>);
+    fireEvent.click(screen.getByRole('button', { name: /下载与存储/ }));
+    const restore = await screen.findByRole('button', { name: '验证并恢复' });
+    expect(screen.getByText(/manual-20260812\.db/)).toBeInTheDocument();
+    expect(screen.getByText(/手动.*有校验记录/)).toBeInTheDocument();
+    fireEvent.click(restore);
+    await waitFor(() => expect(api.restoreBackup).toHaveBeenCalledWith('manual-20260812.db'));
+    await waitFor(() => expect(api.restartDesktopApp).toHaveBeenCalledOnce());
   });
 
   it('groups twenty-nine models and downloads the selected runtime', async () => {

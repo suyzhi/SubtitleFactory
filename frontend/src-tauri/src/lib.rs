@@ -6,7 +6,7 @@ use std::{
     process::{Child, Command, Stdio},
     sync::Mutex,
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use serde::Serialize;
@@ -19,9 +19,15 @@ const LIBRARY_WORKSPACE_UI_MARKER: &str = "subtitle-factory-ui:library-workspace
 const DIRECT_DISTRIBUTION_CHANNEL: &str = "direct";
 const APP_STORE_DISTRIBUTION_CHANNEL: &str = "app_store";
 const BACKEND_STARTUP_ERROR_FILE: &str = "backend-startup-error.txt";
+const BACKEND_SHUTDOWN_GRACE: Duration = Duration::from_secs(15);
 
 #[cfg(unix)]
 use std::os::unix::process::CommandExt;
+
+#[cfg(unix)]
+fn process_group_exists(group: i32) -> bool {
+    unsafe { libc::kill(-group, 0) == 0 }
+}
 
 struct BackendProcess {
     child: Mutex<Option<Child>>,
@@ -54,23 +60,46 @@ fn distribution_channel() -> &'static str {
 
 impl BackendProcess {
     fn stop(&self) {
+        // A previous panic must not turn restart into an unsafe database
+        // replacement. Recover the owned child from a poisoned mutex so the
+        // sidecar still receives its graceful shutdown window.
+        let mut guard = self
+            .child
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let Some(child) = guard.as_mut() else {
+            let _ = fs::remove_file(&self.pid_file);
+            return;
+        };
+
         #[cfg(unix)]
         if let Some(group) = self.process_group {
             unsafe {
                 libc::kill(-group, libc::SIGTERM);
             }
-            thread::sleep(Duration::from_millis(350));
-            unsafe {
-                libc::kill(-group, libc::SIGKILL);
+            let deadline = Instant::now() + BACKEND_SHUTDOWN_GRACE;
+            loop {
+                match child.try_wait() {
+                    Ok(status) if status.is_some() && !process_group_exists(group) => break,
+                    Ok(_) if Instant::now() < deadline => {
+                        thread::sleep(Duration::from_millis(50));
+                    }
+                    Ok(_) | Err(_) => {
+                        unsafe {
+                            libc::kill(-group, libc::SIGKILL);
+                        }
+                        let _ = child.kill();
+                        break;
+                    }
+                }
             }
         }
-        if let Ok(mut guard) = self.child.lock() {
-            if let Some(child) = guard.as_mut() {
-                let _ = child.kill();
-                let _ = child.wait();
-            }
-            *guard = None;
-        }
+
+        #[cfg(not(unix))]
+        let _ = child.kill();
+
+        let _ = child.wait();
+        *guard = None;
         let _ = fs::remove_file(&self.pid_file);
     }
 }
@@ -99,6 +128,15 @@ fn create_backend_session() -> Result<BackendSession, String> {
 #[tauri::command]
 fn backend_session(session: State<'_, BackendSession>) -> BackendSession {
     session.inner().clone()
+}
+
+#[tauri::command]
+fn restart_app(app: tauri::AppHandle) {
+    // Stop the sidecar synchronously first. This proves SQLite has closed
+    // before Tauri launches the replacement process; the later Exit event is
+    // harmless because BackendProcess::stop is idempotent.
+    stop_managed_backend(&app);
+    app.restart();
 }
 
 #[tauri::command]
@@ -492,6 +530,7 @@ pub fn run() {
     let app = tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
             backend_session,
+            restart_app,
             reveal_path,
             save_managed_file,
             save_text_file,
@@ -552,12 +591,61 @@ pub fn run() {
 mod tests {
     use super::{
         clear_stale_backend_startup_error, safe_suggested_name, stream_copy, validate_managed_path,
-        write_atomically, BACKEND_STARTUP_ERROR_FILE,
+        write_atomically, BackendProcess, BACKEND_STARTUP_ERROR_FILE,
     };
-    use std::{fs, io, io::Write, path::Path};
+    use std::{
+        fs, io,
+        io::Write,
+        path::Path,
+        process::{Command, Stdio},
+        sync::Mutex,
+        thread,
+        time::Duration,
+    };
+
+    #[cfg(unix)]
+    use std::os::unix::process::CommandExt;
 
     fn isolated_test_dir(label: &str) -> std::path::PathBuf {
         std::env::temp_dir().join(format!("subtitle-factory-{label}-{}", uuid::Uuid::new_v4()))
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn managed_backend_gets_a_graceful_shutdown_window() {
+        let test_dir = isolated_test_dir("backend-stop-test");
+        fs::create_dir_all(&test_dir).expect("create backend stop test directory");
+        let marker = test_dir.join("graceful.txt");
+        let pid_file = test_dir.join("backend.pid");
+        let child = Command::new("/bin/sh")
+            .args([
+                "-c",
+                "trap 'printf graceful > \"$1\"; exit 0' TERM; while :; do sleep 1; done",
+                "backend-stop-test",
+            ])
+            .arg(&marker)
+            .process_group(0)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("spawn test process group");
+        let group = child.id() as i32;
+        fs::write(&pid_file, group.to_string()).expect("write test pid file");
+        thread::sleep(Duration::from_millis(100));
+
+        BackendProcess {
+            child: Mutex::new(Some(child)),
+            process_group: Some(group),
+            pid_file: pid_file.clone(),
+        }
+        .stop();
+
+        assert_eq!(
+            fs::read_to_string(&marker).expect("graceful marker"),
+            "graceful"
+        );
+        assert!(!pid_file.exists());
+        fs::remove_dir_all(&test_dir).expect("remove backend stop test directory");
     }
 
     #[test]

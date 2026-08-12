@@ -12,10 +12,19 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-from ..services.backups import backup_directory, create_backup, list_backups, restore_backup
+from ..models.database import get_db
+from ..services.backups import (
+    backup_directory,
+    create_backup,
+    last_restore,
+    list_backups,
+    pending_restore,
+    restore_backup,
+)
 from ..services.app_settings import get_app_settings
 from ..services.search_index import rebuild_search_index, search_index_status
 from ..utils.config import EXPORTS_DIR, LOGS_DIR
+from ..utils.task_manager import task_manager
 
 
 router = APIRouter(prefix="/api")
@@ -34,7 +43,26 @@ def _redact(value: str) -> str:
 
 @router.get("/maintenance/backups")
 def backups():
-    return {"directory": str(backup_directory()), "backups": list_backups()}
+    pending = pending_restore()
+    completed = last_restore()
+    return {
+        "directory": str(backup_directory()),
+        "backups": list_backups(),
+        "pending_restore": _public_restore_record(pending),
+        "last_restore": _public_restore_record(completed),
+    }
+
+
+def _public_restore_record(record: dict | None) -> dict | None:
+    if not record:
+        return None
+    return {
+        key: record.get(key)
+        for key in (
+            "status", "source_name", "source_hash", "staged_at", "applied_at",
+        )
+        if record.get(key) is not None
+    }
 
 
 @router.post("/maintenance/backups", status_code=201)
@@ -46,12 +74,46 @@ def backup_now():
 def restore(request: RestoreRequest):
     if not request.confirm:
         raise HTTPException(400, detail={"code": "CONFIRMATION_REQUIRED", "message": "恢复备份需要显式确认"})
+    acquired, live_tasks = task_manager.begin_exclusive_maintenance("database_restore")
+    if not acquired:
+        raise _restore_busy(live_tasks)
     try:
+        db = get_db()
+        try:
+            active = db.execute(
+                """SELECT id,type FROM tasks
+                     WHERE status IN ('pending','running','paused')
+                     ORDER BY updated_at DESC LIMIT 10"""
+            ).fetchall()
+        finally:
+            db.close()
+        if active:
+            raise _restore_busy([
+                {"id": row["id"], "type": row["type"]} for row in active
+            ])
         return restore_backup(request.name)
     except FileNotFoundError as error:
+        task_manager.end_exclusive_maintenance("database_restore")
         raise HTTPException(404, str(error)) from error
-    except ValueError as error:
+    except HTTPException:
+        task_manager.end_exclusive_maintenance("database_restore")
+        raise
+    except (OSError, RuntimeError, ValueError) as error:
+        task_manager.end_exclusive_maintenance("database_restore")
         raise HTTPException(422, str(error)) from error
+    except Exception:
+        task_manager.end_exclusive_maintenance("database_restore")
+        raise
+
+
+def _restore_busy(active_tasks: list[dict]) -> HTTPException:
+    return HTTPException(409, detail={
+        "code": "BACKUP_RESTORE_BUSY",
+        "message": "仍有后台任务在运行、暂停或退出，现在不能恢复数据库",
+        "suggestion": "请先等待任务完成或安全终止，再重试恢复",
+        "details": {"active_tasks": active_tasks[:10]},
+        "recoverable": True,
+    })
 
 
 def _create_diagnostics_bundle() -> Path:

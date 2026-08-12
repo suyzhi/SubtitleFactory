@@ -21,10 +21,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from .models.database import init_db, mark_interrupted_tasks
 from .utils.config import LOGS_DIR, DATA_DIR, is_frozen_app
+from .services.backups import apply_pending_restore, scheduled_backup
+
+# Restore before importing route modules: a route must never open SQLite and
+# then watch the database file get replaced underneath its connection.
+applied_restore = apply_pending_restore()
+
 from .api import batches, content, clips, editor, maintenance, media, ocr, packages, projects, quality, search, settings, speakers, tasks, templates, terminology, watch_folders
 from .security import ALLOWED_ORIGINS, require_loopback_session
 from .services.secret_store import migrate_database_secrets
-from .services.backups import scheduled_backup
 from .services.watch_runtime import resume_interrupted_workflows, watch_loop
 from .services.playlist_batches import recover_playlist_batches
 from .services.distribution import (
@@ -32,6 +37,7 @@ from .services.distribution import (
     distribution_capabilities,
     require_project_distribution,
 )
+from .utils.task_manager import TaskCreationBlocked, task_manager
 from .version import VERSION
 
 # ── 日志配置 ──
@@ -49,6 +55,8 @@ logger = logging.getLogger(__name__)
 # ── 初始化数据库 ──
 init_db()
 interrupted_tasks = mark_interrupted_tasks()
+if applied_restore:
+    logger.info("已在启动前恢复数据库备份：%s", applied_restore.get("source_name"))
 try:
     scheduled_backup()
 except Exception:
@@ -108,6 +116,31 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def block_writes_during_database_restore(request: Request, call_next):
+    mutating = request.method.upper() not in {"GET", "HEAD", "OPTIONS"}
+    restore_request = request.url.path == "/api/maintenance/backups/restore"
+    if not mutating or restore_request:
+        return await call_next(request)
+    if not task_manager.begin_api_mutation():
+        return JSONResponse(status_code=409, content={"error": {
+            "code": "DATABASE_RESTORE_PENDING",
+            "message": "数据库恢复已排队，暂时不能继续修改数据",
+            "suggestion": "请等待 App 完成安全重启",
+            "details": {},
+            "recoverable": True,
+        }})
+    try:
+        return await call_next(request)
+    finally:
+        task_manager.end_api_mutation()
+
+
+# Register authentication last so Starlette places it on the outside of the
+# maintenance gate. An unauthenticated loopback client must always receive 401
+# and must never learn whether a database restore is currently pending.
 app.middleware("http")(require_loopback_session)
 
 
@@ -163,6 +196,18 @@ async def distribution_policy_error(
         "details": {"feature": exc.feature},
         "recoverable": exc.recoverable,
         "available_actions": exc.available_actions,
+    }})
+
+
+@app.exception_handler(TaskCreationBlocked)
+async def task_creation_blocked(request: Request, exc: TaskCreationBlocked):
+    del request
+    return JSONResponse(status_code=409, content={"error": {
+        "code": exc.error_code,
+        "message": str(exc),
+        "suggestion": "请等待 App 完成恢复并重新启动",
+        "details": {},
+        "recoverable": True,
     }})
 
 

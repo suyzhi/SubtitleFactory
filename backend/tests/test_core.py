@@ -551,6 +551,55 @@ class TaskPauseTests(unittest.TestCase):
 
 
 class TaskCancellationTests(unittest.TestCase):
+    def test_active_tasks_keeps_an_unwinding_future_visible(self):
+        manager = TaskManager(max_workers=1)
+        started = threading.Event()
+        release = threading.Event()
+
+        def worker(_task_id):
+            started.set()
+            release.wait(2)
+
+        task_id = manager.create_task("project", "render")
+        future = manager.run_background(task_id, worker)
+        self.assertTrue(started.wait(1))
+        self.assertEqual([task["id"] for task in manager.active_tasks()], [task_id])
+        self.assertTrue(manager.cancel_task(task_id))
+        self.assertEqual([task["id"] for task in manager.active_tasks()], [task_id])
+        release.set()
+        future.result(timeout=2)
+        deadline = time.time() + 1
+        while manager.active_tasks() and time.time() < deadline:
+            time.sleep(0.01)
+        self.assertEqual(manager.active_tasks(), [])
+        manager.shutdown()
+
+    def test_exclusive_maintenance_closes_the_task_creation_race(self):
+        manager = TaskManager(max_workers=1)
+        acquired, active = manager.begin_exclusive_maintenance("database_restore")
+        self.assertTrue(acquired)
+        self.assertEqual(active, [])
+        with self.assertRaisesRegex(RuntimeError, "数据库恢复已开始"):
+            manager.create_task("project", "render")
+        manager.end_exclusive_maintenance("database_restore")
+        task_id = manager.create_task("project", "render")
+        self.assertTrue(task_id)
+        manager.shutdown()
+
+    def test_exclusive_maintenance_refuses_an_in_flight_api_write(self):
+        manager = TaskManager(max_workers=1)
+        self.assertTrue(manager.begin_api_mutation())
+        acquired, active = manager.begin_exclusive_maintenance("database_restore")
+        self.assertFalse(acquired)
+        self.assertEqual(active[0]["type"], "database_write")
+        manager.end_api_mutation()
+        acquired, active = manager.begin_exclusive_maintenance("database_restore")
+        self.assertTrue(acquired)
+        self.assertEqual(active, [])
+        self.assertFalse(manager.begin_api_mutation())
+        manager.end_exclusive_maintenance("database_restore")
+        manager.shutdown()
+
     def test_pending_task_is_cancelled_before_worker_starts(self):
         manager = TaskManager(max_workers=1)
         blocker_started = threading.Event()

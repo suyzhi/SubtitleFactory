@@ -1,4 +1,5 @@
 import json
+import stat
 import sys
 import tempfile
 import unittest
@@ -12,14 +13,23 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from app.models import database, migrations
 from app.api import maintenance, terminology
 from app.services import project_packages, waveform
-from app.services.backups import create_backup, list_backups
+from app.services.backups import (
+    apply_pending_restore,
+    create_backup,
+    last_restore,
+    list_backups,
+    pending_restore,
+    restore_backup,
+)
 from app.services.editor import history_step, import_segment_snapshot
 from app.services.quality import scan
 from app.services.subtitle_importer import parse_subtitle
+from app.utils.task_manager import TaskManager
 
 
 class V1FeatureTests(unittest.TestCase):
     def setUp(self):
+        maintenance.task_manager.end_exclusive_maintenance("database_restore")
         self.folder = tempfile.TemporaryDirectory()
         self.root = Path(self.folder.name)
         self.patches = [
@@ -110,6 +120,133 @@ class V1FeatureTests(unittest.TestCase):
         db.close()
         self.assertEqual(copied, 2)
         self.assertEqual(copied_style["fontSize"], 24)
+
+    def test_backup_restore_is_verified_staged_and_applied_before_restart(self):
+        backup = create_backup("manual")
+        backup_path = Path(backup["path"])
+        checksum_path = backup_path.with_name(f"{backup_path.name}.sha256")
+        self.assertTrue(checksum_path.is_file())
+        self.assertTrue(checksum_path.read_text().startswith(backup["hash"]))
+        self.assertEqual(stat.S_IMODE(backup_path.stat().st_mode), 0o600)
+        self.assertEqual(stat.S_IMODE(checksum_path.stat().st_mode), 0o600)
+        self.assertEqual(stat.S_IMODE(backup_path.parent.stat().st_mode), 0o700)
+
+        db = database.get_db()
+        db.execute("UPDATE projects SET title='After backup' WHERE id=?", (self.project_id,))
+        db.commit()
+        db.close()
+
+        staged = restore_backup(backup_path.name)
+        self.assertTrue(staged["pending"])
+        self.assertTrue(staged["requires_restart"])
+        marker = pending_restore()
+        self.assertEqual(marker["source_name"], backup_path.name)
+        recovery = Path(database.DB_PATH).parent / "recovery"
+        self.assertEqual(stat.S_IMODE(recovery.stat().st_mode), 0o700)
+        self.assertEqual(
+            stat.S_IMODE((recovery / "pending-restore.json").stat().st_mode),
+            0o600,
+        )
+        self.assertEqual(
+            stat.S_IMODE((recovery / marker["staging_name"]).stat().st_mode),
+            0o600,
+        )
+        self.assertTrue(Path(staged["safety_backup"]).is_file())
+        with self.assertRaisesRegex(RuntimeError, "等待重启"):
+            restore_backup(backup_path.name)
+
+        # Staging must not overwrite a live database connection or its current
+        # contents. Only the next process-start boundary applies the restore.
+        db = database.get_db()
+        self.assertEqual(
+            db.execute("SELECT title FROM projects WHERE id=?", (self.project_id,)).fetchone()[0],
+            "After backup",
+        )
+        db.close()
+
+        applied = apply_pending_restore()
+        self.assertEqual(applied["source_name"], backup_path.name)
+        self.assertIsNone(pending_restore())
+        self.assertEqual(last_restore()["source_name"], backup_path.name)
+        db = database.get_db()
+        self.assertEqual(
+            db.execute("SELECT title FROM projects WHERE id=?", (self.project_id,)).fetchone()[0],
+            "V1",
+        )
+        db.close()
+        self.assertIsNone(apply_pending_restore())
+
+    def test_backup_restore_rejects_tampered_recorded_backup(self):
+        backup = create_backup("manual")
+        path = Path(backup["path"])
+        with path.open("ab") as output:
+            output.write(b"tampered")
+        with self.assertRaisesRegex(ValueError, "校验值已变化"):
+            restore_backup(path.name)
+        self.assertIsNone(pending_restore())
+
+    def test_backup_restore_rejects_a_non_database_file(self):
+        invalid = Path(database.DB_PATH).parent / "backups" / "manual-invalid.db"
+        invalid.parent.mkdir(parents=True, exist_ok=True)
+        invalid.write_bytes(b"this is not sqlite")
+        with self.assertRaisesRegex(ValueError, "有效的 SQLite"):
+            restore_backup(invalid.name)
+        self.assertIsNone(pending_restore())
+
+    def test_restore_endpoint_refuses_to_stage_while_a_task_is_active(self):
+        backup = create_backup("manual")
+        db = database.get_db()
+        db.execute(
+            """INSERT INTO tasks(
+                   id,project_id,type,status,details,logs,available_actions,created_at,updated_at
+               ) VALUES ('busy-task',?,'render','running','{}','[]','[]','now','now')""",
+            (self.project_id,),
+        )
+        db.commit()
+        db.close()
+        with self.assertRaises(Exception) as caught:
+            maintenance.restore(maintenance.RestoreRequest(name=Path(backup["path"]).name, confirm=True))
+        self.assertEqual(getattr(caught.exception, "status_code", None), 409)
+        self.assertEqual(caught.exception.detail["code"], "BACKUP_RESTORE_BUSY")
+        self.assertIsNone(pending_restore())
+
+    def test_restore_endpoint_checks_live_workers_even_if_sqlite_lags(self):
+        backup = create_backup("manual")
+        live = [{"id": "memory-only", "type": "model_download", "status": "running"}]
+        with patch.object(
+            maintenance.task_manager,
+            "begin_exclusive_maintenance",
+            return_value=(False, live),
+        ):
+            with self.assertRaises(Exception) as caught:
+                maintenance.restore(maintenance.RestoreRequest(
+                    name=Path(backup["path"]).name,
+                    confirm=True,
+                ))
+        self.assertEqual(getattr(caught.exception, "status_code", None), 409)
+        self.assertEqual(
+            caught.exception.detail["details"]["active_tasks"],
+            [{"id": "memory-only", "type": "model_download", "status": "running"}],
+        )
+        self.assertIsNone(pending_restore())
+
+    def test_successful_restore_closes_mutating_gate_until_restart(self):
+        backup = create_backup("manual")
+        manager = TaskManager(max_workers=1)
+        with patch.object(maintenance, "task_manager", manager):
+            try:
+                staged = maintenance.restore(maintenance.RestoreRequest(
+                    name=Path(backup["path"]).name,
+                    confirm=True,
+                ))
+                self.assertTrue(staged["pending"])
+                self.assertFalse(manager.begin_api_mutation())
+                self.assertIsNotNone(apply_pending_restore())
+            finally:
+                manager.end_exclusive_maintenance("database_restore")
+            self.assertTrue(manager.begin_api_mutation())
+            manager.end_api_mutation()
+        manager.shutdown()
 
     def test_vtt_and_ass_parsers(self):
         vtt = b"WEBVTT\n\n00:00:00.000 --> 00:00:01.000\nHello\n"
