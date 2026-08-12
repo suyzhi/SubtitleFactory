@@ -45,7 +45,7 @@ App Store 版的限制是发行策略，不是运行失败后的静默降级。R
 
 本轮真实 App 验收结果：
 
-- 184 个后端测试与 25 个子测试、60 个前端测试、6 个 Rust 测试、lint 全部通过。
+- 186 个后端测试与 25 个子测试、60 个前端测试、6 个 Rust 测试、lint 全部通过。
 - 主 App、Python sidecar 和 Vision OCR 均为 arm64，深度严格签名校验通过；主 App 有 sandbox、网络与用户选取文件权限，helper 有 sandbox + inherit。
 - 沙盒 App 能持续启动 localhost sidecar，数据库和项目文件位于 `~/Library/Containers/com.subtitlefactory.desktop/`；无令牌请求返回 401，真实会话请求返回 200。
 - `app_store` 能力矩阵关闭 YouTube、浏览器 Cookie、自定义下载目录、文件系统自动化和外部运行时路径；相应越权接口在真实 sidecar 上均返回 `DISTRIBUTION_FEATURE_UNAVAILABLE`，28 个可见模型中没有外部模型 ID。
@@ -83,6 +83,7 @@ App Store 版的限制是发行策略，不是运行失败后的静默降级。R
 - `Cmd/Ctrl + S` 、撤销与重做快捷键已与文档一致；文本输入框保留系统级撤销，不会被项目历史抢占。
 - 项目切换前会等待旧项目的编辑和草稿队列收敛；带项目 ID 的异步结果仅能刷新同一活动项目，防止旧请求覆盖新工作区。
 - 每份新数据库备份有独立 SHA-256 校验记录和仅当前用户可读的文件权限。恢复先取得独占维护门，要求无在途写请求、任务或尚未退出的 worker；随后创建 pre-restore 安全备份、验证、排队并请求 App 安全重启，sidecar 只在任何路由和 worker 打开 SQLite 之前原子应用备份。
+- 主 App 与 frozen sidecar 以私有 EOF 生命周期管道绑定；外部信号、崩溃或强制结束绕过 Tauri 正常退出事件时，sidecar 仍会终止自身及同组 helper，避免后台孤儿进程继续占用媒体或数据库。
 
 ## 当前 P0 清单
 

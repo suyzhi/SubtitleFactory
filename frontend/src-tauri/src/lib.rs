@@ -421,17 +421,12 @@ fn start_backend(
         if !python.exists() {
             return Err(format!("后端 Python 环境不存在：{}", python.display()));
         }
+        let entry_point = backend_dir.join("sidecar_main.py");
+        if !entry_point.is_file() {
+            return Err(format!("后端入口不存在：{}", entry_point.display()));
+        }
         let mut cmd = Command::new(python);
-        cmd.current_dir(backend_dir)
-            .args([
-                "-m",
-                "uvicorn",
-                "app.main:app",
-                "--host",
-                "127.0.0.1",
-                "--port",
-            ])
-            .arg(session.port.to_string());
+        cmd.current_dir(backend_dir).arg(entry_point);
         cmd
     } else {
         let binary_name = if cfg!(target_os = "windows") {
@@ -491,8 +486,12 @@ fn start_backend(
             "SUBTITLE_FACTORY_ALLOWED_ORIGINS",
             "tauri://localhost,http://tauri.localhost,http://localhost:5173,http://127.0.0.1:5173",
         )
+        // Keep a private write end in the desktop process. The frozen sidecar
+        // watches the read end and terminates its whole process group on EOF,
+        // covering crashes and external signals that bypass Tauri RunEvent.
+        .env("SUBTITLE_FACTORY_PARENT_WATCHDOG", "stdin")
         .env("PYTHONUNBUFFERED", "1")
-        .stdin(Stdio::null())
+        .stdin(Stdio::piped())
         .stdout(Stdio::from(log_file))
         .stderr(Stdio::from(error_file));
     #[cfg(unix)]
