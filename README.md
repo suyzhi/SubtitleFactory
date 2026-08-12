@@ -142,8 +142,10 @@ npx tauri dev
 2. 运行后端测试、前端测试和 lint。
 3. 检查 FFmpeg/FFprobe 与 arm64 运行时，固定安装官方 macOS 14 MLX 轮子，构建后端 sidecar，并实际加载 MLX、Sherpa、ONNX Runtime、PyAV 等冻结原生依赖。
 4. 只执行一次正式前端构建，再生成 arm64 `.app` 与 `.dmg`。
-5. 扫描 App 内每个 Mach-O 的部署目标，拒绝高于产品所声明 macOS 14 最低版本的原生依赖，并检查正确新版 UI 标记、签名、包内运行时和 DMG SHA-256。
-6. 退出时清理可重建的前端、Rust、sidecar 和测试缓存。
+5. 恢复并验证冻结运行时的安全相对链接，对最终 App 重新签名，再用这同一份 App 替换 DMG 中 Tauri 的临时副本，避免直装版与 DMG 版发生内容漂移。
+6. 扫描 App 内每个 Mach-O 的部署目标，拒绝高于产品所声明 macOS 14 最低版本的原生依赖，并检查正确新版 UI 标记、签名和包内运行时。
+7. 只读挂载最终 DMG，递归比较内外 App 的文件哈希、权限和链接目标，并验证 Finder 布局、签名、架构、UI 标记与 DMG SHA-256。
+8. 退出时清理可重建的前端、Rust、sidecar 和测试缓存。
 
 任一运行时检查失败都会阻止生成 Release。内置 FFmpeg 8.1.2 从 [FFmpeg 官方源码](https://ffmpeg.org/releases/ffmpeg-8.1.2.tar.xz) 构建；许可证和构建信息会放入 App 的 `THIRD_PARTY_LICENSES/ffmpeg/`。
 

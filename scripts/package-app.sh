@@ -101,10 +101,17 @@ if [ "$MINIMUM_MACOS_VERSION" != "14.0" ]; then
   echo "最终 App 必须声明最低支持 macOS 14.0。" >&2
   exit 1
 fi
+PACKAGED_RUNTIME_ROOT="$APP_PATH/Contents/Resources/backend-runtime"
+"$ROOT/scripts/restore-packaged-runtime-symlinks.sh" \
+  "$ROOT/frontend/src-tauri/backend-runtime" "$PACKAGED_RUNTIME_ROOT"
+xattr -cr "$APP_PATH"
+codesign --force --options runtime --sign - "$APP_PATH"
+"$ROOT/scripts/restore-packaged-runtime-symlinks.sh" \
+  "$ROOT/frontend/src-tauri/backend-runtime" "$PACKAGED_RUNTIME_ROOT"
 "$ROOT/scripts/verify-macos-deployment-target.sh" \
   "$APP_PATH" "$MINIMUM_MACOS_VERSION"
 
-PACKAGED_RUNTIME="$APP_PATH/Contents/Resources/backend-runtime/bin"
+PACKAGED_RUNTIME="$PACKAGED_RUNTIME_ROOT/bin"
 "$ROOT/scripts/verify-release-runtime.sh" "$PACKAGED_RUNTIME"
 if [ ! -x "$PACKAGED_RUNTIME/vision-ocr" ] \
   || [ "$(lipo -archs "$PACKAGED_RUNTIME/vision-ocr" 2>/dev/null || true)" != "arm64" ] \
@@ -131,6 +138,10 @@ if strings "$APP_EXECUTABLE" | rg -F "$OLD_UI_MARKER" >/dev/null; then
   echo "最终 App 可执行文件包含旧 UI 标记。" >&2
   exit 1
 fi
+"$ROOT/scripts/repack-dmg-with-app.sh" "$DMG_PATH" "$APP_PATH"
+"$ROOT/backend/.venv/bin/python" "$ROOT/scripts/verify-dmg-app.py" \
+  "$DMG_PATH" "$APP_PATH" \
+  --minimum-macos-version "$MINIMUM_MACOS_VERSION"
 
 ARCHIVE_DIR="$ROOT/release-archive/$(date +%Y%m%d-%H%M%S)"
 if [ -d "$ROOT/字幕工厂.app" ] \
@@ -165,6 +176,9 @@ if ! strings "$FINAL_APP/Contents/MacOS/app" | rg -F "$UI_LAYOUT_MARKER" >/dev/n
   echo "根目录最终 App 缺少 library-workspace-v2 标记。" >&2
   exit 1
 fi
+"$ROOT/backend/.venv/bin/python" "$ROOT/scripts/verify-dmg-app.py" \
+  "$FINAL_DMG" "$FINAL_APP" \
+  --minimum-macos-version "$MINIMUM_MACOS_VERSION"
 
 echo "Release App: $FINAL_APP"
 echo "Release DMG: $FINAL_DMG"

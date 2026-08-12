@@ -22,6 +22,25 @@ from app.services import downloader
 
 
 class DownloadQualityTests(unittest.TestCase):
+    def setUp(self):
+        # These are download-behaviour unit tests, so their runtime inputs must
+        # not depend on Deno/FFprobe already being installed on the host. The
+        # packaged-app acceptance tests exercise the real bundled executables.
+        deno_patch = patch.object(
+            downloader, "_resolve_deno_path", return_value=Path("/app/bin/deno"),
+        )
+        ffprobe_patch = patch.object(
+            downloader,
+            "resolve_ffprobe_path",
+            return_value=SimpleNamespace(
+                path=Path("/app/bin/ffprobe"), source="bundled",
+            ),
+        )
+        deno_patch.start()
+        ffprobe_patch.start()
+        self.addCleanup(deno_patch.stop)
+        self.addCleanup(ffprobe_patch.stop)
+
     def test_error_classifier_covers_stable_download_failure_model(self):
         cases = [
             ("Join this channel to get access to members-only content", "MEMBERSHIP_REQUIRED", False),
@@ -198,6 +217,10 @@ class DownloadQualityTests(unittest.TestCase):
         self.assertEqual(options["socket_timeout"], 30)
         self.assertTrue(options["continuedl"])
         self.assertEqual(options["retry_sleep_functions"]["http"](n=8), 20)
+        self.assertEqual(
+            options["js_runtimes"],
+            {"deno": {"path": "/app/bin/deno"}},
+        )
 
     def test_media_stream_403_retries_once_with_chrome_cookies(self):
         captured_options = []

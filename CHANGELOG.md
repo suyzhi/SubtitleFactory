@@ -11,6 +11,8 @@
 - Added model-free native runtime smoke tests, preserved PyInstaller's safe relative-library link topology, and deduplicated Sherpa's byte-identical ONNX Runtime alias, reducing the App Store QA App by about 144 MiB without removing inference capabilities.
 - Added source-controlled Simplified Chinese App Store metadata and fail-fast validation for product copy, privacy declarations, legal ownership, support, review contacts, and account-holder confirmations.
 - Set an honest macOS 14 minimum, pinned MLX to its official macOS 14 wheels, compiled Vision OCR for the same target, and made every release scan all bundled Mach-O deployment targets.
+- Preserved the frozen runtime's verified relative links in the direct App, repacked the DMG with that exact signed App, and made release packaging compare every mounted file hash, permission, and link target before delivery.
+- Removed Deno and FFprobe host dependencies from download unit tests while retaining real bundled-runtime checks in packaged-App acceptance.
 
 ## 0.3.2 — 2026-07-26
 
