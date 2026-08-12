@@ -140,7 +140,7 @@ npx tauri dev
 
 1. 验证 Hugging Face/GitHub 模型来源、固定提交、文件大小和哈希元数据。
 2. 运行后端测试、前端测试和 lint。
-3. 检查 FFmpeg/FFprobe 与 arm64 运行时并构建后端 sidecar。
+3. 检查 FFmpeg/FFprobe 与 arm64 运行时，构建后端 sidecar，并实际加载 MLX、Sherpa、ONNX Runtime、PyAV 等冻结原生依赖。
 4. 只执行一次正式前端构建，再生成 arm64 `.app` 与 `.dmg`。
 5. 检查正确新版 UI 标记、签名、包内运行时和 DMG SHA-256。
 6. 退出时清理可重建的前端、Rust、sidecar 和测试缓存。

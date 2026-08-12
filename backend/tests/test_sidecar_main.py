@@ -43,6 +43,22 @@ class ParentWatchdogTests(unittest.TestCase):
         with patch.dict(os.environ, {sidecar_main.PARENT_WATCHDOG_ENV: ""}):
             self.assertIsNone(sidecar_main._start_parent_watchdog())
 
+    def test_runtime_verification_argument_does_not_start_server(self):
+        with (
+            patch.object(
+                sys,
+                "argv",
+                ["subtitle-backend", sidecar_main.RUNTIME_VERIFY_ARGUMENT],
+            ),
+            patch.object(sidecar_main, "_verify_runtime_dependencies") as verify,
+            patch.object(sidecar_main, "_start_parent_watchdog") as watchdog,
+            patch.object(sidecar_main.uvicorn, "run") as run,
+        ):
+            sidecar_main.main()
+        verify.assert_called_once_with()
+        watchdog.assert_not_called()
+        run.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

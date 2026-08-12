@@ -198,6 +198,8 @@ if [ -e "$RUNTIME_PATH/bin/deno" ] \
   echo "最终 App Store App 错误地包含 Deno 或 yt-dlp。" >&2
   exit 1
 fi
+"$ROOT/scripts/restore-packaged-runtime-symlinks.sh" \
+  "$TAURI_DIR/backend-runtime" "$RUNTIME_PATH"
 
 SIGNING_IDENTITY="-"
 if [ "$QA_BUILD" = false ]; then
@@ -297,7 +299,9 @@ if [ "$QA_BUILD" = true ]; then
     mkdir -p "$ARCHIVE_DIR"
     mv "$FINAL_APP" "$ARCHIVE_DIR/"
   fi
-  cp -R "$APP_PATH" "$FINAL_APP"
+  ditto "$APP_PATH" "$FINAL_APP"
+  "$ROOT/scripts/restore-packaged-runtime-symlinks.sh" \
+    "$TAURI_DIR/backend-runtime" "$FINAL_APP/Contents/Resources/backend-runtime"
   codesign --verify --deep --strict "$FINAL_APP"
   "$ROOT/backend/.venv/bin/python" \
     "$ROOT/scripts/verify-packaged-app-store.py" "$FINAL_APP"
@@ -317,7 +321,9 @@ if [ -e "$FINAL_APP" ]; then
   mkdir -p "$ARCHIVE_DIR"
   mv "$FINAL_APP" "$ARCHIVE_DIR/"
 fi
-cp -R "$APP_PATH" "$FINAL_APP"
+ditto "$APP_PATH" "$FINAL_APP"
+"$ROOT/scripts/restore-packaged-runtime-symlinks.sh" \
+  "$TAURI_DIR/backend-runtime" "$FINAL_APP/Contents/Resources/backend-runtime"
 codesign --verify --deep --strict "$FINAL_APP"
 
 echo "App Store App: $FINAL_APP"

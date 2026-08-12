@@ -137,7 +137,7 @@ fi
 FINAL_APP="$ROOT/字幕工厂.app"
 FINAL_DMG="$ROOT/字幕工厂_${VERSION}_aarch64.dmg"
 FINAL_SHA="$FINAL_DMG.sha256"
-cp -R "$APP_PATH" "$FINAL_APP"
+ditto "$APP_PATH" "$FINAL_APP"
 cp "$DMG_PATH" "$FINAL_DMG"
 (
   cd "$ROOT"

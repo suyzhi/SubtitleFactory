@@ -8,6 +8,7 @@
 - Added restart-safe task settlement, durable draft recovery, verified database backups, exclusive restore maintenance, and reversible stale-draft rebasing.
 - Bound the frozen Python sidecar and its media helpers to the desktop process so normal quits, external termination, and forced crashes do not leave orphan processes.
 - Deferred heavy workspace modules and reduced idle polling while preserving visible task state, keyboard operation, and cloud-upload consent boundaries.
+- Added model-free native runtime smoke tests and preserved PyInstaller's safe relative-library link topology, reducing the App Store QA App by about 111 MiB without removing inference capabilities.
 
 ## 0.3.2 — 2026-07-26
 

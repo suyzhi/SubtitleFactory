@@ -67,6 +67,20 @@ fi
 
 cp -R "$DIST_DIR/subtitle-backend/." "$OUTPUT_DIR/"
 chmod +x "$OUTPUT_DIR/subtitle-backend"
+SMOKE_HOME="$(mktemp -d /tmp/subtitle-factory-runtime-smoke.XXXXXX)"
+cleanup_smoke_home() {
+  if [ -d "$SMOKE_HOME" ]; then
+    find "$SMOKE_HOME" -depth -delete
+  fi
+}
+trap cleanup_smoke_home EXIT
+if ! HOME="$SMOKE_HOME" XDG_CACHE_HOME="$SMOKE_HOME/cache" HF_HOME="$SMOKE_HOME/huggingface" \
+  "$OUTPUT_DIR/subtitle-backend" --verify-runtime; then
+  echo "冻结后端的原生运行时自检失败。" >&2
+  exit 1
+fi
+cleanup_smoke_home
+trap - EXIT
 mkdir -p "$OUTPUT_DIR/bin" "$OUTPUT_DIR/THIRD_PARTY_LICENSES/ffmpeg"
 cp "$VENDOR_RUNTIME/ffmpeg-darwin-arm64" "$OUTPUT_DIR/bin/ffmpeg"
 cp "$VENDOR_RUNTIME/ffprobe-darwin-arm64" "$OUTPUT_DIR/bin/ffprobe"
