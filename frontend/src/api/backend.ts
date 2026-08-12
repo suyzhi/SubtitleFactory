@@ -48,6 +48,56 @@ export class BackendError extends Error {
   }
 }
 
+export interface PreparedFile {
+  path: string;
+  filename: string;
+  size?: number;
+}
+
+function isTauriDesktop(): boolean {
+  return typeof window !== 'undefined' && Boolean((window as any).__TAURI_INTERNALS__);
+}
+
+function nativeError(error: unknown): Error {
+  if (error instanceof Error) return error;
+  return new Error(typeof error === 'string' ? error : '系统文件操作失败');
+}
+
+export async function saveManagedFile(sourcePath: string, suggestedName: string): Promise<boolean> {
+  if (!isTauriDesktop()) return false;
+  try {
+    const destination = await invoke<string | null>('save_managed_file', {
+      sourcePath,
+      suggestedName,
+    });
+    return destination !== null;
+  } catch (error) {
+    throw nativeError(error);
+  }
+}
+
+export async function saveTextFile(suggestedName: string, contents: string): Promise<boolean> {
+  if (!isTauriDesktop()) {
+    const blob = new Blob([contents], { type: 'text/plain;charset=utf-8' });
+    const objectUrl = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = objectUrl;
+    anchor.download = suggestedName;
+    anchor.click();
+    window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+    return true;
+  }
+  try {
+    const destination = await invoke<string | null>('save_text_file', {
+      suggestedName,
+      contents,
+    });
+    return destination !== null;
+  } catch (error) {
+    throw nativeError(error);
+  }
+}
+
 export function getDistributionChannel(): DistributionChannel {
   return DISTRIBUTION_CHANNEL;
 }
@@ -116,6 +166,42 @@ async function parseError(res: Response): Promise<BackendError> {
     message: typeof payload?.detail === 'string' ? payload.detail : `请求失败 (${res.status})`,
     details: {}, recoverable: res.status < 500,
   });
+}
+
+async function downloadBackendFile(
+  endpoint: string,
+  suggestedName: string,
+  sourcePath?: string,
+  options?: RequestInit,
+): Promise<boolean> {
+  if (isTauriDesktop()) {
+    if (!sourcePath) {
+      throw new BackendError(500, {
+        code: 'MANAGED_EXPORT_PATH_MISSING',
+        message: '交付文件路径缺失，请重新生成后再保存',
+        details: {},
+        recoverable: true,
+      });
+    }
+    return saveManagedFile(sourcePath, suggestedName);
+  }
+  const response = await authorizedFetch(endpoint, options);
+  if (!response.ok) throw await parseError(response);
+  const blob = await response.blob();
+  const objectUrl = URL.createObjectURL(blob);
+  const disposition = response.headers.get('Content-Disposition') || '';
+  const encoded = disposition.match(/filename\*=UTF-8''([^;]+)/i)?.[1];
+  const plain = disposition.match(/filename="?([^";]+)"?/i)?.[1];
+  const anchor = document.createElement('a');
+  anchor.href = objectUrl;
+  try {
+    anchor.download = encoded ? decodeURIComponent(encoded) : plain || suggestedName;
+  } catch {
+    anchor.download = suggestedName;
+  }
+  anchor.click();
+  window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+  return true;
 }
 
 async function authorizedFetch(url: string, options?: RequestInit, json = true): Promise<Response> {
@@ -494,19 +580,17 @@ export async function exportSubtitles(projectId: string, data: ExportRequest): P
   });
 }
 
-export async function downloadExport(projectId: string, fmt: string): Promise<void> {
-  const response = await authorizedFetch(`/api/projects/${projectId}/export/download?fmt=${encodeURIComponent(fmt)}`);
-  if (!response.ok) throw await parseError(response);
-  const blob = await response.blob();
-  const objectUrl = URL.createObjectURL(blob);
-  const disposition = response.headers.get('Content-Disposition') || '';
-  const encoded = disposition.match(/filename\*=UTF-8''([^;]+)/i)?.[1];
-  const plain = disposition.match(/filename="?([^";]+)"?/i)?.[1];
-  const anchor = document.createElement('a');
-  anchor.href = objectUrl;
-  anchor.download = encoded ? decodeURIComponent(encoded) : plain || `subtitle-export.${fmt}`;
-  anchor.click();
-  window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1000);
+export async function downloadExport(
+  projectId: string,
+  fmt: string,
+  sourcePath?: string,
+  suggestedName = `subtitle-export.${fmt}`,
+): Promise<boolean> {
+  return downloadBackendFile(
+    `/api/projects/${projectId}/export/download?fmt=${encodeURIComponent(fmt)}`,
+    suggestedName,
+    sourcePath,
+  );
 }
 
 export function getBackendMediaUrl(value: string | null | undefined): string | null {
@@ -577,11 +661,22 @@ export interface GlossaryImportPreview { rows: Record<string, string>[]; new_cou
 export async function importGlossaryTerms(glossaryId: string, content: string, delimiter: ',' | '\t', commit = false): Promise<GlossaryImportPreview> {
   return request(`/api/glossaries/${glossaryId}/import`, { method: 'POST', body: JSON.stringify({ content, delimiter, commit }) });
 }
-export async function downloadGlossary(glossaryId: string, format: 'csv' | 'tsv'): Promise<void> {
-  const response = await authorizedFetch(`/api/glossaries/${glossaryId}/export?format=${format}`);
-  if (!response.ok) throw await parseError(response);
-  const blob = await response.blob(); const url = URL.createObjectURL(blob); const anchor = document.createElement('a');
-  anchor.href = url; anchor.download = `glossary.${format}`; anchor.click(); window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+export async function downloadGlossary(
+  glossaryId: string,
+  format: 'csv' | 'tsv',
+  suggestedName = `glossary.${format}`,
+): Promise<boolean> {
+  let prepared: PreparedFile | undefined;
+  if (isTauriDesktop()) {
+    prepared = await request(`/api/glossaries/${glossaryId}/export-file?format=${format}`, {
+      method: 'POST',
+    });
+  }
+  return downloadBackendFile(
+    `/api/glossaries/${glossaryId}/export?format=${format}`,
+    suggestedName,
+    prepared?.path,
+  );
 }
 
 export interface Speaker { id: string; project_id: string; name: string; color: string; external_key?: string | null; }
@@ -700,22 +795,31 @@ export async function restoreBackup(name: string): Promise<void> {
 export async function revealLocalPath(path: string): Promise<void> {
   if ((window as any).__TAURI_INTERNALS__) await invoke('reveal_path', { path });
 }
-export async function downloadDiagnostics(): Promise<void> {
-  const response = await authorizedFetch('/api/maintenance/diagnostics', { method: 'POST' });
-  if (!response.ok) throw await parseError(response);
-  const blob = await response.blob(); const url = URL.createObjectURL(blob);
-  const anchor = document.createElement('a'); anchor.href = url; anchor.download = 'subtitle-factory-diagnostics.zip'; anchor.click();
-  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+export async function downloadDiagnostics(): Promise<boolean> {
+  const prepared = isTauriDesktop()
+    ? await request<PreparedFile>('/api/maintenance/diagnostics/prepare', { method: 'POST' })
+    : undefined;
+  return downloadBackendFile(
+    '/api/maintenance/diagnostics',
+    prepared?.filename || 'subtitle-factory-diagnostics.zip',
+    prepared?.path,
+    { method: 'POST' },
+  );
 }
 
-export async function createProjectPackage(projectId: string, includeMedia: boolean): Promise<{package_id: string; filename: string; size: number}> {
+export async function createProjectPackage(projectId: string, includeMedia: boolean): Promise<{package_id: string; filename: string; path: string; size: number}> {
   return request(`/api/projects/${projectId}/package?include_media=${includeMedia}`, { method: 'POST' });
 }
-export async function downloadProjectPackage(packageId: string, filename: string): Promise<void> {
-  const response = await authorizedFetch(`/api/project-packages/${packageId}/download`);
-  if (!response.ok) throw await parseError(response);
-  const blob = await response.blob(); const url = URL.createObjectURL(blob); const anchor = document.createElement('a');
-  anchor.href = url; anchor.download = filename; anchor.click(); window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+export async function downloadProjectPackage(
+  packageId: string,
+  filename: string,
+  sourcePath?: string,
+): Promise<boolean> {
+  return downloadBackendFile(
+    `/api/project-packages/${packageId}/download`,
+    filename,
+    sourcePath,
+  );
 }
 export async function importProjectPackage(file: File): Promise<{project_id: string; media_status: string}> {
   const form = new FormData(); form.append('file', file);
@@ -814,20 +918,20 @@ export async function deleteContentPack(packId: string): Promise<void> {
   await request(`/api/content-packs/${packId}?confirm=true`, { method: 'DELETE' });
 }
 
-export async function exportContentPack(packId: string): Promise<{ export_id: string; filename: string }> {
+export async function exportContentPack(packId: string): Promise<{ export_id: string; filename: string; path: string; size: number }> {
   return request(`/api/content-packs/${packId}/export`, { method: 'POST' });
 }
 
-export async function downloadContentPack(exportId: string, filename: string): Promise<void> {
-  const response = await authorizedFetch(`/api/content-pack-exports/${encodeURIComponent(exportId)}/download`);
-  if (!response.ok) throw await parseError(response);
-  const blob = await response.blob();
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement('a');
-  anchor.href = url;
-  anchor.download = filename;
-  anchor.click();
-  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+export async function downloadContentPack(
+  exportId: string,
+  filename: string,
+  sourcePath?: string,
+): Promise<boolean> {
+  return downloadBackendFile(
+    `/api/content-pack-exports/${encodeURIComponent(exportId)}/download`,
+    filename,
+    sourcePath,
+  );
 }
 
 export async function getClipSets(projectId: string): Promise<{ clip_sets: ClipSet[] }> {
@@ -889,16 +993,13 @@ export async function getClipRender(renderId: string): Promise<ClipRender> {
   return request(`/api/clip-renders/${renderId}`);
 }
 
-export async function downloadClipRender(renderId: string, filename = 'short-clip.mp4'): Promise<void> {
-  const response = await authorizedFetch(`/api/clip-renders/${renderId}/download`);
-  if (!response.ok) throw await parseError(response);
-  const blob = await response.blob();
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement('a');
-  anchor.href = url;
-  anchor.download = filename;
-  anchor.click();
-  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+export async function downloadClipRender(renderId: string, filename = 'short-clip.mp4'): Promise<boolean> {
+  const render = isTauriDesktop() ? await getClipRender(renderId) : undefined;
+  return downloadBackendFile(
+    `/api/clip-renders/${renderId}/download`,
+    filename,
+    render?.path || undefined,
+  );
 }
 
 export async function deleteClipRender(renderId: string): Promise<void> {

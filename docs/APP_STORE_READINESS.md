@@ -45,13 +45,24 @@ App Store 版的限制是发行策略，不是运行失败后的静默降级。R
 
 本轮真实 App 验收结果：
 
-- 168 个后端测试与 25 个子测试、53 个前端测试、lint 全部通过。
+- 169 个后端测试与 25 个子测试、55 个前端测试、5 个 Rust 测试、lint 全部通过。
 - 主 App、Python sidecar 和 Vision OCR 均为 arm64，深度严格签名校验通过；主 App 有 sandbox、网络与用户选取文件权限，helper 有 sandbox + inherit。
 - 沙盒 App 能持续启动 localhost sidecar，数据库和项目文件位于 `~/Library/Containers/com.subtitlefactory.desktop/`；无令牌请求返回 401，真实会话请求返回 200。
 - `app_store` 能力矩阵关闭 YouTube、浏览器 Cookie、自定义下载目录、文件系统自动化和外部运行时路径；相应越权接口在真实 sidecar 上均返回 `DISTRIBUTION_FEATURE_UNAVAILABLE`，28 个可见模型中没有外部模型 ID。
 - 捆绑 arm64 FFmpeg/FFprobe 在沙盒内可用，yt-dlp、Deno 和 EJS 报告为 `disabled`。
 - 用 1 秒真实 MP4 走与前端相同的 multipart 上传路径，项目创建、导入和读取均成功，媒体被复制进沙盒项目库；测试项目和文件随后精确清理。
 - 通过正常 Quit 退出后，主 App 和 sidecar 均停止，没有遗留后台进程。
+
+## 原生文件交付边界
+
+字幕、带字幕成片、短片、项目包、内容发布包、术语表、诊断包和字幕样式统一使用 macOS 原生存储面板。桌面 App 不再把大文件读入 WebView `Blob`，而是让 Python 先在 App 管理的数据目录生成文件，再由 Rust 主进程流式交付到用户明确选择的位置；纯浏览器开发模式保留 HTTP 下载回退。
+
+- Rust 会重新规范化源路径并确认它属于本次启动确定的 App 数据根目录；目录外路径和符号链接逃逸均被拒绝。
+- 用户可见文件名会清理路径分隔符、控制字符与冒号，保留扩展名并限制 UTF-8 长度。
+- 覆盖文件使用同目录临时文件完整写入和同步后再原子替换；写入中断不会截断原文件，也不会遗留 `.part` 文件。
+- 用户取消系统存储面板会返回明确的“已取消”，不会伪报导出成功；处理日志不再显示内部绝对输出路径。
+- 诊断包、术语表和内容发布包的待交付文件使用稳定的 App 管理路径，重复导出不会无限堆积临时副本。
+- 发布脚本在 sidecar 资源准备完成后执行 Rust 测试，确保目录边界、文件名、逐字节复制和失败回滚成为直装版与 App Store 版共同的发布门禁。
 
 ## 当前 P0 清单
 
@@ -66,6 +77,8 @@ App Store 版的限制是发行策略，不是运行失败后的静默降级。R
 - [ ] 安装 Mac App Distribution、Mac Installer Distribution 证书和 Mac App Store Connect provisioning profile。
 - [x] 本地 QA 对主 App、Python sidecar、FFmpeg/FFprobe、Vision OCR 和所有嵌套 Mach-O 逐层签名；helper 使用 sandbox + inherit，并自动防止 QA 的临时库验证例外进入正式版。
 - [x] 在本地沙盒 QA App 中验证媒体导入、localhost sidecar、能力门禁、鉴权、捆绑运行时和退出清理。
+- [x] 导出改用原生存储面板、受控源路径和原子流式复制；浏览器仅保留开发回退。
+- [ ] 解锁桌面后逐项人工点击字幕、成片、项目包、内容包、术语表、诊断包与样式导出，验证存储面板命名、取消和覆盖交互。
 - [ ] 使用真实 Apple Distribution 身份重复逐层签名验收，并验证 provisioning profile、Team ID 和 Keychain access group 完全一致。
 - [ ] 使用真实 Apple Distribution 签名在沙盒中验证模型下载、Keychain、云端授权、导出与第二次启动；这些依赖团队身份的路径不能由 ad-hoc QA 代替。
 - [ ] 在 Apple Distribution 签名的完整 `.app` 上分别记录首次启动与第二次启动时间；本地 ad-hoc 独立 sidecar 的对照值为约 29.5 秒 / 0.5 秒，不能代替正式信任链验收。

@@ -1,6 +1,41 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { getTaskStatus, materializeProjectVideo } from './backend';
+const invokeMock = vi.hoisted(() => vi.fn());
+
+vi.mock('@tauri-apps/api/core', () => ({ invoke: invokeMock }));
+
+import {
+  getTaskStatus, materializeProjectVideo, saveManagedFile, saveTextFile,
+} from './backend';
+
+beforeEach(() => {
+  invokeMock.mockReset();
+  delete (window as any).__TAURI_INTERNALS__;
+});
+
+describe('native file delivery', () => {
+  it('sends only the managed source and suggested name to the Rust save command', async () => {
+    (window as any).__TAURI_INTERNALS__ = {};
+    invokeMock.mockResolvedValue('/Users/test/Desktop/episode.mp4');
+
+    await expect(saveManagedFile('/managed/exports/render.mp4', 'episode.mp4')).resolves.toBe(true);
+    expect(invokeMock).toHaveBeenCalledWith('save_managed_file', {
+      sourcePath: '/managed/exports/render.mp4',
+      suggestedName: 'episode.mp4',
+    });
+  });
+
+  it('distinguishes an explicit save-panel cancellation from success', async () => {
+    (window as any).__TAURI_INTERNALS__ = {};
+    invokeMock.mockResolvedValue(null);
+
+    await expect(saveTextFile('subtitle-style.json', '{"version":1}')).resolves.toBe(false);
+    expect(invokeMock).toHaveBeenCalledWith('save_text_file', {
+      suggestedName: 'subtitle-style.json',
+      contents: '{"version":1}',
+    });
+  });
+});
 
 describe('local API caching', () => {
   it('disables WebKit caching for task polling GET requests', async () => {

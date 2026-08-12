@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from ..models.database import get_db
+from ..utils.config import EXPORTS_DIR
 from ..services.content_packs import (
     ContentPackError,
     create_content_pack,
@@ -143,15 +146,17 @@ def regenerate_content_section(pack_id: str, kind: str):
 @router.post("/content-packs/{pack_id}/export")
 def export_publication_pack(pack_id: str):
     path = _handle(export_content_pack, pack_id)
-    return {"export_id": path.stem, "filename": path.name}
+    return {
+        "export_id": path.stem,
+        "filename": path.name,
+        "path": str(path),
+        "size": path.stat().st_size,
+    }
 
 
 @router.get("/content-pack-exports/{export_id}/download")
 def download_publication_pack(export_id: str):
-    import tempfile
-    from pathlib import Path
-
-    path = Path(tempfile.gettempdir()) / f"{export_id}.zip"
+    path = Path(EXPORTS_DIR) / "content-packs" / f"{export_id}.zip"
     if not path.is_file() or not path.name.startswith("subtitle-factory-content-"):
         raise HTTPException(404, "内容发布包导出不存在或已过期")
     return FileResponse(path, filename=path.name, media_type="application/zip")

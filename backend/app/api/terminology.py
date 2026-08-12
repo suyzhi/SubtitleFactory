@@ -6,6 +6,7 @@ import csv
 import io
 import time
 import uuid
+from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import PlainTextResponse
@@ -13,6 +14,7 @@ from pydantic import BaseModel, Field
 
 from ..models.database import get_db
 from ..services.terminology import fuzzy_memory, normalize_source
+from ..utils.config import EXPORTS_DIR
 
 
 router = APIRouter(prefix="/api")
@@ -200,8 +202,7 @@ def import_terms(glossary_id: str, request: TermImport):
         db.close()
 
 
-@router.get("/glossaries/{glossary_id}/export", response_class=PlainTextResponse)
-def export_terms(glossary_id: str, format: str = Query("csv", pattern="^(csv|tsv)$")):
+def _export_terms_content(glossary_id: str, format: str) -> str:
     db = get_db()
     try:
         rows = db.execute("SELECT * FROM glossary_terms WHERE glossary_id=? ORDER BY source_text", (glossary_id,)).fetchall()
@@ -212,4 +213,23 @@ def export_terms(glossary_id: str, format: str = Query("csv", pattern="^(csv|tsv
     writer.writerow(["source_text", "target_text", "case_sensitive", "whole_word", "do_not_translate", "note"])
     for row in rows:
         writer.writerow([row["source_text"], row["target_text"], row["case_sensitive"], row["whole_word"], row["do_not_translate"], row["note"]])
-    return PlainTextResponse(output.getvalue(), media_type="text/tab-separated-values" if format == "tsv" else "text/csv")
+    return output.getvalue()
+
+
+@router.post("/glossaries/{glossary_id}/export-file")
+def prepare_terms_export(
+    glossary_id: str,
+    format: str = Query("csv", pattern="^(csv|tsv)$"),
+):
+    target = Path(EXPORTS_DIR) / "glossaries" / f"glossary-{glossary_id}.{format}"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(_export_terms_content(glossary_id, format), encoding="utf-8-sig")
+    return {"path": str(target), "filename": target.name, "size": target.stat().st_size}
+
+
+@router.get("/glossaries/{glossary_id}/export", response_class=PlainTextResponse)
+def export_terms(glossary_id: str, format: str = Query("csv", pattern="^(csv|tsv)$")):
+    return PlainTextResponse(
+        _export_terms_content(glossary_id, format),
+        media_type="text/tab-separated-values" if format == "tsv" else "text/csv",
+    )

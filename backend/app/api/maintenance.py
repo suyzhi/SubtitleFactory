@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import re
-import tempfile
 import time
 import zipfile
 from pathlib import Path
@@ -16,7 +15,7 @@ from pydantic import BaseModel
 from ..services.backups import backup_directory, create_backup, list_backups, restore_backup
 from ..services.app_settings import get_app_settings
 from ..services.search_index import rebuild_search_index, search_index_status
-from ..utils.config import LOGS_DIR
+from ..utils.config import EXPORTS_DIR, LOGS_DIR
 
 
 router = APIRouter(prefix="/api")
@@ -55,10 +54,10 @@ def restore(request: RestoreRequest):
         raise HTTPException(422, str(error)) from error
 
 
-@router.post("/maintenance/diagnostics")
-def diagnostics():
+def _create_diagnostics_bundle() -> Path:
     """Export configuration shape and redacted log tail, never subtitle/media text."""
-    target = Path(tempfile.gettempdir()) / f"subtitle-factory-diagnostics-{int(time.time())}.zip"
+    target = Path(EXPORTS_DIR) / "diagnostics" / "subtitle-factory-diagnostics.zip"
+    target.parent.mkdir(parents=True, exist_ok=True)
     settings = get_app_settings().copy()
     for key in list(settings):
         if "path" in key or "directory" in key or "key" in key:
@@ -74,6 +73,18 @@ def diagnostics():
         }, ensure_ascii=False, indent=2))
         bundle.writestr("settings-shape.json", json.dumps(settings, ensure_ascii=False, indent=2))
         bundle.writestr("app.log", log_tail)
+    return target
+
+
+@router.post("/maintenance/diagnostics/prepare")
+def prepare_diagnostics():
+    target = _create_diagnostics_bundle()
+    return {"path": str(target), "filename": target.name, "size": target.stat().st_size}
+
+
+@router.post("/maintenance/diagnostics")
+def diagnostics():
+    target = _create_diagnostics_bundle()
     return FileResponse(target, filename=target.name, media_type="application/zip")
 
 

@@ -22,7 +22,12 @@ def create_package(project_id: str, include_media: bool = False):
         raise HTTPException(404, str(error)) from error
     token = path.stem
     _exports[token] = path
-    return {"package_id": token, "filename": path.name, "size": path.stat().st_size}
+    return {
+        "package_id": token,
+        "filename": path.name,
+        "path": str(path),
+        "size": path.stat().st_size,
+    }
 
 
 @router.get("/project-packages/{package_id}/download")

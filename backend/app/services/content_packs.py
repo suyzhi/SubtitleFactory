@@ -5,7 +5,6 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-import tempfile
 import time
 import uuid
 import zipfile
@@ -15,6 +14,7 @@ from typing import Any
 import httpx
 
 from ..models.database import get_db
+from ..utils.config import EXPORTS_DIR
 from ..utils.task_manager import TaskCancelled, task_manager
 from .ai_providers import (
     assigned_provider,
@@ -695,7 +695,8 @@ def export_content_pack(pack_id: str) -> Path:
         "# 公众号", str(social.get("wechat") or ""),
         "# 通用社交", str(social.get("generic") or ""),
     ])
-    output = Path(tempfile.gettempdir()) / f"subtitle-factory-content-{pack_id}-{int(time.time())}.zip"
+    output = Path(EXPORTS_DIR) / "content-packs" / f"subtitle-factory-content-{pack_id}.zip"
+    output.parent.mkdir(parents=True, exist_ok=True)
     data = {
         "format": "subtitle-factory-content-pack",
         "version": 1,

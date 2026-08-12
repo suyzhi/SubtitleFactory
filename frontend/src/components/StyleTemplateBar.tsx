@@ -11,6 +11,7 @@ export default function StyleTemplateBar({ style, onApply }: Props) {
   const fileRef = useRef<HTMLInputElement>(null);
   const [selected, setSelected] = useState('');
   const [fontWarning, setFontWarning] = useState('');
+  const [exportMessage, setExportMessage] = useState('');
   const query = useQuery({ queryKey: ['style-templates'], queryFn: api.getStyleTemplates });
   const templates = useMemo(() => query.data?.templates || [], [query.data?.templates]);
   const save = useMutation({
@@ -31,9 +32,16 @@ export default function StyleTemplateBar({ style, onApply }: Props) {
     const template = templates.find(item => item.id === identifier); if (!template) return;
     onApply(normalizeSettings(template.settings));
   };
-  const exportJson = () => {
-    const blob = new Blob([JSON.stringify({ name: '字幕样式', settings: style }, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob); const anchor = document.createElement('a'); anchor.href = url; anchor.download = 'subtitle-style.json'; anchor.click(); URL.revokeObjectURL(url);
+  const exportJson = async () => {
+    try {
+      const saved = await api.saveTextFile(
+        'subtitle-style.json',
+        JSON.stringify({ name: '字幕样式', settings: style }, null, 2),
+      );
+      setExportMessage(saved ? '字幕样式已保存' : '已取消保存字幕样式');
+    } catch (reason) {
+      setExportMessage(reason instanceof Error ? reason.message : String(reason));
+    }
   };
   const importJson = async (file?: File) => {
     if (!file) return;
@@ -46,8 +54,8 @@ export default function StyleTemplateBar({ style, onApply }: Props) {
   return <div className="style-template-bar">
     <label>样式模板<select value={selected} onChange={event => apply(event.target.value)}><option value="">选择模板…</option>{templates.map(item => <option key={item.id} value={item.id}>{item.builtin ? '系统 · ' : ''}{item.name}</option>)}</select></label>
     <button onClick={() => { const name = window.prompt('模板名称'); if (name?.trim()) save.mutate(name.trim()); }}>保存当前样式</button>
-    <button onClick={exportJson}>导出 JSON</button><button onClick={() => fileRef.current?.click()}>导入 JSON</button>
+    <button onClick={() => void exportJson()}>导出 JSON</button><button onClick={() => fileRef.current?.click()}>导入 JSON</button>
     <input ref={fileRef} hidden type="file" accept="application/json,.json" onChange={event => void importJson(event.target.files?.[0])}/>
-    {fontWarning && <span role="status">{fontWarning}</span>}
+    {(fontWarning || exportMessage) && <span role="status">{fontWarning || exportMessage}</span>}
   </div>;
 }

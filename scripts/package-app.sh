@@ -48,6 +48,7 @@ npm run lint
 
 "$ROOT/scripts/verify-release-runtime.sh"
 "$ROOT/scripts/build-sidecar.sh"
+cargo test --manifest-path "$ROOT/frontend/src-tauri/Cargo.toml" --locked
 
 if ! rg -F "$UI_MARKER" "$ROOT/frontend/src/App.tsx" >/dev/null \
   || ! rg -F "$UI_LAYOUT_MARKER" "$ROOT/frontend/src/App.tsx" >/dev/null \

@@ -1,6 +1,6 @@
 use std::{
-    fs::{self, OpenOptions},
-    io::Write,
+    fs::{self, File, OpenOptions},
+    io::{self, Write},
     net::TcpListener,
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
@@ -11,6 +11,7 @@ use std::{
 
 use serde::Serialize;
 use tauri::{Manager, RunEvent, State, WindowEvent};
+use tauri_plugin_dialog::DialogExt;
 use uuid::Uuid;
 
 const PROFESSIONAL_UI_MARKER: &str = "subtitle-factory-ui:professional-v2";
@@ -26,6 +27,10 @@ struct BackendProcess {
     child: Mutex<Option<Child>>,
     process_group: Option<i32>,
     pid_file: PathBuf,
+}
+
+struct ManagedFiles {
+    root: PathBuf,
 }
 
 #[derive(Clone, Serialize)]
@@ -97,11 +102,8 @@ fn backend_session(session: State<'_, BackendSession>) -> BackendSession {
 }
 
 #[tauri::command]
-fn reveal_path(path: String) -> Result<(), String> {
-    let candidate = PathBuf::from(path);
-    if !candidate.exists() {
-        return Err("路径不存在".into());
-    }
+fn reveal_path(path: String, managed_files: State<'_, ManagedFiles>) -> Result<(), String> {
+    let candidate = validate_managed_path(&managed_files.root, Path::new(&path), false)?;
     Command::new("/usr/bin/open")
         .arg(&candidate)
         .status()
@@ -109,6 +111,212 @@ fn reveal_path(path: String) -> Result<(), String> {
         .success()
         .then_some(())
         .ok_or_else(|| "无法在 Finder 中打开路径".into())
+}
+
+fn backend_data_dir(app_data: &Path, session: &BackendSession) -> PathBuf {
+    if session.distribution_channel == APP_STORE_DISTRIBUTION_CHANNEL {
+        app_data.join("data")
+    } else {
+        std::env::var_os("SUBTITLE_FACTORY_DATA_DIR")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| app_data.join("data"))
+    }
+}
+
+fn validate_managed_path(
+    root: &Path,
+    candidate: &Path,
+    require_file: bool,
+) -> Result<PathBuf, String> {
+    let canonical_root = root
+        .canonicalize()
+        .map_err(|_| "应用管理的数据目录不存在".to_string())?;
+    let canonical_candidate = candidate
+        .canonicalize()
+        .map_err(|_| "要交付的文件不存在".to_string())?;
+    if !canonical_candidate.starts_with(&canonical_root) {
+        return Err("拒绝访问应用管理目录之外的文件".into());
+    }
+    if require_file && !canonical_candidate.is_file() {
+        return Err("要交付的内容不是文件".into());
+    }
+    Ok(canonical_candidate)
+}
+
+fn safe_suggested_name(suggested_name: &str, source: Option<&Path>) -> Result<String, String> {
+    const MAX_FILENAME_BYTES: usize = 240;
+
+    fn truncate_utf8(value: &str, max_bytes: usize) -> &str {
+        if value.len() <= max_bytes {
+            return value;
+        }
+        let mut boundary = max_bytes;
+        while !value.is_char_boundary(boundary) {
+            boundary -= 1;
+        }
+        &value[..boundary]
+    }
+
+    fn sanitize(value: &str) -> Option<String> {
+        let mut result = String::with_capacity(value.len());
+        let mut replacing = false;
+        for character in value.trim().chars() {
+            if character == '/' || character == '\\' || character == ':' || character.is_control() {
+                if !replacing {
+                    result.push('-');
+                    replacing = true;
+                }
+            } else {
+                result.push(character);
+                replacing = false;
+            }
+        }
+        let result = result.trim().trim_matches('.').trim();
+        if result.is_empty() || result == "." || result == ".." {
+            return None;
+        }
+        if result.len() <= MAX_FILENAME_BYTES {
+            return Some(result.to_string());
+        }
+        let suffix = result
+            .rfind('.')
+            .filter(|index| *index > 0 && result.len() - index <= 32)
+            .map(|index| &result[index..])
+            .unwrap_or("");
+        let stem_bytes = MAX_FILENAME_BYTES.saturating_sub(suffix.len());
+        let stem = truncate_utf8(&result[..result.len() - suffix.len()], stem_bytes).trim_end();
+        (!stem.is_empty()).then(|| format!("{stem}{suffix}"))
+    }
+
+    sanitize(suggested_name)
+        .or_else(|| {
+            source
+                .and_then(Path::file_name)
+                .and_then(|value| value.to_str())
+                .and_then(sanitize)
+        })
+        .ok_or_else(|| "建议的文件名无效".into())
+}
+
+fn choose_save_destination(
+    app: &tauri::AppHandle,
+    suggested_name: &str,
+) -> Result<Option<PathBuf>, String> {
+    let mut dialog = app
+        .dialog()
+        .file()
+        .set_title("导出文件")
+        .set_file_name(suggested_name);
+    if let Some(extension) = Path::new(suggested_name)
+        .extension()
+        .and_then(|value| value.to_str())
+        .filter(|value| !value.is_empty())
+    {
+        dialog = dialog.add_filter("交付文件", &[extension]);
+    }
+    if let Some(window) = app.get_webview_window("main") {
+        dialog = dialog.set_parent(&window);
+    }
+    dialog
+        .blocking_save_file()
+        .map(|value| value.into_path().map_err(|error| error.to_string()))
+        .transpose()
+}
+
+fn stream_copy(source: &Path, destination: &Path) -> Result<u64, String> {
+    if source == destination {
+        return source
+            .metadata()
+            .map(|metadata| metadata.len())
+            .map_err(|error| error.to_string());
+    }
+    let mut input = File::open(source).map_err(|error| format!("无法读取交付文件：{error}"))?;
+    write_atomically(destination, |output| io::copy(&mut input, output))
+        .map_err(|error| format!("复制交付文件失败：{error}"))
+}
+
+fn write_atomically<F>(destination: &Path, writer: F) -> Result<u64, String>
+where
+    F: FnOnce(&mut File) -> io::Result<u64>,
+{
+    let parent = destination
+        .parent()
+        .ok_or_else(|| "目标文件没有可写目录".to_string())?;
+    destination
+        .file_name()
+        .and_then(|value| value.to_str())
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| "目标文件名无效".to_string())?;
+    let temporary = parent.join(format!(
+        ".subtitle-factory-{}.part",
+        Uuid::new_v4().simple()
+    ));
+    let mut output = OpenOptions::new()
+        .create_new(true)
+        .write(true)
+        .open(&temporary)
+        .map_err(|error| format!("无法创建临时交付文件：{error}"))?;
+    let written = match writer(&mut output).and_then(|bytes| {
+        output.sync_all()?;
+        Ok(bytes)
+    }) {
+        Ok(bytes) => bytes,
+        Err(error) => {
+            drop(output);
+            let _ = fs::remove_file(&temporary);
+            return Err(format!("无法完成临时文件写入：{error}"));
+        }
+    };
+    drop(output);
+    if let Err(error) = fs::rename(&temporary, destination) {
+        let _ = fs::remove_file(&temporary);
+        return Err(format!("无法原子替换目标文件：{error}"));
+    }
+    Ok(written)
+}
+
+#[tauri::command]
+async fn save_managed_file(
+    app: tauri::AppHandle,
+    managed_files: State<'_, ManagedFiles>,
+    source_path: String,
+    suggested_name: String,
+) -> Result<Option<String>, String> {
+    let source = validate_managed_path(&managed_files.root, Path::new(&source_path), true)?;
+    let suggested_name = safe_suggested_name(&suggested_name, Some(&source))?;
+    let Some(destination) = choose_save_destination(&app, &suggested_name)? else {
+        return Ok(None);
+    };
+    let destination_for_result = destination.clone();
+    tauri::async_runtime::spawn_blocking(move || stream_copy(&source, &destination))
+        .await
+        .map_err(|error| format!("交付任务意外结束：{error}"))??;
+    Ok(Some(destination_for_result.to_string_lossy().into_owned()))
+}
+
+#[tauri::command]
+async fn save_text_file(
+    app: tauri::AppHandle,
+    suggested_name: String,
+    contents: String,
+) -> Result<Option<String>, String> {
+    if contents.len() > 10 * 1024 * 1024 {
+        return Err("文本交付内容超过 10 MB".into());
+    }
+    let suggested_name = safe_suggested_name(&suggested_name, None)?;
+    let Some(destination) = choose_save_destination(&app, &suggested_name)? else {
+        return Ok(None);
+    };
+    let destination_for_result = destination.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        write_atomically(&destination, |output| {
+            output.write_all(contents.as_bytes())?;
+            Ok(contents.len() as u64)
+        })
+    })
+    .await
+    .map_err(|error| format!("交付任务意外结束：{error}"))??;
+    Ok(Some(destination_for_result.to_string_lossy().into_owned()))
 }
 
 fn development_backend_dir() -> PathBuf {
@@ -141,20 +349,15 @@ fn stop_stale_process_group(pid_file: &PathBuf) {
     let _ = fs::remove_file(pid_file);
 }
 
-fn start_backend(app: &tauri::App, session: &BackendSession) -> Result<BackendProcess, String> {
+fn start_backend(
+    app: &tauri::App,
+    session: &BackendSession,
+    backend_data: &Path,
+) -> Result<BackendProcess, String> {
     let app_data = app
         .path()
         .app_data_dir()
         .map_err(|error| error.to_string())?;
-    // App Store builds always use their sandbox container. Direct builds retain
-    // the explicit override used by isolated QA and portable support workflows.
-    let backend_data = if session.distribution_channel == APP_STORE_DISTRIBUTION_CHANNEL {
-        app_data.join("data")
-    } else {
-        std::env::var_os("SUBTITLE_FACTORY_DATA_DIR")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| app_data.join("data"))
-    };
     fs::create_dir_all(&app_data).map_err(|error| error.to_string())?;
     let pid_file = app_data.join("backend.pid");
     stop_stale_process_group(&pid_file);
@@ -287,7 +490,12 @@ fn clear_stale_backend_startup_error(app_data: &Path) -> std::io::Result<()> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let app = tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![backend_session, reveal_path])
+        .invoke_handler(tauri::generate_handler![
+            backend_session,
+            reveal_path,
+            save_managed_file,
+            save_text_file,
+        ])
         .plugin(tauri_plugin_dialog::init())
         .plugin(
             tauri_plugin_log::Builder::default()
@@ -302,7 +510,8 @@ pub fn run() {
                 .path()
                 .app_data_dir()
                 .map_err(|value| value.to_string())?;
-            let backend = match start_backend(app, &session) {
+            let managed_root = backend_data_dir(&app_data, &session);
+            let backend = match start_backend(app, &session, &managed_root) {
                 Ok(backend) => {
                     if let Err(error) = clear_stale_backend_startup_error(&app_data) {
                         log::warn!("无法清理过期的后端启动错误：{error}");
@@ -319,6 +528,7 @@ pub fn run() {
                     }
                 }
             };
+            app.manage(ManagedFiles { root: managed_root });
             app.manage(session);
             app.manage(backend);
             Ok(())
@@ -340,15 +550,19 @@ pub fn run() {
 
 #[cfg(test)]
 mod tests {
-    use super::{clear_stale_backend_startup_error, BACKEND_STARTUP_ERROR_FILE};
-    use std::fs;
+    use super::{
+        clear_stale_backend_startup_error, safe_suggested_name, stream_copy, validate_managed_path,
+        write_atomically, BACKEND_STARTUP_ERROR_FILE,
+    };
+    use std::{fs, io, io::Write, path::Path};
+
+    fn isolated_test_dir(label: &str) -> std::path::PathBuf {
+        std::env::temp_dir().join(format!("subtitle-factory-{label}-{}", uuid::Uuid::new_v4()))
+    }
 
     #[test]
     fn successful_start_clears_stale_backend_error() {
-        let test_dir = std::env::temp_dir().join(format!(
-            "subtitle-factory-startup-error-test-{}",
-            uuid::Uuid::new_v4()
-        ));
+        let test_dir = isolated_test_dir("startup-error-test");
         fs::create_dir_all(&test_dir).expect("create isolated test directory");
         let error_file = test_dir.join(BACKEND_STARTUP_ERROR_FILE);
         fs::write(&error_file, "stale failure").expect("write stale error");
@@ -358,5 +572,101 @@ mod tests {
         assert!(!error_file.exists());
         clear_stale_backend_startup_error(&test_dir).expect("missing file is already clean");
         fs::remove_dir(&test_dir).expect("remove isolated test directory");
+    }
+
+    #[test]
+    fn managed_file_validation_rejects_outside_and_symlink_escape() {
+        let test_dir = isolated_test_dir("managed-file-test");
+        let root = test_dir.join("managed");
+        let outside = test_dir.join("outside.txt");
+        fs::create_dir_all(&root).expect("create managed root");
+        fs::write(root.join("inside.txt"), b"inside").expect("write managed file");
+        fs::write(&outside, b"outside").expect("write outside file");
+
+        assert!(validate_managed_path(&root, &root.join("inside.txt"), true).is_ok());
+        assert!(validate_managed_path(&root, &outside, true).is_err());
+
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(&outside, root.join("escape.txt"))
+                .expect("create escape symlink");
+            assert!(validate_managed_path(&root, &root.join("escape.txt"), true).is_err());
+        }
+
+        fs::remove_dir_all(&test_dir).expect("remove managed file test directory");
+    }
+
+    #[test]
+    fn suggested_names_are_flat_and_have_a_safe_fallback() {
+        let sanitized =
+            safe_suggested_name("../项目\\成片\n.mp4", None).expect("sanitize suggested filename");
+        assert!(!sanitized.contains('/'));
+        assert!(!sanitized.contains('\\'));
+        assert!(!sanitized.chars().any(char::is_control));
+        assert!(sanitized.ends_with(".mp4"));
+        assert!(!sanitized.contains(':'));
+
+        let long_name = format!("{}.mp4", "超长项目名称".repeat(80));
+        let truncated = safe_suggested_name(&long_name, None).expect("truncate long filename");
+        assert!(truncated.len() <= 240);
+        assert!(truncated.ends_with(".mp4"));
+
+        assert_eq!(
+            safe_suggested_name("   ", Some(Path::new("/managed/export.srt")))
+                .expect("use source filename"),
+            "export.srt"
+        );
+        assert!(safe_suggested_name("\n", None).is_err());
+    }
+
+    #[test]
+    fn stream_copy_preserves_exact_bytes() {
+        let test_dir = isolated_test_dir("stream-copy-test");
+        fs::create_dir_all(&test_dir).expect("create stream copy directory");
+        let source = test_dir.join("source.bin");
+        let destination = test_dir.join("destination.bin");
+        let payload: Vec<u8> = (0..131_071).map(|index| (index % 251) as u8).collect();
+        fs::write(&source, &payload).expect("write source payload");
+
+        assert_eq!(
+            stream_copy(&source, &destination).expect("stream copy succeeds"),
+            payload.len() as u64
+        );
+        assert_eq!(
+            fs::read(&destination).expect("read copied payload"),
+            payload
+        );
+        assert_eq!(
+            stream_copy(&source, &source).expect("same source is a no-op"),
+            payload.len() as u64
+        );
+
+        fs::remove_dir_all(&test_dir).expect("remove stream copy directory");
+    }
+
+    #[test]
+    fn failed_atomic_write_preserves_an_existing_destination() {
+        let test_dir = isolated_test_dir("atomic-write-test");
+        fs::create_dir_all(&test_dir).expect("create atomic write directory");
+        let destination = test_dir.join("existing.txt");
+        fs::write(&destination, b"original").expect("write original destination");
+
+        let result = write_atomically(&destination, |output| {
+            output.write_all(b"partial")?;
+            Err(io::Error::other("synthetic interruption"))
+        });
+        assert!(result.is_err());
+        assert_eq!(
+            fs::read(&destination).expect("read preserved destination"),
+            b"original"
+        );
+        assert_eq!(
+            fs::read_dir(&test_dir)
+                .expect("list atomic write directory")
+                .count(),
+            1
+        );
+
+        fs::remove_dir_all(&test_dir).expect("remove atomic write directory");
     }
 }

@@ -10,6 +10,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app.models import database, migrations
+from app.api import maintenance, terminology
 from app.services import project_packages, waveform
 from app.services.backups import create_backup, list_backups
 from app.services.editor import history_step, import_segment_snapshot
@@ -26,6 +27,9 @@ class V1FeatureTests(unittest.TestCase):
             patch.object(project_packages, "PROJECTS_DIR", self.root / "projects"),
             patch.object(project_packages, "EXPORTS_DIR", self.root / "exports"),
             patch.object(waveform, "PROJECTS_DIR", self.root / "projects"),
+            patch.object(maintenance, "EXPORTS_DIR", self.root / "exports"),
+            patch.object(maintenance, "LOGS_DIR", self.root / "logs"),
+            patch.object(terminology, "EXPORTS_DIR", self.root / "exports"),
         ]
         for item in self.patches: item.start()
         database.init_db()
@@ -112,6 +116,31 @@ class V1FeatureTests(unittest.TestCase):
         ass = b"[Events]\nDialogue: 0,0:00:00.00,0:00:01.20,Default,,0,0,0,,{\\i1}Hello\\Nworld\n"
         self.assertEqual(parse_subtitle(vtt, "a.vtt")[0]["text"], "Hello")
         self.assertEqual(parse_subtitle(ass, "a.ass")[0]["text"], "Hello\nworld")
+
+    def test_prepared_exports_stay_inside_the_managed_exports_directory(self):
+        glossary_id = str(uuid.uuid4())
+        db = database.get_db()
+        db.execute(
+            "INSERT INTO glossaries VALUES (?,?,'Native export','en','zh','now','now')",
+            (glossary_id, self.project_id),
+        )
+        db.execute(
+            """INSERT INTO glossary_terms VALUES (?,?, 'timeline','时间线',0,1,0,'','now','now')""",
+            (str(uuid.uuid4()), glossary_id),
+        )
+        db.commit()
+        db.close()
+
+        glossary = terminology.prepare_terms_export(glossary_id, "csv")
+        diagnostics = maintenance.prepare_diagnostics()
+        managed_exports = (self.root / "exports").resolve()
+        for prepared in (glossary, diagnostics):
+            path = Path(prepared["path"]).resolve()
+            self.assertTrue(path.is_relative_to(managed_exports))
+            self.assertTrue(path.is_file())
+            self.assertEqual(prepared["size"], path.stat().st_size)
+
+        self.assertTrue(Path(glossary["path"]).read_bytes().startswith(b"\xef\xbb\xbf"))
 
     def test_failed_migration_restores_pre_migration_database(self):
         def fail_after_ddl(conn):

@@ -90,6 +90,12 @@ function libraryTimecode(value: number) {
     : `${minutes}:${String(remainder).padStart(2, '0')}`;
 }
 
+function projectExportFilename(projectTitle: string | undefined, format: string, suffix = '') {
+  const extension = format === 'srt-bilingual' ? 'bilingual.srt' : format;
+  const title = projectTitle?.trim() || '字幕工厂';
+  return `${title}${suffix ? `-${suffix}` : ''}.${extension}`;
+}
+
 function DeferredPanel({ label, kind = 'panel', theme = 'dark' }: {
   label: string;
   kind?: 'panel' | 'player' | 'overlay' | 'settings';
@@ -647,10 +653,20 @@ function App() {
           }
           // Export result
           if ((status.type === 'export' || status.type === 'render') && status.status === 'success' && d.output_path) {
-            addLog('info', status.type, `输出文件: ${d.output_path}${d.output_size ? ` (${(d.output_size/1024/1024).toFixed(1)}MB)` : ''}`);
+            addLog('info', status.type, `输出文件已生成${d.output_size ? ` (${(d.output_size/1024/1024).toFixed(1)}MB)` : ''}`);
             if (status.type === 'render' && downloadedRenderTask.current !== status.id) {
               downloadedRenderTask.current = status.id;
-              void api.downloadExport(activeProject?.id || status.project_id || '', d.format || 'mp4');
+              const format = String(d.format || 'mp4');
+              void api.downloadExport(
+                activeProject?.id || status.project_id || '',
+                format,
+                String(d.output_path),
+                projectExportFilename(activeProject?.title, format, '带字幕'),
+              ).then(saved => {
+                addLog('info', status.type, saved ? '成片已保存到所选位置' : '已取消保存成片');
+              }).catch(error => {
+                addLog('error', status.type, `成片保存失败：${error.message}`);
+              });
             }
           }
         }
@@ -1124,13 +1140,18 @@ function App() {
           addLog('info', '压制视频', `${fmt.toUpperCase()} 视频导出任务已创建`);
         }
       } else {
-        await api.exportSubtitles(activeProject.id, {
+        const result = await api.exportSubtitles(activeProject.id, {
           format: fmt, bilingual: config.bilingual,
           primary_language: subtitleStyle.mode === 'bilingual_translated_first' ? 'translated' : 'original', style: subtitleStyle,
         });
-        addLog('info', '导出', `${fmt.toUpperCase()} 导出成功`);
         setStepStatus('export', 'success', 100);
-        await api.downloadExport(activeProject.id, fmt);
+        const saved = await api.downloadExport(
+          activeProject.id,
+          fmt,
+          result.path,
+          projectExportFilename(activeProject.title, fmt),
+        );
+        addLog('info', '导出', saved ? `${fmt.toUpperCase()} 已保存` : `已取消保存 ${fmt.toUpperCase()}`);
       }
     } catch (e: any) {
       addLog('error', '导出', `${fmt} 导出失败: ${e.message}`);
@@ -1287,8 +1308,12 @@ function App() {
     if (!activeProject) return;
     try {
       const result = await api.createProjectPackage(activeProject.id, includeMedia);
-      await api.downloadProjectPackage(result.package_id, result.filename);
-      setToast(includeMedia ? '完整项目包已导出' : '精简项目包已导出');
+      const saved = await api.downloadProjectPackage(
+        result.package_id,
+        `${activeProject.title}-${includeMedia ? '完整' : '精简'}.sfproject`,
+        result.path,
+      );
+      setToast(saved ? (includeMedia ? '完整项目包已导出' : '精简项目包已导出') : '已取消保存项目包');
     } catch (error: any) { setToast(error.message); }
   }, [activeProject]);
 

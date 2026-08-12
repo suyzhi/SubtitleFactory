@@ -141,6 +141,7 @@ export VITE_DISTRIBUTION_CHANNEL="app_store"
 
 "$ROOT/scripts/verify-release-runtime.sh"
 "$ROOT/scripts/build-sidecar.sh"
+cargo test --manifest-path "$ROOT/frontend/src-tauri/Cargo.toml" --locked
 npm run build
 
 if ! rg -F "$UI_MARKER" "$ROOT/frontend/src/App.tsx" >/dev/null \

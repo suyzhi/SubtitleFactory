@@ -24,6 +24,7 @@ class ContentReproductionTests(unittest.TestCase):
             patch.object(project_packages, "PROJECTS_DIR", self.root / "projects"),
             patch.object(project_packages, "EXPORTS_DIR", self.root / "exports"),
             patch.object(clips, "EXPORTS_DIR", self.root / "exports"),
+            patch.object(content_packs, "EXPORTS_DIR", self.root / "exports"),
         ]
         for item in self.patches:
             item.start()
@@ -187,6 +188,7 @@ class ContentReproductionTests(unittest.TestCase):
         self.assertEqual(conflict.exception.error_code, "CONTENT_REVISION_CONFLICT")
 
         output = content_packs.export_content_pack(pack["id"])
+        self.assertTrue(output.resolve().is_relative_to((self.root / "exports").resolve()))
         with zipfile.ZipFile(output) as archive:
             self.assertEqual(
                 {

@@ -386,6 +386,16 @@ export default function SettingsCenter(props: Props) {
     } catch { setError('无法复制诊断信息'); }
   };
 
+  const exportDiagnostics = async () => {
+    setError('');
+    try {
+      const saved = await api.downloadDiagnostics();
+      setMessage(saved ? '脱敏诊断包已保存' : '已取消保存诊断包');
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+    }
+  };
+
   const renderPath = (
     label: string, field: keyof AppSettings, kind: PathValidationResult['kind'], placeholder: string, directory = false,
   ) => {
@@ -646,7 +656,7 @@ export default function SettingsCenter(props: Props) {
               <SettingsSection title="关于字幕工厂" description="本地优先的专业字幕工作台。">
                 <div className="about-card"><strong>字幕工厂 {health?.version || '0.4.1'}</strong><span>Apple Silicon · {distributionChannel === 'app_store' ? 'Mac App Store 版' : '直装版'}</span><small>服务状态：{health?.status || '正在连接'}</small></div>
                 <div className="about-data-row"><span><strong>数据目录</strong><small>{health?.runtime?.data_directory || 'App 本地数据目录'}</small></span></div>
-                <div className="inline-actions"><button className="button secondary" onClick={() => void copyDiagnostics()}>复制诊断信息</button><button className="button secondary" onClick={() => void api.downloadDiagnostics().catch(reason => setError(reason.message))}>导出脱敏诊断包</button><button className="button secondary" onClick={() => { onClose(); onOpenLogs(); }}>查看处理日志</button></div>
+                <div className="inline-actions"><button className="button secondary" onClick={() => void copyDiagnostics()}>复制诊断信息</button><button className="button secondary" onClick={() => void exportDiagnostics()}>导出脱敏诊断包</button><button className="button secondary" onClick={() => { onClose(); onOpenLogs(); }}>查看处理日志</button></div>
                 <p className="settings-help">复制的诊断信息不包含本机路径或 API Key。自定义路径和密钥不会进入 Git、默认配置、日志或 Release。</p>
               </SettingsSection>
               <SettingsSection title="隐私与数据" description="默认本地处理；任何云端发送都需要用户主动配置并明确执行。">

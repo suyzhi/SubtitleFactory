@@ -292,8 +292,12 @@ function PublicationPacks({
     if (!selected) return;
     try {
       const result = await api.exportContentPack(selected.id);
-      await api.downloadContentPack(result.export_id, result.filename);
-      onMessage('内容发布包 ZIP 已导出');
+      const saved = await api.downloadContentPack(
+        result.export_id,
+        `${selected.name}.zip`,
+        result.path,
+      );
+      onMessage(saved ? '内容发布包 ZIP 已导出' : '已取消保存内容发布包');
     } catch (reason) { setError(errorMessage(reason)); }
   };
 
@@ -468,7 +472,7 @@ function ClipCandidateCard({
         <button className="button secondary" disabled={busy} onClick={() => void saveLayout(layout)}>保存此布局</button>
       </section>)}</div>
     {!!candidate.renders.length && <div className="clip-render-list">{candidate.renders.map(render =>
-      <span key={render.id} className={render.status}><strong>{render.aspect_ratio}</strong><small>{render.status === 'success' ? `${render.width}×${render.height} · ${Number(render.duration || 0).toFixed(1)} 秒` : render.error || render.status}</small>{render.status === 'success' && <button onClick={() => void api.downloadClipRender(render.id, `${candidate.title}-${render.aspect_ratio.replace(':', 'x')}.mp4`)}>下载</button>}{['failed', 'cancelled'].includes(render.status) && <button onClick={() => void api.deleteClipRender(render.id).then(() => onMessage('短片记录已删除'))}>删除</button>}</span>)}</div>}
+      <span key={render.id} className={render.status}><strong>{render.aspect_ratio}</strong><small>{render.status === 'success' ? `${render.width}×${render.height} · ${Number(render.duration || 0).toFixed(1)} 秒` : render.error || render.status}</small>{render.status === 'success' && <button onClick={() => void api.downloadClipRender(render.id, `${candidate.title}-${render.aspect_ratio.replace(':', 'x')}.mp4`).then(saved => onMessage(saved ? '短片已保存' : '已取消保存短片')).catch(reason => setError(errorMessage(reason)))}>下载</button>}{['failed', 'cancelled'].includes(render.status) && <button onClick={() => void api.deleteClipRender(render.id).then(() => onMessage('短片记录已删除'))}>删除</button>}</span>)}</div>}
     {error && <p className="content-error">{error}</p>}
   </article>;
 }
