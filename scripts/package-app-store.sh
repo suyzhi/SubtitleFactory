@@ -299,6 +299,8 @@ if [ "$QA_BUILD" = true ]; then
   fi
   cp -R "$APP_PATH" "$FINAL_APP"
   codesign --verify --deep --strict "$FINAL_APP"
+  "$ROOT/backend/.venv/bin/python" \
+    "$ROOT/scripts/verify-packaged-app-store.py" "$FINAL_APP"
   echo "App Store QA App: $FINAL_APP"
   echo "注意：这是验证 app_store 通道和沙盒边界的 ad-hoc QA 产物，不可上传 App Store Connect。"
   exit 0

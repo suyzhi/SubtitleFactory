@@ -39,19 +39,19 @@ App Store 版的限制是发行策略，不是运行失败后的静默降级。R
 
 ## 2026-08-12 App Store 通道实机 QA
 
-`./scripts/package-app-store.sh --qa` 会在没有 Apple 团队证书时构建根目录 `字幕工厂-AppStore-QA.app`。它运行完整后端、前端与 lint 验证，使用 `app_store` 编译通道构建 sidecar、Vite 和 Tauri App，逐层 ad-hoc 签名所有 Mach-O，并检查沙盒权限、Hardened Runtime、arm64、隐私清单、发行 UI 标记，以及最终包中不存在 Deno、yt-dlp 和旧设置界面。构建结束仍按仓库约束清理所有可重建产物。
+`./scripts/package-app-store.sh --qa` 会在没有 Apple 团队证书时构建根目录 `字幕工厂-AppStore-QA.app`。它运行完整后端、前端与 lint 验证，使用 `app_store` 编译通道构建 sidecar、Vite 和 Tauri App，逐层 ad-hoc 签名所有 Mach-O，并检查沙盒权限、Hardened Runtime、arm64、隐私清单、发行 UI 标记，以及最终包中不存在 Deno、yt-dlp 和旧设置界面。随后验收器会启动根目录最终 App，通过真实会话检查 API 鉴权、发行限制、模型目录、沙箱本地导入、包内 FFmpeg 缩略图、精确项目清理、强制退出和正常退出。构建结束仍按仓库约束清理所有可重建产物。
 
 这份 QA App 只能验证产品逻辑和沙盒边界，不能上传 App Store Connect。ad-hoc 签名没有共同的 Apple Team ID，Hardened Runtime 会拒绝 Python sidecar 加载包内动态库，因此 QA helper 会临时加入 `com.apple.security.cs.disable-library-validation`。正式构建明确禁止该权限，并要求所有嵌套 Mach-O 使用同一个 Mac App Distribution 身份；不要把 QA 签名当成正式签名证据。
 
 本轮真实 App 验收结果：
 
-- 186 个后端测试与 25 个子测试、60 个前端测试、6 个 Rust 测试、lint 全部通过。
+- 186 个后端测试与 25 个子测试、61 个前端测试、6 个 Rust 测试、lint 全部通过。
 - 主 App、Python sidecar 和 Vision OCR 均为 arm64，深度严格签名校验通过；主 App 有 sandbox、网络与用户选取文件权限，helper 有 sandbox + inherit。
 - 沙盒 App 能持续启动 localhost sidecar，数据库和项目文件位于 `~/Library/Containers/com.subtitlefactory.desktop/`；无令牌请求返回 401，真实会话请求返回 200。
 - `app_store` 能力矩阵关闭 YouTube、浏览器 Cookie、自定义下载目录、文件系统自动化和外部运行时路径；相应越权接口在真实 sidecar 上均返回 `DISTRIBUTION_FEATURE_UNAVAILABLE`，28 个可见模型中没有外部模型 ID。
 - 捆绑 arm64 FFmpeg/FFprobe 在沙盒内可用，yt-dlp、Deno 和 EJS 报告为 `disabled`。
-- 用 1 秒真实 MP4 走与前端相同的 multipart 上传路径，项目创建、导入和读取均成功，媒体被复制进沙盒项目库；测试项目和文件随后精确清理。
-- 通过正常 Quit 退出后，主 App 和 sidecar 均停止，没有遗留后台进程。
+- 用 0.5 秒真实 MP4 走与前端相同的 multipart 上传路径，项目创建、导入和读取均成功，媒体被复制进沙盒项目库，包内 FFmpeg 生成缩略图；测试项目和文件随后精确清理。
+- 主 App 被强制终止后，sidecar 进程组自动退出；重新启动并正常 Quit 后，主 App、sidecar 和 PID 文件均停止或清理。
 
 ## 原生文件交付边界
 
