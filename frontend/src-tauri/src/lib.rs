@@ -2,7 +2,7 @@ use std::{
     fs::{self, OpenOptions},
     io::Write,
     net::TcpListener,
-    path::PathBuf,
+    path::{Path, PathBuf},
     process::{Child, Command, Stdio},
     sync::Mutex,
     thread,
@@ -17,6 +17,7 @@ const PROFESSIONAL_UI_MARKER: &str = "subtitle-factory-ui:professional-v2";
 const LIBRARY_WORKSPACE_UI_MARKER: &str = "subtitle-factory-ui:library-workspace-v2";
 const DIRECT_DISTRIBUTION_CHANNEL: &str = "direct";
 const APP_STORE_DISTRIBUTION_CHANNEL: &str = "app_store";
+const BACKEND_STARTUP_ERROR_FILE: &str = "backend-startup-error.txt";
 
 #[cfg(unix)]
 use std::os::unix::process::CommandExt;
@@ -275,6 +276,14 @@ fn stop_managed_backend(app: &tauri::AppHandle) {
     }
 }
 
+fn clear_stale_backend_startup_error(app_data: &Path) -> std::io::Result<()> {
+    match fs::remove_file(app_data.join(BACKEND_STARTUP_ERROR_FILE)) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error),
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let app = tauri::Builder::default()
@@ -289,15 +298,20 @@ pub fn run() {
             log::info!("release UI marker: {PROFESSIONAL_UI_MARKER}");
             log::info!("release UI layout marker: {LIBRARY_WORKSPACE_UI_MARKER}");
             let session = create_backend_session()?;
+            let app_data = app
+                .path()
+                .app_data_dir()
+                .map_err(|value| value.to_string())?;
             let backend = match start_backend(app, &session) {
-                Ok(backend) => backend,
+                Ok(backend) => {
+                    if let Err(error) = clear_stale_backend_startup_error(&app_data) {
+                        log::warn!("无法清理过期的后端启动错误：{error}");
+                    }
+                    backend
+                }
                 Err(error) => {
                     log::error!("{error}");
-                    let app_data = app
-                        .path()
-                        .app_data_dir()
-                        .map_err(|value| value.to_string())?;
-                    let _ = fs::write(app_data.join("backend-startup-error.txt"), &error);
+                    let _ = fs::write(app_data.join(BACKEND_STARTUP_ERROR_FILE), &error);
                     BackendProcess {
                         child: Mutex::new(None),
                         process_group: None,
@@ -322,4 +336,27 @@ pub fn run() {
             stop_managed_backend(handle);
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{clear_stale_backend_startup_error, BACKEND_STARTUP_ERROR_FILE};
+    use std::fs;
+
+    #[test]
+    fn successful_start_clears_stale_backend_error() {
+        let test_dir = std::env::temp_dir().join(format!(
+            "subtitle-factory-startup-error-test-{}",
+            uuid::Uuid::new_v4()
+        ));
+        fs::create_dir_all(&test_dir).expect("create isolated test directory");
+        let error_file = test_dir.join(BACKEND_STARTUP_ERROR_FILE);
+        fs::write(&error_file, "stale failure").expect("write stale error");
+
+        clear_stale_backend_startup_error(&test_dir).expect("clear stale error");
+
+        assert!(!error_file.exists());
+        clear_stale_backend_startup_error(&test_dir).expect("missing file is already clean");
+        fs::remove_dir(&test_dir).expect("remove isolated test directory");
+    }
 }
