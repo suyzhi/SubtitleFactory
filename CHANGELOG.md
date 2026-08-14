@@ -3,6 +3,7 @@
 ## 0.4.1 UI 修复与美化 — 2026-08-14
 
 - Styled previously-unstyled elements: player empty state, process-timeline empty state / step number / current badge, log level icons and detail blocks, stats labels, task-drawer failure cards, and playlist item errors.
+- Fixed the project-card "•••" menu button drifting below the card: it now sits as a frosted chip in the top-right corner of the cover (hover-revealed in light theme, always visible in dark).
 - Polished the player idle view into a centered glass placeholder, tinted error log entries, and made scrollbars theme-aware with a global keyboard focus ring.
 
 ## 0.4.1 工程改进 — 2026-08-14
