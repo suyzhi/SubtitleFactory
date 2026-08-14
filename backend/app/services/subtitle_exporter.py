@@ -161,6 +161,13 @@ def export_ass(segments: list, output_path: str, bilingual: bool = False,
     translated_override = ass_color(settings.get("translatedTextColor") or settings.get("textColor"), "#dddddd")
     box_color = pysubs2.Color(255, 255, 255) if background_mode == "white" else pysubs2.Color(0, 0, 0)
 
+    def ass_text(value: str) -> str:
+        # SSAEvent.text is the ASS wire representation rather than plain text.
+        # Literal newlines would split a Dialogue record and produce an invalid
+        # file, so normalize every platform newline to the ASS hard-line-break
+        # escape before combining it with style override tags.
+        return str(value or "").replace("\r\n", "\n").replace("\r", "\n").replace("\n", r"\N")
+
     subs = pysubs2.SSAFile()
     subs.info["PlayResX"] = str(play_res_x)
     subs.info["PlayResY"] = str(play_res_y)
@@ -220,8 +227,8 @@ def export_ass(segments: list, output_path: str, bilingual: bool = False,
         start_ms = int(seg["start"] * 1000)
         end_ms = int(seg["end"] * 1000)
 
-        text = seg.get("clean_text") or seg["raw_text"]
-        translated = seg.get("translated_text", "")
+        text = ass_text(seg.get("clean_text") or seg["raw_text"])
+        translated = ass_text(seg.get("translated_text", ""))
 
         if bilingual and translated:
             if primary_lang == "original":

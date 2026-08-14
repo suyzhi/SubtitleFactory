@@ -766,11 +766,13 @@ class PersistenceAndExportTests(unittest.TestCase):
             path = Path(folder) / "out.ass"
             export_ass([{
                 "index": 1, "start": 0.0, "end": 1.5,
-                "raw_text": "Hello", "clean_text": "Hello", "translated_text": "你好",
+                "raw_text": "Hello", "clean_text": "Hello\nWorld", "translated_text": "你好\n世界",
             }], str(path), bilingual=True)
             content = path.read_text(encoding="utf-8-sig")
             self.assertIn("[V4+ Styles]", content)
-            self.assertIn("你好", content)
+            self.assertIn(r"Hello\NWorld", content)
+            self.assertIn(r"你好\N世界", content)
+            self.assertNotIn("Hello\nWorld", content)
 
     def test_video_renderer_supports_mp4_and_mkv_containers(self):
         with tempfile.TemporaryDirectory() as folder:

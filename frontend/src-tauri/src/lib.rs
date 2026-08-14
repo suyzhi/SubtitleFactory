@@ -257,8 +257,44 @@ fn choose_save_destination(
     }
     dialog
         .blocking_save_file()
-        .map(|value| value.into_path().map_err(|error| error.to_string()))
+        .map(|value| {
+            value
+                .into_path()
+                .map(|path| normalize_repeated_save_extension(path, suggested_name))
+                .map_err(|error| error.to_string())
+        })
         .transpose()
+}
+
+fn normalize_repeated_save_extension(mut destination: PathBuf, suggested_name: &str) -> PathBuf {
+    let Some(extension) = Path::new(suggested_name)
+        .extension()
+        .and_then(|value| value.to_str())
+        .filter(|value| !value.is_empty())
+    else {
+        return destination;
+    };
+    let Some(file_name) = destination
+        .file_name()
+        .and_then(|value| value.to_str())
+        .map(str::to_owned)
+    else {
+        return destination;
+    };
+    let suffix = format!(".{extension}");
+    let repeated_suffix = format!("{suffix}{suffix}");
+    if file_name
+        .to_ascii_lowercase()
+        .ends_with(&repeated_suffix.to_ascii_lowercase())
+    {
+        let normalized = destination.with_file_name(&file_name[..file_name.len() - suffix.len()]);
+        // The native panel confirmed the literal returned path. Never turn that
+        // confirmation into an unconfirmed overwrite of a different file.
+        if !normalized.exists() {
+            destination = normalized;
+        }
+    }
+    destination
 }
 
 fn stream_copy(source: &Path, destination: &Path) -> Result<u64, String> {
@@ -590,8 +626,9 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::{
-        clear_stale_backend_startup_error, safe_suggested_name, stream_copy, validate_managed_path,
-        write_atomically, BackendProcess, BACKEND_STARTUP_ERROR_FILE,
+        clear_stale_backend_startup_error, normalize_repeated_save_extension,
+        safe_suggested_name, stream_copy, validate_managed_path, write_atomically, BackendProcess,
+        BACKEND_STARTUP_ERROR_FILE,
     };
     use std::{
         fs, io,
@@ -705,6 +742,44 @@ mod tests {
             "export.srt"
         );
         assert!(safe_suggested_name("\n", None).is_err());
+    }
+
+    #[test]
+    fn native_save_destination_does_not_duplicate_the_expected_extension() {
+        assert_eq!(
+            normalize_repeated_save_extension(
+                "/tmp/qa-content-pack.zip.zip".into(),
+                "content-pack.zip",
+            ),
+            Path::new("/tmp/qa-content-pack.zip")
+        );
+        assert_eq!(
+            normalize_repeated_save_extension(
+                "/tmp/QA-CONTENT-PACK.ZIP.ZIP".into(),
+                "content-pack.zip",
+            ),
+            Path::new("/tmp/QA-CONTENT-PACK.ZIP")
+        );
+        assert_eq!(
+            normalize_repeated_save_extension(
+                "/tmp/archive.tar.zip".into(),
+                "content-pack.zip",
+            ),
+            Path::new("/tmp/archive.tar.zip")
+        );
+
+        let test_dir = isolated_test_dir("save-extension-test");
+        fs::create_dir_all(&test_dir).expect("create save extension test directory");
+        let existing = test_dir.join("existing.zip");
+        fs::write(&existing, b"keep").expect("write existing intended destination");
+        assert_eq!(
+            normalize_repeated_save_extension(
+                test_dir.join("existing.zip.zip"),
+                "content-pack.zip",
+            ),
+            test_dir.join("existing.zip.zip")
+        );
+        fs::remove_dir_all(&test_dir).expect("remove save extension test directory");
     }
 
     #[test]

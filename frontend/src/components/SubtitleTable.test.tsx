@@ -2,14 +2,14 @@
 
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Project, SubtitleSegment } from './types';
-import { SubtitleTable } from './App';
-import { deriveProcessSteps } from './processSteps';
+import type { Project, SubtitleSegment } from '../types';
+import SubtitleTable from './SubtitleTable';
+import { deriveProcessSteps } from '../processSteps';
 import {
   buildSubtitleRowOffsets,
   findSubtitleFocusIndex,
   getSubtitleWindowRange,
-} from './subtitleTableVirtualization';
+} from '../subtitleTableVirtualization';
 
 vi.mock('@tauri-apps/api/window', () => ({
   getCurrentWindow: vi.fn(),

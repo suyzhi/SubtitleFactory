@@ -18,6 +18,10 @@ vi.mock('../api/backend', async importOriginal => {
       ready: false, segmentation_model: null, embedding_model: null, managed_directory: '',
     }),
     startOCR: vi.fn().mockResolvedValue({ task_id: 'ocr-task' }),
+    commitOCR: vi.fn().mockResolvedValue({
+      revision: 2, operation_id: 'ocr-import', operation: 'import_subtitles',
+      affected_count: 1, segments: [],
+    }),
     getTaskStatus: vi.fn()
       .mockResolvedValueOnce({
         id: 'ocr-task', project_id: 'project', type: 'ocr', status: 'running',
@@ -79,5 +83,40 @@ describe('SmartToolsPanel task polling', () => {
 
     expect(screen.queryByText('使用自定义模型文件')).not.toBeInTheDocument();
     expect(await screen.findByText('首次使用需准备离线模型')).toBeInTheDocument();
+  });
+
+  it('states that committing OCR replaces the current track and remains undoable', async () => {
+    vi.mocked(api.getTaskStatus).mockResolvedValueOnce({
+      id: 'ocr-task', project_id: 'project', type: 'ocr', status: 'success',
+      step: 'ocr_preview', progress: 100, message: '完成', error: null,
+      created_at: '', updated_at: '',
+      details: { ocr_preview: [{ start: 0, end: 1, text: 'OCR 字幕', confidence: .95 }] },
+      logs: [],
+    });
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const onEditorResult = vi.fn();
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={client}>
+        <SmartToolsPanel
+          projectId="project"
+          revision={1}
+          duration={2}
+          onEditorResult={onEditorResult}
+          onProjectChanged={vi.fn()}
+        />
+      </QueryClientProvider>,
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: '生成 OCR 预览' }));
+    const commit = await screen.findByRole('button', { name: '替换当前字幕（可撤销）' });
+    expect(screen.queryByText(/新字幕轨/)).not.toBeInTheDocument();
+    fireEvent.click(commit);
+
+    await waitFor(() => expect(api.commitOCR).toHaveBeenCalledWith('project', 1, [
+      { start: 0, end: 1, text: 'OCR 字幕', confidence: .95 },
+    ]));
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining('替换当前字幕'));
+    expect(onEditorResult).toHaveBeenCalled();
   });
 });

@@ -164,6 +164,23 @@ describe('ContentCenter', () => {
     expect(await screen.findByText('已保存')).toBeInTheDocument();
   });
 
+  it('renames a publication pack with an in-app form', async () => {
+    const renamed = { ...pack, name: '访谈发布包', revision: 5 };
+    vi.mocked(api.updateContentPack).mockResolvedValue(renamed);
+    const prompt = vi.spyOn(window, 'prompt');
+    const user = userEvent.setup();
+    render(<ContentCenter project={project} projectRevision={3} hasSegments onPreview={() => undefined} onMessage={() => undefined}/>);
+
+    await user.click(await screen.findByRole('button', { name: '重命名' }));
+    const input = screen.getByRole('textbox', { name: '发布包名称' });
+    await user.clear(input);
+    await user.type(input, '访谈发布包');
+    await user.click(screen.getByRole('button', { name: '保存' }));
+
+    await waitFor(() => expect(api.updateContentPack).toHaveBeenCalledWith('pack-1', '访谈发布包', 4));
+    expect(prompt).not.toHaveBeenCalled();
+  });
+
   it('saves a second aspect ratio before submitting a multi-output render', async () => {
     const nextSet: ClipSet = {
       ...clipSet,

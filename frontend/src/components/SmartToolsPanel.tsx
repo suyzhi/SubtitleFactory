@@ -128,10 +128,10 @@ export default function SmartToolsPanel({ projectId, revision, duration, onEdito
   }
 
   async function commitOCR() {
-    if (!ocrCues.length || !window.confirm(`将 ${ocrCues.length} 条 OCR 结果作为新字幕轨导入？当前字幕可通过撤销恢复。`)) return;
+    if (!ocrCues.length || !window.confirm(`将以 ${ocrCues.length} 条 OCR 结果替换当前字幕。此操作会保存为一条历史记录，可立即撤销恢复。继续吗？`)) return;
     try {
       const result = await api.commitOCR(projectId, revision, ocrCues);
-      onEditorResult(result); setOcrCues([]); setMessage('OCR 字幕已导入，可随时撤销');
+      onEditorResult(result); setOcrCues([]); setMessage('OCR 结果已替换当前字幕，可随时撤销恢复');
     } catch (error) { setMessage(error instanceof Error ? error.message : String(error)); }
   }
 
@@ -153,13 +153,13 @@ export default function SmartToolsPanel({ projectId, revision, duration, onEdito
     </section>
 
     <section className="smart-tool-card" aria-labelledby="ocr-tools-title">
-      <header><div><small>macOS Vision · 预览后导入</small><h2 id="ocr-tools-title">硬字幕 OCR</h2></div><span>{ocrCues.length ? `${ocrCues.length} 条预览` : '不会覆盖字幕'}</span></header>
+      <header><div><small>macOS Vision · 预览后确认</small><h2 id="ocr-tools-title">硬字幕 OCR</h2></div><span>{ocrCues.length ? `${ocrCues.length} 条预览` : '预览不会改动字幕'}</span></header>
       <div className="ocr-region-grid">{(['x', 'y', 'width', 'height'] as const).map(key => <label key={key}>{({x:'左',y:'上',width:'宽',height:'高'} as const)[key]}（%）<input type="number" min="0" max="100" value={ocrRegion[key]} onChange={event => setOcrRegion(current => ({ ...current, [key]: Number(event.target.value) }))}/></label>)}</div>
       <div className="ocr-region-preview"><span style={{ left: `${ocrRegion.x}%`, top: `${ocrRegion.y}%`, width: `${ocrRegion.width}%`, height: `${ocrRegion.height}%` }}>字幕识别区域</span></div>
       <div className="ocr-time-grid"><label>入点（秒）<input type="number" min="0" step="0.1" value={ocrStart} onChange={event => setOcrStart(Number(event.target.value))}/></label><label>出点（秒）<input type="number" min="0.1" step="0.1" value={ocrEnd} onChange={event => setOcrEnd(Number(event.target.value))}/></label><label>采样间隔<input type="number" min="0.2" max="3" step="0.1" value={ocrInterval} onChange={event => setOcrInterval(Number(event.target.value))}/></label></div>
       <button className="button primary" disabled={ocrEnd <= ocrStart || task?.status === 'running'} onClick={() => void startOCR()}>生成 OCR 预览</button>
       {ocrCues.length > 0 && <div className="ocr-preview-list"><header><strong>识别预览</strong><small>平均置信度 {Math.round(averageConfidence * 100)}%</small></header>{ocrCues.slice(0, 100).map((cue, index) => <div key={`${cue.start}-${index}`}><time>{cue.start.toFixed(2)}–{cue.end.toFixed(2)}</time><span>{cue.text}</span><em>{Math.round(Number(cue.confidence || 0) * 100)}%</em></div>)}</div>}
-      {ocrCues.length > 0 && <button className="button" onClick={() => void commitOCR()}>确认导入为新字幕轨</button>}
+      {ocrCues.length > 0 && <button className="button" onClick={() => void commitOCR()}>替换当前字幕（可撤销）</button>}
     </section>
     <section className="cloud-consent-card"><header><div><small>默认关闭</small><h3>云端增强授权</h3></div><p>本地能力不会读取这些授权。开启后，也只有主动使用对应云端增强操作时才会上传所说明的范围。</p></header><div>{(['ocr','speaker','quality'] as const).map(capability => { const record = authorizations.data?.authorizations.find(item => item.capability === capability); const granted = Boolean(record?.granted); const label = capability === 'ocr' ? 'OCR' : capability === 'speaker' ? '说话人增强' : 'AI 质检'; return <label key={capability}><span><strong>{label}</strong><small>{granted ? `已授权 · ${record?.granted_at || ''}` : '仅本地运行'}</small></span><input type="checkbox" checked={granted} onChange={event => { const next = event.target.checked; if (next && !window.confirm(`启用${label}云端授权后，只有在你主动选择云端增强时才会上传相关${capability === 'speaker' ? '音频片段' : '内容'}。继续吗？`)) return; void api.setCloudAuthorization(capability, next).then(() => client.invalidateQueries({ queryKey: ['cloud-authorizations'] })); }}/></label>; })}</div></section>
     {(message || task) && <aside className={`smart-task-status ${task?.status || ''}`} role="status"><strong>{task?.message || message}</strong>{task && <span>{Math.round(task.progress || 0)}%</span>}{task?.error && <small>{task.error}</small>}</aside>}

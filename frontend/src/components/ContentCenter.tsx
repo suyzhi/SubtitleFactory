@@ -195,6 +195,7 @@ function PublicationPacks({
   const [outputLanguage, setOutputLanguage] = useState('auto');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [renameDraft, setRenameDraft] = useState<string | null>(null);
   const alive = useRef(true);
 
   useEffect(() => {
@@ -220,6 +221,8 @@ function PublicationPacks({
     setPacks([]);
     void refresh().catch(reason => setError(errorMessage(reason)));
   }, [project.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => setRenameDraft(null), [selected?.id]);
 
   const waitForTask = useCallback(async (taskId: string, packId: string) => {
     while (alive.current) {
@@ -271,13 +274,19 @@ function PublicationPacks({
     } catch (reason) { setError(errorMessage(reason)); }
   };
 
-  const rename = async () => {
-    if (!selected) return;
-    const next = window.prompt('发布包名称', selected.name)?.trim();
-    if (!next || next === selected.name) return;
+  const rename = () => {
+    if (selected) setRenameDraft(selected.name);
+  };
+
+  const saveRename = async () => {
+    if (!selected || renameDraft === null) return;
+    const next = renameDraft.trim();
+    if (!next) return;
+    if (next === selected.name) { setRenameDraft(null); return; }
     try {
       const pack = await api.updateContentPack(selected.id, next, selected.revision);
       setSelected(pack);
+      setRenameDraft(null);
       await refresh(pack.id);
     } catch (reason) { setError(errorMessage(reason)); }
   };
@@ -330,11 +339,17 @@ function PublicationPacks({
       {selected && <>
         <header className="content-pack-toolbar">
           <div>
-            <span><strong>{selected.name}</strong>{selected.stale && <em>源字幕已更新</em>}</span>
+            {renameDraft === null
+              ? <span><strong>{selected.name}</strong>{selected.stale && <em>源字幕已更新</em>}</span>
+              : <form className="content-pack-rename" onSubmit={event => { event.preventDefault(); void saveRename(); }}>
+                <input autoFocus aria-label="发布包名称" maxLength={120} value={renameDraft} onChange={event => setRenameDraft(event.target.value)} onKeyDown={event => { if (event.key === 'Escape') setRenameDraft(null); }}/>
+                <button className="button primary" disabled={!renameDraft.trim()}>保存</button>
+                <button type="button" className="button secondary" onClick={() => setRenameDraft(null)}>取消</button>
+              </form>}
             <small>{selected.provider_id || '内容服务'} · {selected.model || '默认模型'} · 字幕修订 {selected.source_revision}</small>
           </div>
           <div>
-            <button className="button secondary" onClick={rename}>重命名</button>
+            <button className="button secondary" disabled={renameDraft !== null} onClick={rename}>重命名</button>
             <button className="button secondary" onClick={() => void navigator.clipboard.writeText(JSON.stringify(selected.sections || [], null, 2)).then(() => onMessage('发布包结构已复制'))}>复制</button>
             <button className="button secondary" onClick={() => void exportPack()}>导出 ZIP</button>
             <button className="button secondary danger" onClick={() => void remove()}>删除</button>
