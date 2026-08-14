@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.1 工程改进 — 2026-08-14
+
+- Split the monolithic `App.tsx` into the `SubtitleTable` component (with colocated CSS), `DeferredPanel`, and shared display utilities, keeping the release entry chain and UI markers intact.
+- Introduced a gradual backend quality gate: ruff (E4/E7/E9/F/I/B) and core-layer mypy with zero errors, log rotation for `app.log`, and disabled interactive API docs in frozen releases.
+- Added an offline deterministic end-to-end API test covering create → transcribe → edit/lock → SRT export with mocked inference.
+- Added the arm64 release-packaging workflow (tag or manual trigger) alongside the quality-gate ruff/mypy steps.
+
 ## 0.4.1 — 2026-08-12
 
 - Replaced the legacy three-column launch surface with a dedicated project library and a separate professional project workspace inspired by Final Cut Pro.
