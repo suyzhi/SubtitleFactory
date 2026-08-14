@@ -40,8 +40,8 @@ label:hover > input:not(:disabled), label:hover > select:not(:disabled) { filter
 ::selection { background: color-mix(in srgb, var(--accent) 32%, transparent); }
 ::-webkit-scrollbar { width: 7px; height: 7px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: #d5cebd; border-radius: 8px; }
-::-webkit-scrollbar-thumb:hover { background: #c9c2ae; }
+::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--text-3) 42%, transparent); border-radius: 8px; }
+::-webkit-scrollbar-thumb:hover { background: color-mix(in srgb, var(--text-3) 62%, transparent); }
 
 .pro-app,
 .settings-backdrop {
@@ -2691,3 +2691,73 @@ body.is-resizing * { transition: none !important; }
   .content-pack-toolbar > div:last-child { max-width: 310px; }
   .clip-layout-grid { grid-template-columns: minmax(0, 1fr); }
 }
+
+/* ══ 组件补齐与界面美化 ══
+   此前一批状态性元素（空状态、错误卡片、日志徽标等）没有对应样式，
+   以下规则补齐它们，并统一焦点环、主题感知滚动条与播放器空状态。 */
+
+/* ── 键盘焦点环（鼠标点击不触发） ── */
+:focus-visible { outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent); outline-offset: 2px; border-radius: 4px; }
+
+/* ── 播放器空状态：居中于黑色画布之上 ── */
+.pro-player .player-empty {
+  position: absolute; inset: 0; z-index: 1;
+  display: grid; place-items: center; align-content: center; gap: 12px;
+  padding: 24px; text-align: center;
+  color: rgba(255, 255, 255, .58); font-size: 12px; letter-spacing: .05em;
+  background:
+    radial-gradient(62% 58% at 50% 40%, rgba(255, 255, 255, .05), transparent 72%),
+    linear-gradient(180deg, rgba(255, 255, 255, .02), transparent 45%);
+  pointer-events: none;
+}
+.pro-player .player-empty::before {
+  content: '▶';
+  display: grid; place-items: center; width: 48px; height: 48px;
+  border: 1px solid rgba(255, 255, 255, .16); border-radius: 50%;
+  color: rgba(255, 255, 255, .48); font-size: 15px;
+}
+
+/* ── 流程时间线：空状态、步骤序号与「当前」徽标 ── */
+.process-empty {
+  padding: 16px 10px; text-align: center;
+  color: var(--text-3); font-size: 10px;
+  border: 1px dashed var(--border); border-radius: 7px;
+}
+.step-indicator .step-number { align-self: center; color: var(--text-3); font-size: 7px; }
+.step-badge {
+  margin-left: 6px; padding: 1px 6px; border-radius: 99px;
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  color: var(--accent); font-size: 8px; font-weight: 600;
+}
+
+/* ── 运行日志：级别图标着色、详情与建议、空状态 ── */
+.log-level-icon { width: 15px; flex: 0 0 15px; text-align: center; font-size: 9px; color: var(--text-3); }
+.log-info .log-level-icon { color: var(--accent); }
+.log-warning .log-level-icon { color: var(--yellow); }
+.log-error .log-level-icon { color: var(--red); }
+.log-entry { transition: background-color .16s ease, color .16s ease; }
+.log-entry.log-error { background: color-mix(in srgb, var(--red) 6%, transparent); }
+.log-entry.log-error:hover { background: color-mix(in srgb, var(--red) 10%, transparent); }
+.log-detail-text {
+  flex-basis: 100%; padding: 7px 9px; margin-top: 2px;
+  border-left: 2px solid var(--accent); border-radius: 0 6px 6px 0;
+  background: var(--surface-2); color: var(--text-2);
+  font: 9px/1.55 var(--mono); white-space: pre-wrap; word-break: break-word;
+}
+.log-suggestion { flex-basis: 100%; color: var(--yellow); font-size: 9px; }
+.log-empty-text { padding: 20px 0; text-align: center; color: var(--text-3); font-size: 10px; }
+
+/* ── 转写统计：标签 ── */
+.stat-label { color: var(--text-3); }
+
+/* ── 全局任务抽屉：失败卡片 ── */
+.global-task-failure {
+  grid-column: 1 / -1; display: grid; gap: 3px; padding: 9px 11px;
+  border: 1px solid color-mix(in srgb, var(--red) 30%, transparent); border-radius: 9px;
+  background: color-mix(in srgb, var(--red) 9%, transparent);
+}
+.global-task-failure strong { color: var(--red); font-size: 11px; }
+.global-task-failure span { color: var(--text-2); font-size: 10px; }
+
+/* ── 播放列表：条目错误 ── */
+.playlist-item-error { display: block; margin-top: 2px; color: var(--red); }
