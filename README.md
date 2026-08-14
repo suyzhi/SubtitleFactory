@@ -122,6 +122,31 @@ cd frontend
 npx tauri dev
 ```
 
+### 质量门
+
+提交前请运行与 CI 一致的检查（CI 在 push / pull_request 上自动执行）：
+
+```bash
+# 后端：测试、lint 与核心层类型检查（配置见 backend/pyproject.toml）
+cd backend
+./.venv/bin/python -m pytest -q tests
+./.venv/bin/ruff check app tests sidecar_main.py
+./.venv/bin/mypy app/api app/models app/utils app/security.py app/main.py app/version.py
+
+# 前端：类型、lint、测试与生产构建
+cd ../frontend
+npx tsc -b
+npm run lint
+npm test
+npm run build
+```
+
+`mypy` 采用渐进式门禁：`app/api`、`app/models`、`app/utils`、`app/security.py` 与 `app/main.py` 严格要求零错误；`app/services` 层暂时静默跟进，补齐注解后再逐模块解除豁免。
+
+### 发布流水线
+
+`.github/workflows/release.yml` 在 `v*` 标签推送或手动触发时，于 Apple Silicon (arm64) macOS runner 上执行完整打包验收（含 FFmpeg 源码构建、sidecar 冻结、DMG 内外哈希对比与真实启动验收），并上传 DMG 与校验文件；runner 标签可通过 `workflow_dispatch` 按可用区调整。
+
 ## 发布构建
 
 首次构建先从 FFmpeg 官方源码准备可再分发的 LGPL arm64 运行时：
