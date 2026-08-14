@@ -19,8 +19,8 @@ from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 from ..utils.config import DOWNLOADS_DIR
 from ..utils.task_manager import TaskCancelled, task_manager
-from .download_errors import DownloadServiceError
 from .distribution import require_youtube_feature
+from .download_errors import DownloadServiceError
 from .runtime_diagnostics import (
     resolve_deno_path,
     resolve_ffmpeg_path,

@@ -1,5 +1,5 @@
-import os
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -17,18 +17,18 @@ if "SUBTITLE_FACTORY_DATA_DIR" not in os.environ:
 
 from app import security
 from app.main import app
-from app.services.distribution import (
-    APP_STORE_CHANNEL,
-    CHANNEL_ENV,
-    DIRECT_CHANNEL,
-    distribution_capabilities,
-)
 from app.models.database import get_db
 from app.services import (
     app_settings,
     project_packages,
     runtime_diagnostics,
     watch_runtime,
+)
+from app.services.distribution import (
+    APP_STORE_CHANNEL,
+    CHANNEL_ENV,
+    DIRECT_CHANNEL,
+    distribution_capabilities,
 )
 from app.utils import config
 from app.utils.task_manager import task_manager

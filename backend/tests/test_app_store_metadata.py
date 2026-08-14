@@ -2,7 +2,6 @@ import importlib.util
 import json
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / "scripts/verify-app-store-metadata.py"
 SPEC = importlib.util.spec_from_file_location("verify_app_store_metadata", SCRIPT)

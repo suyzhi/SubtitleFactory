@@ -4,7 +4,6 @@ from fastapi import APIRouter, Query
 
 from ..services.search_index import search_segments
 
-
 router = APIRouter(prefix="/api")
 
 

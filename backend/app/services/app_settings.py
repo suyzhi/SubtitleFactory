@@ -9,7 +9,6 @@ from typing import Any, Mapping
 from ..models.database import get_db
 from .distribution import distribution_capabilities, is_external_model_reference
 
-
 APP_SETTINGS_DEFAULTS: dict[str, Any] = {
     "default_workflow": "automatic",
     "auto_save": True,

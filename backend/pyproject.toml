@@ -1,0 +1,31 @@
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+extend-exclude = [".venv", "build", "dist", "runtime", "data", "logs"]
+
+[tool.ruff.lint]
+# E4/E7/E9 语法与真实性错误；F pyflakes；I 导入排序；B bugbear。
+# 排除项：E402（延迟导入/顶层 sys.path 是既有架构）、E701/E702（单行语句是既有风格）、
+# B008（FastAPI 的 Query/File 默认值惯用法）。
+select = ["E4", "E7", "E9", "F", "I", "B"]
+ignore = ["E402", "E701", "E702", "B008"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["app"]
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
+exclude = ["\\.venv/", "^build/", "^dist/", "^runtime/", "^data/", "^logs/"]
+# 渐进式类型化：先要求函数签名健全（缺注解不报错），后续再收紧。
+disallow_untyped_defs = false
+check_untyped_defs = false
+warn_unused_ignores = false
+warn_redundant_casts = false
+
+# 渐进式类型化门禁：核心 API/模型/安全层严格检查；services 层静默跟进，
+# 待其类型注解补齐后再逐模块解除豁免。
+[[tool.mypy.overrides]]
+module = "app.services.*"
+follow_imports = "silent"
+

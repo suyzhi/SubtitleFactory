@@ -11,7 +11,6 @@ import httpx
 from ..utils.config import MODELS_DIR
 from ..utils.task_manager import task_manager
 
-
 ROOT = Path(MODELS_DIR) / "speaker-diarization"
 SEGMENTATION_URL = "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-segmentation-models/sherpa-onnx-pyannote-segmentation-3-0.tar.bz2"
 EMBEDDING_URL = "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx"

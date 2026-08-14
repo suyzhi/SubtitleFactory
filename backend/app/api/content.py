@@ -9,9 +9,9 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from ..models.database import get_db
-from ..utils.config import EXPORTS_DIR
 from ..services.content_packs import (
     ContentPackError,
+    _load_pack,
     create_content_pack,
     delete_pack,
     export_content_pack,
@@ -19,9 +19,8 @@ from ..services.content_packs import (
     regenerate_section,
     update_pack,
     update_section,
-    _load_pack,
 )
-
+from ..utils.config import EXPORTS_DIR
 
 router = APIRouter(prefix="/api")
 

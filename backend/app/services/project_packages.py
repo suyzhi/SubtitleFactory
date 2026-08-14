@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import shutil
 import time
 import uuid
@@ -14,7 +13,6 @@ from pathlib import Path, PurePosixPath
 from ..models.database import get_db
 from ..utils.config import EXPORTS_DIR, PROJECTS_DIR
 from .distribution import distribution_capabilities
-
 
 PACKAGE_VERSION = 2
 SUPPORTED_PACKAGE_VERSIONS = {1, 2}

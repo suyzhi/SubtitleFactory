@@ -12,8 +12,8 @@ import platform
 import shutil
 import subprocess
 import sys
-from importlib import import_module
 from dataclasses import asdict, dataclass
+from importlib import import_module
 from pathlib import Path
 from typing import Any, Iterable, Sequence
 

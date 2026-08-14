@@ -14,7 +14,6 @@ from .model_catalog import (
     resolve_local_model,
 )
 
-
 _PUNCTUATION_ONLY = re.compile(r"^[\W_]+$", re.UNICODE)
 
 

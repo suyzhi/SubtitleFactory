@@ -31,7 +31,6 @@ from .sherpa_catalog import (
     ManagedSherpaModel,
 )
 
-
 _MANIFEST_NAME = ".subtitle-factory-manifest.json"
 _DOWNLOAD_LOCK = threading.Lock()
 _PUNCTUATION_ONLY = re.compile(r"^[\W_]+$", re.UNICODE)

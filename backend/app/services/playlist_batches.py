@@ -16,16 +16,15 @@ from urllib.parse import parse_qs, urlparse
 from ..models.database import get_db, project_to_dict
 from ..utils.config import PROJECTS_DIR
 from ..utils.task_manager import TaskCancelled, task_manager
-from .app_settings import get_effective_app_settings as get_app_settings
-from .ai_settings import get_ai_settings
 from .ai_providers import assigned_provider
+from .ai_settings import get_ai_settings
+from .app_settings import get_effective_app_settings as get_app_settings
 from .audio_extractor import extract_audio
-from .download_errors import DownloadServiceError
 from .distribution import require_youtube_feature
+from .download_errors import DownloadServiceError
 from .subtitle_cleaner import clean_subtitles
 from .subtitle_translator import translate_subtitles
 from .transcriber import transcribe_audio
-
 
 PLAYLIST_KIND = "youtube_playlist"
 STAGE_ORDER = ("download", "extract_audio", "transcribe", "clean", "translate")
@@ -904,7 +903,6 @@ def resume_batch(batch_id: str) -> dict[str, Any]:
             "SELECT item_id,stage,task_id FROM batch_item_stages WHERE item_id IN (SELECT id FROM batch_items WHERE batch_id=?) AND status='paused'",
             (batch_id,),
         ).fetchall()
-        item_ids = [row[0] for row in db.execute("SELECT id FROM batch_items WHERE batch_id=? AND source_state='active'", (batch_id,)).fetchall()]
         db.commit()
     finally:
         db.close()
@@ -1002,7 +1000,6 @@ def enable_batch_stage(batch_id: str, stage: str, configuration: dict[str, Any])
                 (snapshot, _now(), needed_stage, batch_id),
             )
         db.execute("UPDATE batches SET configuration_json=?,paused=0,status='running',updated_at=? WHERE id=?", (snapshot, _now(), batch_id))
-        item_ids = [row[0] for row in db.execute("SELECT id FROM batch_items WHERE batch_id=? AND source_state='active'", (batch_id,)).fetchall()]
         db.commit()
     finally:
         db.close()

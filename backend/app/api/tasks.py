@@ -2,14 +2,14 @@
 字幕工厂 - 任务状态 API
 """
 
-import logging
 import json
+import logging
 
 from fastapi import APIRouter, HTTPException
 
-from ..utils.task_manager import task_manager
 from ..models.database import get_db
 from ..services.subtitle_cleaner import retry_clean_batch
+from ..utils.task_manager import task_manager
 
 logger = logging.getLogger(__name__)
 
@@ -173,6 +173,8 @@ def _start_batch_retry(original: dict, batch_index: int) -> dict:
     if original.get("type") != "clean":
         raise HTTPException(400, "当前仅支持重试字幕整理批次")
     project_id = original.get("project_id")
+    if not isinstance(project_id, str):
+        raise HTTPException(400, "任务记录缺少有效的项目 ID")
     active = task_manager.active_task_ids(project_id)
     if active:
         raise HTTPException(409, "当前项目还有任务正在运行，请完成后再重试")

@@ -7,7 +7,6 @@ from typing import Optional
 
 import av
 
-
 logger = logging.getLogger(__name__)
 
 THUMBNAIL_MAX_WIDTH = 480

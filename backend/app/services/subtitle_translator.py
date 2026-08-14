@@ -10,19 +10,18 @@ import logging
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import List
 
-from ..utils.task_manager import TaskCancelled, task_manager
 from ..models.database import get_db
+from ..utils.task_manager import TaskCancelled, task_manager
 from .ai_providers import (
     AIProviderRequestError,
     assigned_provider,
     prepare_chat_payload,
     raise_for_provider_status,
 )
+from .editor import SEGMENT_COLUMNS
 from .subtitle_cleaner import AIOutputLengthError, _validate_batch_results
 from .terminology import exact_memory, relevant_terms, remember_translation
-from .editor import SEGMENT_COLUMNS
 
 logger = logging.getLogger(__name__)
 

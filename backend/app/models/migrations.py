@@ -12,7 +12,6 @@ import time
 from pathlib import Path
 from typing import Callable
 
-
 CURRENT_SCHEMA_VERSION = 12
 
 

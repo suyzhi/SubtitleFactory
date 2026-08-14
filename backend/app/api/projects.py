@@ -2,49 +2,101 @@
 字幕工厂 - 项目 API 路由
 """
 
-import uuid
-import os
-import time
-import json
-import shutil
-import logging
-import wave
-import threading
 import importlib.util
+import json
+import logging
+import os
 import re
+import shutil
+import threading
+import time
+import uuid
+import wave
 from importlib import import_module
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Query
+from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse
 
 from ..models.database import get_db, init_db, project_to_dict, segment_to_dict
 from ..models.schemas import (
-    ProjectCreate, ProjectResponse, ProjectUpdate, SegmentResponse,
-    ProjectGroupUpdate, ProjectMediaModeUpdate, SegmentUpdate, SegmentOperationItem, SegmentOperationRequest, ExportRequest, ProcessingConfig,
-    WorkflowRequest, TranscriptionRetryRequest, ModelPrepareRequest, MediaSelectionUpdate,
-    ModelScanRequest, ModelImportRequest,
+    ExportRequest,
+    MediaSelectionUpdate,
+    ModelImportRequest,
+    ModelPrepareRequest,
+    ModelScanRequest,
+    ProjectCreate,
+    ProjectGroupUpdate,
+    ProjectMediaModeUpdate,
+    ProjectResponse,
+    ProjectUpdate,
+    SegmentOperationItem,
+    SegmentOperationRequest,
+    SegmentUpdate,
+    TranscriptionRetryRequest,
+    WorkflowRequest,
 )
-from ..services.editor import EditorServiceError, execute_operation, import_segment_snapshot
-from ..services.subtitle_importer import parse_subtitle
-from ..utils.config import (
-    DATA_DIR, PROJECTS_DIR, DOWNLOADS_DIR, AUDIO_DIR, SUBTITLES_DIR,
-    EXPORTS_DIR,
-)
-from ..utils.task_manager import task_manager
 from ..security import signed_media_url
 from ..services.app_settings import get_effective_app_settings as get_app_settings
+from ..services.audio_extractor import extract_audio
+from ..services.audio_preview import generate_track_preview
+from ..services.cloud_asr import (
+    FUN_ASR_MODEL_ID,
+    FUN_ASR_RUNTIME,
+    fun_asr_status,
+)
 from ..services.distribution import (
     distribution_capabilities,
     is_external_model_reference,
     require_external_runtime_paths,
     require_youtube_feature,
 )
-from ..services.audio_extractor import extract_audio
-from ..services.audio_preview import generate_track_preview
+from ..services.editor import EditorServiceError, execute_operation, import_segment_snapshot
+from ..services.local_models import (
+    get_imported,
+    register_model,
+    remove_imported,
+    scan_models,
+    validate_imported,
+)
+from ..services.managed_sherpa import (
+    managed_model_status,
+    prepare_managed_model,
+    remove_managed_model,
+)
+from ..services.model_catalog import (
+    MODEL_CATEGORY_ORDER,
+    QWEN_ASR_CATALOG_BY_ID,
+    QWEN_ASR_MODEL_CATALOG,
+    WHISPER_CATALOG_BY_ID,
+    WHISPER_MODEL_CATALOG,
+    prepare_catalog_model,
+    prepare_whisper_model,
+    remove_catalog_model,
+    runtime_model_status,
+)
+from ..services.parakeet_transcriber import (
+    PARAKEET_ARCHIVE_BYTES,
+    PARAKEET_MODEL_ID,
+    PARAKEET_ONNX_MODEL_ID,
+    PARAKEET_SUPPORTED_LANGUAGES,
+    SILERO_VAD_BYTES,
+    prepare_parakeet_model,
+)
+from ..services.playback_info import get_playback_info
+from ..services.sherpa_catalog import (
+    MANAGED_SHERPA_BY_ID,
+    MANAGED_SHERPA_MODELS,
+)
+from ..services.sherpa_catalog import (
+    MODEL_CATEGORY_ORDER as SHERPA_CATEGORY_ORDER,
+)
+from ..services.subtitle_cleaner import clean_subtitles, undo_last_clean
+from ..services.subtitle_exporter import export_ass, export_srt, export_vtt, get_subtitle_path
+from ..services.subtitle_importer import parse_subtitle
+from ..services.subtitle_translator import translate_subtitles
 from ..services.transcriber import (
-    MANAGED_SHERPA_MODEL_IDS,
     PARAKEET_MODEL_IDS,
     QWEN_ASR_MODEL_IDS,
     SUPPORTED_TRANSCRIPTION_MODELS,
@@ -52,47 +104,17 @@ from ..services.transcriber import (
     resolve_transcription_model,
     transcribe_audio,
 )
-from ..services.parakeet_transcriber import (
-    PARAKEET_SUPPORTED_LANGUAGES, PARAKEET_MODEL_ID, PARAKEET_ONNX_MODEL_ID,
-    PARAKEET_ARCHIVE_BYTES, SILERO_VAD_BYTES,
-    prepare_parakeet_model,
-)
-from ..services.model_catalog import (
-    MODEL_CATEGORY_ORDER,
-    QWEN_ASR_CATALOG_BY_ID,
-    QWEN_ASR_MODEL_CATALOG,
-    WHISPER_MODEL_CATALOG,
-    WHISPER_CATALOG_BY_ID,
-    prepare_catalog_model,
-    prepare_whisper_model,
-    remove_catalog_model,
-    runtime_model_status,
-)
-from ..services.cloud_asr import (
-    FUN_ASR_MODEL_ID,
-    FUN_ASR_RUNTIME,
-    fun_asr_status,
-)
-from ..services.managed_sherpa import (
-    managed_model_status,
-    prepare_managed_model,
-    remove_managed_model,
-)
-from ..services.sherpa_catalog import (
-    MANAGED_SHERPA_BY_ID,
-    MANAGED_SHERPA_MODELS,
-    MODEL_CATEGORY_ORDER as SHERPA_CATEGORY_ORDER,
-)
-from ..services.subtitle_cleaner import clean_subtitles, undo_last_clean
-from ..services.subtitle_translator import translate_subtitles
-from ..services.subtitle_exporter import (
-    export_srt, export_vtt, export_ass,
-    get_subtitle_path
-)
 from ..services.video_renderer import burn_subtitles
 from ..services.video_thumbnail import generate_video_thumbnail
-from ..services.playback_info import get_playback_info
-from ..services.local_models import scan_models, register_model, get_imported, validate_imported, remove_imported
+from ..utils.config import (
+    AUDIO_DIR,
+    DATA_DIR,
+    DOWNLOADS_DIR,
+    EXPORTS_DIR,
+    PROJECTS_DIR,
+    SUBTITLES_DIR,
+)
+from ..utils.task_manager import task_manager
 
 logger = logging.getLogger(__name__)
 
@@ -1090,7 +1112,7 @@ def create_project(req: ProjectCreate):
             default_mode = get_app_settings().get("youtube_media_mode")
         except Exception:
             default_mode = "local"
-        media_mode = req.media_mode or default_mode
+        media_mode = (req.media_mode or default_mode) or "local"
         if media_mode not in {"local", "web"}:
             media_mode = "local"
 
@@ -2311,19 +2333,15 @@ def export_subtitles(project_id: str, req: ExportRequest):
     if fmt == "srt":
         out = get_subtitle_path(project_id, "srt")
         export_srt(segments, out, bilingual=bilingual, primary_lang=req.primary_language)
-        media_type = "text/plain"
     elif fmt == "vtt":
         out = get_subtitle_path(project_id, "vtt")
         export_vtt(segments, out, bilingual=bilingual, primary_lang=req.primary_language)
-        media_type = "text/vtt"
     elif fmt == "ass":
         out = get_subtitle_path(project_id, "ass")
         export_ass(segments, out, bilingual=bilingual, primary_lang=req.primary_language, settings=style_settings)
-        media_type = "text/plain"
     elif fmt == "srt-bilingual":
         out = get_subtitle_path(project_id, "bilingual.srt")
         export_srt(segments, out, bilingual=True, primary_lang=req.primary_language)
-        media_type = "text/plain"
     elif fmt in {"mp4", "mkv"}:
         if (
             row["source_type"] == "youtube"

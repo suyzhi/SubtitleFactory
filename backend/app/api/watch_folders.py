@@ -14,7 +14,6 @@ from pydantic import BaseModel, Field
 from ..models.database import get_db
 from ..services.distribution import require_filesystem_automation
 
-
 router = APIRouter(
     prefix="/api",
     dependencies=[Depends(require_filesystem_automation)],

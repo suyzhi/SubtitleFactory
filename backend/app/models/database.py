@@ -10,10 +10,10 @@ import threading
 import time
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
+
+from ..security import signed_media_url
 from ..utils.config import DB_PATH
 from .migrations import run_migrations
-from ..security import signed_media_url
-
 
 _INIT_DB_LOCK = threading.RLock()
 
@@ -438,7 +438,7 @@ def _youtube_video_id(source_url: str | None) -> str | None:
     elif hostname == "youtube.com" or hostname.endswith(".youtube.com"):
         path_parts = [part for part in parsed.path.split("/") if part]
         if path_parts and path_parts[0] == "watch":
-            video_id = (parse_qs(parsed.query).get("v") or [None])[0]
+            video_id = (parse_qs(parsed.query).get("v") or [""])[0]
         elif len(path_parts) >= 2 and path_parts[0] in {"embed", "live", "shorts"}:
             video_id = path_parts[1]
 

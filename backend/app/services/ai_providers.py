@@ -8,7 +8,6 @@ from ..models.database import get_db
 from .ai_settings import PROVIDER_PRESETS
 from .secret_store import get_secret, keychain_enabled, save_secret
 
-
 PRESETS = {item["id"]: item for item in PROVIDER_PRESETS}
 DEEPSEEK_V4_MODELS = {"deepseek-v4-flash", "deepseek-v4-pro"}
 

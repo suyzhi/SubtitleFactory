@@ -1,7 +1,13 @@
 """Scan and register external model directories without copying user files."""
 
-import hashlib, json, os, time, uuid
+import hashlib
+import json
+import os
+import time
+import uuid
 from pathlib import Path
+from typing import overload
+
 from ..models.database import get_db
 
 SKIP = {".git", "_internal", "__pycache__", "node_modules", ".cache"}
@@ -79,6 +85,10 @@ def register_model(path: str, cli_path: str | None = None, display_name: str | N
     ); db.commit(); db.close(); return get_imported(model_id)
 
 
+@overload
+def get_imported(model_id: str) -> dict: ...
+@overload
+def get_imported(model_id: None = None) -> list[dict]: ...
 def get_imported(model_id: str | None = None) -> dict | list[dict]:
     db = get_db()
     rows = db.execute("SELECT * FROM imported_models" + (" WHERE id=?" if model_id else " ORDER BY created_at"), ((model_id,) if model_id else ())).fetchall(); db.close()

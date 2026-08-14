@@ -2,15 +2,15 @@
 字幕工厂 - FastAPI 应用主入口
 """
 
+import logging
 import os
 import sys
-import logging
 import threading
 from contextlib import asynccontextmanager
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
-from fastapi import Depends, FastAPI
-from fastapi import HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.exception_handlers import http_exception_handler
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -20,37 +20,60 @@ from fastapi.responses import JSONResponse
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from .models.database import init_db, mark_interrupted_tasks
-from .utils.config import LOGS_DIR, DATA_DIR, is_frozen_app
 from .services.backups import apply_pending_restore, scheduled_backup
+from .utils.config import DATA_DIR, LOGS_DIR, is_frozen_app
 
 # Restore before importing route modules: a route must never open SQLite and
 # then watch the database file get replaced underneath its connection.
 applied_restore = apply_pending_restore()
 
-from .api import batches, content, clips, editor, maintenance, media, ocr, packages, projects, quality, search, settings, speakers, tasks, templates, terminology, watch_folders
+from .api import (
+    batches,
+    clips,
+    content,
+    editor,
+    maintenance,
+    media,
+    ocr,
+    packages,
+    projects,
+    quality,
+    search,
+    settings,
+    speakers,
+    tasks,
+    templates,
+    terminology,
+    watch_folders,
+)
 from .security import ALLOWED_ORIGINS, require_loopback_session
-from .services.secret_store import migrate_database_secrets
-from .services.watch_runtime import resume_interrupted_workflows, watch_loop
-from .services.playlist_batches import recover_playlist_batches
 from .services.distribution import (
     DistributionPolicyError,
     distribution_capabilities,
     require_project_distribution,
 )
+from .services.playlist_batches import recover_playlist_batches
+from .services.secret_store import migrate_database_secrets
+from .services.watch_runtime import resume_interrupted_workflows, watch_loop
 from .utils.task_manager import TaskCreationBlocked, task_manager
 from .version import VERSION
 
-# ── 日志配置 ──
+# ── 日志配置（轮转：单文件 5 MiB，保留 5 份历史） ──
 os.makedirs(LOGS_DIR, exist_ok=True)
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
     handlers=[
-        logging.FileHandler(LOGS_DIR / "app.log", encoding="utf-8"),
+        RotatingFileHandler(
+            LOGS_DIR / "app.log", maxBytes=5 * 1024 * 1024, backupCount=5, encoding="utf-8",
+        ),
         logging.StreamHandler(),
     ],
 )
 logger = logging.getLogger(__name__)
+
+# 发布版（冻结 sidecar）不对外暴露交互式 API 文档；开发模式保留 /docs 与 /redoc。
+DOCS_ENABLED = not is_frozen_app()
 
 # ── 初始化数据库 ──
 init_db()
@@ -106,6 +129,8 @@ app = FastAPI(
     description="YouTube 视频转写字幕桌面软件的 API 服务",
     version=VERSION,
     lifespan=lifespan,
+    docs_url="/docs" if DOCS_ENABLED else None,
+    redoc_url="/redoc" if DOCS_ENABLED else None,
 )
 
 # ── 仅允许桌面 WebView 与本地开发前端访问 ──
@@ -269,5 +294,8 @@ def health_check():
 logger.info("=" * 50)
 logger.info("字幕工厂 API 启动")
 logger.info(f"数据目录: {DATA_DIR}")
-logger.info(f"文档地址: http://127.0.0.1:8000/docs")
+if DOCS_ENABLED:
+    logger.info("文档地址: http://127.0.0.1:%s/docs", os.getenv("SUBTITLE_FACTORY_PORT", "8000"))
+else:
+    logger.info("交互式 API 文档已在发布版禁用")
 logger.info("=" * 50)

@@ -10,7 +10,6 @@ from __future__ import annotations
 import os
 from dataclasses import asdict, dataclass
 
-
 DIRECT_CHANNEL = "direct"
 APP_STORE_CHANNEL = "app_store"
 CHANNEL_ENV = "SUBTITLE_FACTORY_DISTRIBUTION_CHANNEL"

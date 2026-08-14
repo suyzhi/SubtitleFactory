@@ -10,7 +10,6 @@ from unittest.mock import patch
 import av
 import numpy as np
 
-
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BACKEND_DIR))
 if "SUBTITLE_FACTORY_DATA_DIR" not in os.environ:

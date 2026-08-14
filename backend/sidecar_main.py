@@ -10,7 +10,6 @@ from typing import BinaryIO, Callable
 
 import uvicorn
 
-
 PARENT_WATCHDOG_ENV = "SUBTITLE_FACTORY_PARENT_WATCHDOG"
 RUNTIME_VERIFY_ARGUMENT = "--verify-runtime"
 
@@ -31,11 +30,11 @@ def _verify_runtime_dependencies() -> None:
     import mlx_whisper
     import numpy as np
     import onnxruntime
-    from PIL import Image
     import pysubs2
     import scipy.signal
     import sherpa_onnx
     import tiktoken
+    from PIL import Image
 
     if not mx.is_available(mx.gpu):
         raise RuntimeError("MLX Metal GPU is unavailable")

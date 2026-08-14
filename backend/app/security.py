@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import hmac
 import hashlib
+import hmac
 import os
 import secrets
 import sys
@@ -12,7 +12,6 @@ from urllib.parse import urlencode
 
 from fastapi import Request
 from starlette.responses import JSONResponse
-
 
 DEV_TOKEN = "subtitle-factory-local-development"
 API_TOKEN = os.getenv("SUBTITLE_FACTORY_API_TOKEN") or secrets.token_hex(32)

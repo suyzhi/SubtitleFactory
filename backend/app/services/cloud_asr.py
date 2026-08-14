@@ -16,7 +16,6 @@ from ..models.database import get_db
 from ..utils.task_manager import task_manager
 from .ai_providers import get_provider
 
-
 FUN_ASR_MODEL_ID = "fun-asr-realtime"
 FUN_ASR_RUNTIME = "dashscope_cloud"
 _MAX_CHUNK_FRAMES = 150 * 16_000

@@ -10,8 +10,8 @@ from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app.models import database, migrations
 from app.api import maintenance, terminology
+from app.models import database, migrations
 from app.services import project_packages, waveform
 from app.services.backups import (
     apply_pending_restore,

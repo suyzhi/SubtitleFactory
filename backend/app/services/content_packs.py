@@ -22,7 +22,6 @@ from .ai_providers import (
     raise_for_provider_status,
 )
 
-
 SECTION_ORDER = ("chapters", "summary", "quotes", "youtube", "podcast", "social")
 SECTION_TITLES = {
     "chapters": "章节与时间戳",

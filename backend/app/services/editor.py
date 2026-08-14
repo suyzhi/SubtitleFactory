@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import json
 import hashlib
+import json
 import re
 import time
 import uuid
@@ -15,7 +15,6 @@ from pydantic import ValidationError
 
 from ..models.database import get_db, segment_to_dict
 from ..models.schemas import SegmentOperationItem, SegmentOperationRequest
-
 
 SEGMENT_COLUMNS = (
     "id", "project_id", "idx", "start", "end", "raw_text", "clean_text",

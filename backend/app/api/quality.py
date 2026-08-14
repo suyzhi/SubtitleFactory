@@ -6,12 +6,11 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from ..services.quality import list_issues, scan, set_issue_status
-from ..services.ai_quality import generate_quality_preview
 from ..models.database import get_db
 from ..models.schemas import SegmentOperationItem, SegmentOperationRequest
+from ..services.ai_quality import generate_quality_preview
 from ..services.editor import EditorServiceError, execute_operation
-
+from ..services.quality import list_issues, scan, set_issue_status
 
 router = APIRouter(prefix="/api")
 

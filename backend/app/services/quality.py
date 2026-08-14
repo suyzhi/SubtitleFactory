@@ -10,7 +10,6 @@ import uuid
 
 from ..models.database import get_db
 
-
 DEFAULT_RULES = {
     "min_duration": 0.5,
     "max_duration": 8.0,

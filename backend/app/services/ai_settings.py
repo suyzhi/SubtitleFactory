@@ -7,7 +7,6 @@ from ..models.database import get_db
 from ..utils.config import LLM_API_KEY, LLM_BASE_URL, LLM_MODEL
 from .secret_store import get_secret, keychain_enabled, save_secret
 
-
 PROVIDER_PRESETS = [
     {"id": "deepseek", "name": "DeepSeek", "base_url": "https://api.deepseek.com/v1", "model": "deepseek-v4-flash", "models": ["deepseek-v4-flash", "deepseek-v4-pro"]},
     {"id": "openai", "name": "OpenAI", "base_url": "https://api.openai.com/v1", "model": "gpt-4.1-mini", "models": ["gpt-4.1-mini", "gpt-4.1", "gpt-4o-mini"]},

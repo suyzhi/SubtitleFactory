@@ -12,7 +12,6 @@ from ..models.schemas import SegmentOperationItem, SegmentOperationRequest
 from ..utils.task_manager import task_manager
 from .editor import execute_operation
 
-
 COLORS = ("#5b8cff", "#e46f91", "#55b98f", "#d99c48", "#9b78df", "#4da9c7")
 
 

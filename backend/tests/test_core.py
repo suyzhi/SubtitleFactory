@@ -4,9 +4,9 @@ import tempfile
 import threading
 import time
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
-from pathlib import Path
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BACKEND_DIR))
@@ -15,32 +15,32 @@ if "SUBTITLE_FACTORY_DATA_DIR" not in os.environ:
         prefix="subtitle-factory-tests-",
     )
 
+from app.api.tasks import _task_dict
 from app.models.database import get_db, init_db
+from app.services.ai_providers import (
+    AIProviderRequestError,
+    prepare_chat_payload,
+)
+from app.services.ai_quality import generate_quality_preview
+from app.services.ai_settings import get_ai_settings, save_ai_settings
+from app.services.ffmpeg_encoding import select_h264_encoder_args
 from app.services.subtitle_cleaner import (
     _build_semantic_batches,
+    _call_llm_group,
+    _commit_restructured_segments,
     _compose_final_segments,
     _fingerprint,
     _validate_batch_results,
     _validate_grouped_results,
-    _commit_restructured_segments,
-    _call_llm_group,
     clean_subtitles,
     retry_clean_batch,
     undo_last_clean,
 )
 from app.services.subtitle_exporter import export_ass, export_srt
 from app.services.subtitle_translator import _call_llm_translate
-from app.services.ai_providers import (
-    AIProviderRequestError,
-    prepare_chat_payload,
-)
-from app.services.ai_quality import generate_quality_preview
-from app.services.video_renderer import burn_subtitles
-from app.services.ffmpeg_encoding import select_h264_encoder_args
 from app.services.transcriber import _post_process_segments
-from app.services.ai_settings import get_ai_settings, save_ai_settings
+from app.services.video_renderer import burn_subtitles
 from app.utils.task_manager import TaskManager, task_manager
-from app.api.tasks import _task_dict
 
 
 class TimestampSegmentationTests(unittest.TestCase):
@@ -71,7 +71,8 @@ class TimestampSegmentationTests(unittest.TestCase):
             {"start": 3.2, "end": 4.5, "text": "three"},
         ])
         self.assertEqual([item["index"] for item in output], list(range(1, len(output) + 1)))
-        for previous, current in zip(output, output[1:]):
+        # 错位配对（前一条与后一条比较），长度刻意不等，禁用 B905
+        for previous, current in zip(output, output[1:]):  # noqa: B905
             self.assertLessEqual(previous["end"], current["start"])
             self.assertGreater(current["end"], current["start"])
 
@@ -223,10 +224,11 @@ class AIResultValidationTests(unittest.TestCase):
             {"idx": idx, "start": float(idx - 1), "end": float(idx), "raw_text": text}
             for idx, text in enumerate(["One.", "Two.", "Three.", "Four."], 1)
         ]
-        invalid = lambda: SimpleNamespace(
-            raise_for_status=lambda: None,
-            json=lambda: {"choices": [{"finish_reason": "stop", "message": {"content": "not-json"}}]},
-        )
+        def invalid():
+            return SimpleNamespace(
+                raise_for_status=lambda: None,
+                json=lambda: {"choices": [{"finish_reason": "stop", "message": {"content": "not-json"}}]},
+            )
         left = SimpleNamespace(
             raise_for_status=lambda: None,
             json=lambda: {"choices": [{"finish_reason": "stop", "message": {"content":

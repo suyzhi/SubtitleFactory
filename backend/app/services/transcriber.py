@@ -10,40 +10,26 @@
 重要：不要 list(segments_generator) 阻塞等待所有 segment 生成完毕。
 """
 
-import uuid
-import re
-import math
 import json
-import time as time_module
 import logging
+import re
 import sys
+import time as time_module
+import uuid
 from dataclasses import asdict, dataclass
+from functools import partial
 from pathlib import Path
-from typing import List, Optional
+from typing import List
 
+from ..models.database import get_db
 from ..utils.config import (
-    WHISPER_MODEL,
     MAX_CHARS_CN,
     MAX_CHARS_EN,
-    MIN_DURATION,
     MAX_DURATION,
+    MIN_DURATION,
+    WHISPER_MODEL,
 )
 from ..utils.task_manager import task_manager
-from ..models.database import get_db
-from .parakeet_transcriber import (
-    PARAKEET_MODEL_ID,
-    PARAKEET_ONNX_MODEL_ID,
-    PARAKEET_SUPPORTED_LANGUAGES,
-    create_parakeet_session,
-    get_parakeet_model_status,
-)
-from .model_catalog import (
-    QWEN_ASR_CATALOG_BY_ID,
-    WHISPER_CATALOG_BY_ID,
-    prepare_whisper_model,
-    resolve_local_model,
-    runtime_model_status,
-)
 from .cloud_asr import (
     FUN_ASR_MODEL_ID,
     FUN_ASR_RUNTIME,
@@ -54,6 +40,20 @@ from .managed_sherpa import (
     create_managed_session,
     managed_model_status,
     recommended_ready_model,
+)
+from .model_catalog import (
+    QWEN_ASR_CATALOG_BY_ID,
+    WHISPER_CATALOG_BY_ID,
+    prepare_whisper_model,
+    resolve_local_model,
+    runtime_model_status,
+)
+from .parakeet_transcriber import (
+    PARAKEET_MODEL_ID,
+    PARAKEET_ONNX_MODEL_ID,
+    PARAKEET_SUPPORTED_LANGUAGES,
+    create_parakeet_session,
+    get_parakeet_model_status,
 )
 from .sherpa_catalog import MANAGED_SHERPA_BY_ID
 
@@ -470,6 +470,7 @@ def transcribe_audio(task_id: str, audio_path: str, project_id: str, language: s
         progress_start = session.progress_start
     elif runtime == "mlx" or (imported and imported["format"] == "mlx"):
         from types import SimpleNamespace
+
         import mlx_whisper
         if imported:
             model_path=imported["path"]
@@ -503,8 +504,8 @@ def transcribe_audio(task_id: str, audio_path: str, project_id: str, language: s
         runtime_model_name = f"MLX Whisper {model_id}"
         progress_start = 5.0
     else:
-        from faster_whisper import WhisperModel
         import ctranslate2
+        from faster_whisper import WhisperModel
 
         device = "cuda" if ctranslate2.get_cuda_device_count() > 0 else "cpu"
         compute_type = "float16" if device == "cuda" else "int8"
@@ -576,7 +577,6 @@ def transcribe_audio(task_id: str, audio_path: str, project_id: str, language: s
     # 核心：逐段迭代，边转写边写入
     generated_count = 0
     last_log_time = time_module.time()
-    last_idx = 0
 
     for segment in segments_gen:
         task_manager.checkpoint(task_id)
@@ -642,8 +642,6 @@ def transcribe_audio(task_id: str, audio_path: str, project_id: str, language: s
         if should_log:
             task_manager.add_log(task_id, "info", "语音转写", log_msg)
 
-        last_idx = generated_count
-
     task_manager.checkpoint(task_id)
     if generated_count == 0:
         db_empty = get_db()
@@ -664,7 +662,7 @@ def transcribe_audio(task_id: str, audio_path: str, project_id: str, language: s
     logger.info(f"[Transcriber] 增量转写完成: {generated_count} 条原始字幕")
     task_manager.update_task(
         task_id, step="postprocessing", progress=90,
-        message=f"转写完成，正在进行字幕后处理...",
+        message="转写完成，正在进行字幕后处理...",
         details={
             "is_generating_segments": False,
             "is_postprocessing": True,
@@ -810,7 +808,7 @@ def _segment_word_timings(segment, time_offset: float = 0.0) -> list[dict]:
     source = getattr(segment, "timings", None) or getattr(segment, "words", None) or []
     result: list[dict] = []
     for item in source:
-        getter = item.get if isinstance(item, dict) else lambda key, default=None: getattr(item, key, default)
+        getter = item.get if isinstance(item, dict) else partial(getattr, item)
         text = str(getter("text") or getter("word") or getter("token") or "")
         try:
             start = float(getter("start", getter("startTime", 0.0))) + time_offset

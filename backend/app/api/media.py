@@ -6,7 +6,6 @@ from fastapi import APIRouter, HTTPException, Query
 
 from ..services.waveform import get_waveform
 
-
 router = APIRouter(prefix="/api")
 
 

@@ -4,10 +4,8 @@
 支持导出 SRT、VTT、ASS、双语字幕格式。
 """
 
-import os
-import re
 import logging
-from typing import List, Optional
+import os
 from datetime import timedelta
 
 from ..utils.config import EXPORTS_DIR

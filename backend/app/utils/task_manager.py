@@ -5,13 +5,13 @@
 使用线程池执行后台任务，保证 API 不阻塞。
 """
 
-import uuid
-import time
 import json
 import logging
 import threading
+import time
+import uuid
 from concurrent.futures import Future, ThreadPoolExecutor
-from typing import Optional, Callable
+from typing import Callable, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +54,7 @@ class TaskManager:
             "transcribe": "ml", "workflow": "ml", "render": "ffmpeg",
             "download": "io", "extract_audio": "io", "clean": "network_ai", "translate": "network_ai",
         }.get(task_type, "io")
-        task = {
+        task: dict = {
             "id": task_id,
             "project_id": project_id,
             "type": task_type,

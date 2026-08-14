@@ -628,7 +628,7 @@ def prepare_catalog_model(
             task_manager.checkpoint(task_id)
             prior_complete = completed
 
-            def report(file_bytes: int, resumed: bool) -> None:
+            def report(file_bytes: int, resumed: bool, prior_complete: int = prior_complete, item: CatalogFile = item) -> None:
                 current = min(total, prior_complete + file_bytes)
                 percent = current * 100 / max(total, 1)
                 task_manager.update_task(

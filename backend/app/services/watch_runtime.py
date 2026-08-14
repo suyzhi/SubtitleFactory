@@ -9,7 +9,6 @@ import time
 
 from ..models.database import get_db
 
-
 logger = logging.getLogger(__name__)
 
 

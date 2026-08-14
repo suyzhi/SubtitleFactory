@@ -13,9 +13,9 @@ from ..services.distribution import (
     distribution_capabilities,
     require_external_runtime_paths,
 )
-from ..services.speaker_models import prepare as prepare_speaker_models, status as speaker_model_status
+from ..services.speaker_models import prepare as prepare_speaker_models
+from ..services.speaker_models import status as speaker_model_status
 from ..utils.task_manager import task_manager
-
 
 router = APIRouter(prefix="/api")
 

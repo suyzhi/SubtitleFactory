@@ -13,6 +13,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from ..models.database import get_db
+from ..services.app_settings import get_app_settings
 from ..services.backups import (
     backup_directory,
     create_backup,
@@ -21,11 +22,9 @@ from ..services.backups import (
     pending_restore,
     restore_backup,
 )
-from ..services.app_settings import get_app_settings
 from ..services.search_index import rebuild_search_index, search_index_status
 from ..utils.config import EXPORTS_DIR, LOGS_DIR
 from ..utils.task_manager import task_manager
-
 
 router = APIRouter(prefix="/api")
 

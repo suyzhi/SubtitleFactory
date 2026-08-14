@@ -9,7 +9,6 @@ from pydantic import BaseModel, Field
 
 from ..models.database import get_db
 
-
 router = APIRouter(prefix="/api")
 
 BUILTINS = (

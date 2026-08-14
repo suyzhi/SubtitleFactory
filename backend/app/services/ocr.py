@@ -13,8 +13,8 @@ import tempfile
 from difflib import SequenceMatcher
 from pathlib import Path
 
-from ..utils.task_manager import task_manager
 from ..utils.config import is_frozen_app
+from ..utils.task_manager import task_manager
 from .runtime_diagnostics import resolve_ffmpeg_path
 
 

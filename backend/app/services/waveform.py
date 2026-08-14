@@ -14,7 +14,6 @@ from pathlib import Path
 from ..models.database import get_db
 from ..utils.config import PROJECTS_DIR
 
-
 RESOLUTIONS = (1_000, 4_000, 16_000)
 
 

@@ -5,7 +5,6 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BACKEND_DIR))
 if "SUBTITLE_FACTORY_DATA_DIR" not in os.environ:
@@ -13,13 +12,14 @@ if "SUBTITLE_FACTORY_DATA_DIR" not in os.environ:
         prefix="subtitle-factory-runtime-tests-",
     )
 
+from fastapi import HTTPException
+
+from app.api.projects import _runtime_options, _select_runtime
 from app.services import downloader
 from app.services import ocr as vision_ocr
 from app.services import parakeet_transcriber as parakeet
 from app.services import runtime_diagnostics as runtime
 from app.services.transcriber import resolve_transcription_model
-from app.api.projects import _runtime_options, _select_runtime
-from fastapi import HTTPException
 
 
 def _executable(folder: Path, name: str, output: str = "tool version 1") -> Path:

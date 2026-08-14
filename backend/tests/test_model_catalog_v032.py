@@ -1,5 +1,4 @@
 import hashlib
-import json
 import os
 import sys
 import tempfile
@@ -21,11 +20,11 @@ from app.main import app
 from app.security import API_TOKEN
 from app.services import model_catalog
 from app.services.model_catalog import (
+    QWEN_ASR_CATALOG_BY_ID,
+    WHISPER_CATALOG_BY_ID,
     CatalogFile,
     ModelDownloadError,
     ModelVariant,
-    QWEN_ASR_CATALOG_BY_ID,
-    WHISPER_CATALOG_BY_ID,
 )
 from app.services.parakeet_transcriber import (
     PARAKEET_ARCHIVE_SHA256,
@@ -33,7 +32,6 @@ from app.services.parakeet_transcriber import (
 )
 from app.services.transcriber import resolve_transcription_model
 from app.utils.task_manager import TaskCancelled, task_manager
-
 
 EXPECTED_REPOSITORIES = {
     "tiny": (
@@ -108,7 +106,7 @@ class CatalogContractTests(unittest.TestCase):
         self.assertEqual(set(WHISPER_CATALOG_BY_ID), set(EXPECTED_REPOSITORIES))
         for model_id, expected in EXPECTED_REPOSITORIES.items():
             definition = WHISPER_CATALOG_BY_ID[model_id]
-            for runtime, pair in zip(("cpu", "mlx"), expected):
+            for runtime, pair in zip(("cpu", "mlx"), expected, strict=True):
                 variant = definition.variants[runtime]
                 self.assertEqual((variant.repository, variant.revision), pair)
                 self.assertTrue(variant.files)

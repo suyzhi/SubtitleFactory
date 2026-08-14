@@ -7,7 +7,6 @@ import os
 from ..models.database import get_db
 from ..utils.config import is_frozen_app
 
-
 SERVICE = "com.subtitlefactory.desktop.ai"
 
 

@@ -22,7 +22,6 @@ from urllib.parse import quote
 
 from ..models import database
 
-
 PENDING_RESTORE_MARKER = "pending-restore.json"
 LAST_RESTORE_RECEIPT = "last-restore.json"
 PENDING_RESTORE_PREFIX = "pending-restore-"

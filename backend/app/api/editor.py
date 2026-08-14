@@ -19,7 +19,6 @@ from ..services.editor import (
     save_draft,
 )
 
-
 router = APIRouter(prefix="/api/projects", tags=["editor"])
 
 

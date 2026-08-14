@@ -2,7 +2,6 @@
 
 import os
 import platform
-import re
 import shutil
 import subprocess
 import time
@@ -14,8 +13,27 @@ import httpx
 from fastapi import APIRouter, HTTPException
 
 from ..models.schemas import (
-    AIConnectionTest, AISettingsUpdate, AIProviderUpdate, AIAssignmentsUpdate,
-    AppSettingsUpdate, PathValidationRequest,
+    AIAssignmentsUpdate,
+    AIConnectionTest,
+    AIProviderUpdate,
+    AISettingsUpdate,
+    AppSettingsUpdate,
+    PathValidationRequest,
+)
+from ..services.ai_providers import (
+    get_provider,
+    list_provider_cards,
+    prepare_chat_payload,
+    raise_for_provider_status,
+    record_test,
+    save_provider,
+)
+from ..services.ai_settings import (
+    PROVIDER_PRESETS,
+    get_ai_settings,
+    normalize_base_url,
+    record_ai_test,
+    save_ai_settings,
 )
 from ..services.app_settings import (
     effective_app_settings,
@@ -29,20 +47,9 @@ from ..services.distribution import (
     require_external_runtime_paths,
 )
 from ..services.local_models import get_imported
-from ..services.sherpa_catalog import MANAGED_SHERPA_BY_ID
 from ..services.model_catalog import WHISPER_CATALOG_BY_ID
-from ..services.ai_settings import (
-    PROVIDER_PRESETS,
-    get_ai_settings,
-    normalize_base_url,
-    record_ai_test,
-    save_ai_settings,
-)
+from ..services.sherpa_catalog import MANAGED_SHERPA_BY_ID
 from ..utils.config import DATA_DIR, DOWNLOADS_DIR, MODELS_DIR
-from ..services.ai_providers import (
-    get_provider, list_provider_cards, prepare_chat_payload, raise_for_provider_status,
-    record_test, save_provider,
-)
 
 router = APIRouter(prefix="/api")
 
@@ -316,8 +323,9 @@ def _fallback_executable_status(name: str, configured: str | None = None) -> dic
     if name == "yt_dlp":
         try:
             yt_dlp = import_module("yt" + "_dlp")
+            yt_dlp_path = str(Path(yt_dlp.__file__).resolve()) if yt_dlp.__file__ else "内置模块"
             return _runtime_item(
-                ok=True, status="ready", path=str(Path(yt_dlp.__file__).resolve()),
+                ok=True, status="ready", path=yt_dlp_path,
                 source="bundled_python", message="yt-dlp 内置模块可用",
                 version=getattr(getattr(yt_dlp, "version", None), "__version__", None),
             )
@@ -358,7 +366,9 @@ def _fallback_model_status(settings: dict[str, Any]) -> dict[str, Any]:
     coreml_error = None
     try:
         from ..services.parakeet_transcriber import (
-            _asset_paths, _model_cache_is_valid, discover_coreml_runtime,
+            _asset_paths,
+            _model_cache_is_valid,
+            discover_coreml_runtime,
         )
         if distribution_capabilities().external_runtime_paths:
             coreml = discover_coreml_runtime(

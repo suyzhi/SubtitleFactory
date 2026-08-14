@@ -24,8 +24,8 @@ if "SUBTITLE_FACTORY_DATA_DIR" not in os.environ:
         prefix="subtitle-factory-parakeet-tests-",
     )
 
-from app.models.database import get_db, init_db
 from app.api.projects import start_transcribe
+from app.models.database import get_db, init_db
 from app.services import parakeet_transcriber as parakeet
 from app.services.parakeet_transcriber import (
     PARAKEET_MODEL_DIR_NAME,

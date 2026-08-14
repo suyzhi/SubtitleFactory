@@ -208,7 +208,7 @@ def retry_clean_batch(task_id: str, original_task_id: str, batch_index: int):
         raise BatchRetryError("失败批次中的字幕顺序已改变，不能安全覆盖")
 
     batch = [current[position] for position in selected_positions]
-    for snapshot, row in zip(stored_segments, batch):
+    for snapshot, row in zip(stored_segments, batch, strict=True):
         current_signature = (
             row["id"], float(row["start"]), float(row["end"]), row.get("raw_text", ""),
             row.get("clean_text", ""), row.get("translated_text", ""), int(bool(row.get("locked"))),

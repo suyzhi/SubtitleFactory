@@ -2,9 +2,9 @@
 字幕工厂 - Pydantic 数据模型
 """
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
-from typing import Any, Literal, Optional, List
+from typing import Any, List, Literal, Optional
 
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 # ── Project ─────────────────────────────────────────────
 
@@ -110,6 +110,10 @@ class SegmentOperationItem(BaseModel):
     locked: Optional[bool] = None
 
 
+def _default_replace_fields() -> List[Literal["clean_text", "translated_text"]]:
+    return ["clean_text", "translated_text"]
+
+
 class SegmentOperationRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -123,7 +127,7 @@ class SegmentOperationRequest(BaseModel):
     search: Optional[str] = None
     replacement: str = ""
     fields: List[Literal["clean_text", "translated_text"]] = Field(
-        default_factory=lambda: ["clean_text", "translated_text"]
+        default_factory=_default_replace_fields
     )
     match_case: bool = True
     delta: float = 0

@@ -22,7 +22,6 @@ from .content_packs import _call_json
 from .ffmpeg_encoding import select_h264_encoder_args
 from .runtime_diagnostics import resolve_ffmpeg_path, resolve_ffprobe_path
 
-
 ASPECT_DIMENSIONS = {"9:16": (1080, 1920), "1:1": (1080, 1080), "16:9": (1920, 1080)}
 
 
@@ -669,7 +668,7 @@ def _subtitle_overlay_paths(
                 fill=fill,
             )
         cursor = top
-        for (kind, text, font), box in zip(rendered, dimensions):
+        for (kind, text, font), box in zip(rendered, dimensions, strict=True):
             line_width = box[2] - box[0]
             line_height = box[3] - box[1]
             color = _hex_rgba(

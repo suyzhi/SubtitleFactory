@@ -5,10 +5,10 @@
 优先使用 ASS 字幕以获得更好的样式控制。
 """
 
-import subprocess
-import os
-import logging
 import json
+import logging
+import os
+import subprocess
 from pathlib import Path
 
 from ..utils.config import EXPORTS_DIR
@@ -127,7 +127,6 @@ def burn_subtitles(task_id: str, video_path: str, subtitle_path: str,
 
     # 判断字幕格式
     subtitle_ext = os.path.splitext(subtitle_path)[1].lower()
-    is_ass = subtitle_ext == ".ass"
 
     # 构建 ffmpeg 命令
     # 优先硬字幕；若用户机器上的 ffmpeg 未编译 libass，则自动回退为
@@ -226,7 +225,7 @@ def burn_subtitles(task_id: str, video_path: str, subtitle_path: str,
 
     except subprocess.TimeoutExpired:
         task_manager.add_log(task_id, "error", "rendering", "视频压制超时", detail="超过 2 小时")
-        raise Exception("视频压制超时（超过 2 小时）")
-    except FileNotFoundError:
+        raise Exception("视频压制超时（超过 2 小时）") from None
+    except FileNotFoundError as error:
         task_manager.add_log(task_id, "error", "rendering", "FFmpeg 运行时不可用")
-        raise Exception("FFmpeg 运行时不可用")
+        raise Exception("FFmpeg 运行时不可用") from error
