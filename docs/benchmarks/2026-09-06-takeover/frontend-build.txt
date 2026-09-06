@@ -1,0 +1,24 @@
+
+> frontend@0.4.1 build
+> tsc -b && vite build
+
+vite v8.1.3 building client environment for production...
+[2K
+transforming...✓ 123 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                                0.55 kB │ gzip:   0.33 kB
+dist/assets/settings-DB89BF_F.png              4.56 kB
+dist/assets/app-icon-ui-CcXbXKVN.png          61.46 kB
+dist/assets/index-DMj6xrko.css               191.69 kB │ gzip:  33.57 kB
+dist/assets/dist-js-Xp_zxfdL.js                0.16 kB │ gzip:   0.16 kB
+dist/assets/core-w4ZWUd33.js                   1.02 kB │ gzip:   0.50 kB
+dist/assets/ProductionCenter-C9msf_gr.js       5.40 kB │ gzip:   2.50 kB
+dist/assets/PlaylistBatchDialog-DWDdudrM.js    6.21 kB │ gzip:   2.50 kB
+dist/assets/ContentCenter-D8W3t47a.js         24.64 kB │ gzip:   8.06 kB
+dist/assets/backend-CL4qnV7R.js               30.01 kB │ gzip:   9.83 kB
+dist/assets/SettingsCenter-CAcR6WoI.js        38.05 kB │ gzip:  12.50 kB
+dist/assets/SubtitlePlayer-BqFiUwm5.js        42.06 kB │ gzip:  27.05 kB
+dist/assets/index-CgtuH8c9.js                412.49 kB │ gzip: 124.95 kB
+
+✓ built in 125ms

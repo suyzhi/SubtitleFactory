@@ -92,7 +92,9 @@ def resume_interrupted_workflows(interrupted: list[dict]) -> int:
             # audio chunk but before the response reached us.  Never resubmit
             # cloud audio silently; the recovery card requires a new user click.
             if (
-                payload.get("model") == FUN_ASR_MODEL_ID
+                (payload.get("options") or {}).get("enable_clean")
+                or (payload.get("options") or {}).get("enable_translate")
+                or payload.get("model") == FUN_ASR_MODEL_ID
                 or payload.get("runtime") == FUN_ASR_RUNTIME
             ):
                 continue
@@ -138,7 +140,7 @@ def resume_interrupted_workflows(interrupted: list[dict]) -> int:
                 db.close()
             task_manager.run_background(
                 task_id, _do_workflow, payload["project_id"], payload["model"],
-                payload["language"], payload.get("source_url"), payload["runtime"],
+                payload["language"], payload.get("source_url"), payload["runtime"], payload.get("options"), details,
             )
             resumed += 1
         except Exception:

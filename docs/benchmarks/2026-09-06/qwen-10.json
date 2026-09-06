@@ -1,0 +1,402 @@
+[
+  {
+    "sample": "mixed",
+    "iteration": 0,
+    "max_speech_seconds": 10,
+    "total_seconds": 5.448928791971412,
+    "first_result_seconds": 3.3610418339958414,
+    "process_peak_rss_bytes": 2083258368,
+    "segments": [
+      {
+        "start": 0.07,
+        "end": 6.758,
+        "text": "Welcome to the subtitle workshop: import a video, check every sentence, and export the final subtitles."
+      },
+      {
+        "start": 7.59,
+        "end": 10.95,
+        "text": "欢迎使用字幕工厂，请导入视频。"
+      },
+      {
+        "start": 11.206,
+        "end": 12.87,
+        "text": "检查每一句字幕。"
+      },
+      {
+        "start": 13.094,
+        "end": 15.0031875,
+        "text": "然后导出最终文件。"
+      }
+    ],
+    "character_errors": 0,
+    "reference_characters": 112,
+    "cer": 0.0,
+    "out_of_bounds": 0,
+    "adjacent_duplicates": 0
+  },
+  {
+    "sample": "dialogue",
+    "iteration": 0,
+    "max_speech_seconds": 10,
+    "total_seconds": 2.511688791040797,
+    "first_result_seconds": 1.2773639159859158,
+    "process_peak_rss_bytes": 2083258368,
+    "segments": [
+      {
+        "start": 0.07,
+        "end": 6.758,
+        "text": "Welcome to the subtitle workshop: import a video, check every sentence, and export the final subtitles."
+      },
+      {
+        "start": 7.558,
+        "end": 9.574,
+        "text": "The meeting begins at nine thirty."
+      },
+      {
+        "start": 9.862,
+        "end": 13.12275,
+        "text": "Please keep the original recording and review the final version."
+      }
+    ],
+    "character_errors": 0,
+    "reference_characters": 166,
+    "cer": 0.0,
+    "out_of_bounds": 0,
+    "adjacent_duplicates": 0
+  },
+  {
+    "sample": "long",
+    "iteration": 0,
+    "max_speech_seconds": 10,
+    "total_seconds": 19.764421166968532,
+    "first_result_seconds": 1.2589441669988446,
+    "process_peak_rss_bytes": 2083258368,
+    "segments": [
+      {
+        "start": 0.07,
+        "end": 6.758,
+        "text": "Welcome to the subtitle workshop: import a video, check every sentence, and export the final subtitles."
+      },
+      {
+        "start": 7.558,
+        "end": 9.574,
+        "text": "The meeting begins at nine thirty."
+      },
+      {
+        "start": 9.862,
+        "end": 13.126,
+        "text": "Please keep the original recording and review the final version."
+      },
+      {
+        "start": 16.102,
+        "end": 22.726,
+        "text": "Welcome to the subtitle workshop. Import a video, check every sentence, and export the final subtitles."
+      },
+      {
+        "start": 23.686,
+        "end": 25.701999999999998,
+        "text": "The meeting begins at nine thirty."
+      },
+      {
+        "start": 25.958,
+        "end": 29.253999999999998,
+        "text": "Please keep the original recording and review the final version."
+      },
+      {
+        "start": 32.262,
+        "end": 38.854,
+        "text": "Welcome to the subtitle workshop. Import a video, check every sentence, and export the final subtitles."
+      },
+      {
+        "start": 39.814,
+        "end": 41.83,
+        "text": "The meeting begins at nine thirty."
+      },
+      {
+        "start": 42.374,
+        "end": 45.35,
+        "text": "Keep the original recording and review the final version."
+      },
+      {
+        "start": 48.358,
+        "end": 55.077999999999996,
+        "text": "Welcome to the subtitle workshop. Import a video, check every sentence, and export the final subtitles."
+      },
+      {
+        "start": 55.942,
+        "end": 57.958,
+        "text": "The meeting begins at nine thirty."
+      },
+      {
+        "start": 58.502,
+        "end": 61.478,
+        "text": "Keep the original recording and review the final version."
+      },
+      {
+        "start": 64.486,
+        "end": 71.238,
+        "text": "Welcome to the subtitle workshop. Import a video, check every sentence, and export the final subtitles."
+      },
+      {
+        "start": 72.038,
+        "end": 74.086,
+        "text": "The meeting begins at nine thirty."
+      },
+      {
+        "start": 74.63,
+        "end": 77.63799999999999,
+        "text": "Keep the original recording and review the final version."
+      },
+      {
+        "start": 80.614,
+        "end": 87.366,
+        "text": "Welcome to the subtitle workshop. Import a video, check every sentence, and export the final subtitles."
+      },
+      {
+        "start": 88.166,
+        "end": 90.214,
+        "text": "The meeting begins at nine thirty."
+      },
+      {
+        "start": 90.47,
+        "end": 93.734,
+        "text": "Please keep the original recording and review the final version."
+      },
+      {
+        "start": 96.742,
+        "end": 103.334,
+        "text": "Welcome to the subtitle workshop. Import a video, check every sentence, and export the final subtitles."
+      },
+      {
+        "start": 104.294,
+        "end": 106.31,
+        "text": "The meeting begins at nine thirty."
+      },
+      {
+        "start": 106.598,
+        "end": 109.862,
+        "text": "Please keep the original recording and review the final version."
+      },
+      {
+        "start": 112.838,
+        "end": 119.46199999999999,
+        "text": "Welcome to the subtitle workshop. Import a video, check every sentence, and export the final subtitles."
+      },
+      {
+        "start": 120.422,
+        "end": 122.438,
+        "text": "The meeting begins at nine thirty."
+      },
+      {
+        "start": 122.694,
+        "end": 125.99000000000001,
+        "text": "Please keep the original recording and review the final version."
+      }
+    ],
+    "character_errors": 18,
+    "reference_characters": 1328,
+    "cer": 0.01355421686746988,
+    "out_of_bounds": 0,
+    "adjacent_duplicates": 0
+  },
+  {
+    "sample": "mixed",
+    "iteration": 1,
+    "max_speech_seconds": 10,
+    "total_seconds": 3.530195166997146,
+    "first_result_seconds": 1.4438511249609292,
+    "process_peak_rss_bytes": 2083258368,
+    "segments": [
+      {
+        "start": 0.07,
+        "end": 6.758,
+        "text": "Welcome to the subtitle workshop: import a video, check every sentence, and export the final subtitles."
+      },
+      {
+        "start": 7.59,
+        "end": 10.95,
+        "text": "欢迎使用字幕工厂，请导入视频。"
+      },
+      {
+        "start": 11.206,
+        "end": 12.87,
+        "text": "检查每一句字幕。"
+      },
+      {
+        "start": 13.094,
+        "end": 15.0031875,
+        "text": "然后导出最终文件。"
+      }
+    ],
+    "character_errors": 0,
+    "reference_characters": 112,
+    "cer": 0.0,
+    "out_of_bounds": 0,
+    "adjacent_duplicates": 0
+  },
+  {
+    "sample": "dialogue",
+    "iteration": 1,
+    "max_speech_seconds": 10,
+    "total_seconds": 2.677885540993884,
+    "first_result_seconds": 1.3847984159947373,
+    "process_peak_rss_bytes": 2083258368,
+    "segments": [
+      {
+        "start": 0.07,
+        "end": 6.758,
+        "text": "Welcome to the subtitle workshop: import a video, check every sentence, and export the final subtitles."
+      },
+      {
+        "start": 7.558,
+        "end": 9.574,
+        "text": "The meeting begins at nine thirty."
+      },
+      {
+        "start": 9.862,
+        "end": 13.12275,
+        "text": "Please keep the original recording and review the final version."
+      }
+    ],
+    "character_errors": 0,
+    "reference_characters": 166,
+    "cer": 0.0,
+    "out_of_bounds": 0,
+    "adjacent_duplicates": 0
+  },
+  {
+    "sample": "long",
+    "iteration": 1,
+    "max_speech_seconds": 10,
+    "total_seconds": 26.731998250004835,
+    "first_result_seconds": 1.3242655840003863,
+    "process_peak_rss_bytes": 2083258368,
+    "segments": [
+      {
+        "start": 0.07,
+        "end": 6.758,
+        "text": "Welcome to the subtitle workshop: import a video, check every sentence, and export the final subtitles."
+      },
+      {
+        "start": 7.558,
+        "end": 9.574,
+        "text": "The meeting begins at nine thirty."
+      },
+      {
+        "start": 9.862,
+        "end": 13.126,
+        "text": "Please keep the original recording and review the final version."
+      },
+      {
+        "start": 16.102,
+        "end": 22.726,
+        "text": "Welcome to the subtitle workshop. Import a video, check every sentence, and export the final subtitles."
+      },
+      {
+        "start": 23.686,
+        "end": 25.701999999999998,
+        "text": "The meeting begins at nine thirty."
+      },
+      {
+        "start": 25.958,
+        "end": 29.253999999999998,
+        "text": "Please keep the original recording and review the final version."
+      },
+      {
+        "start": 32.262,
+        "end": 38.854,
+        "text": "Welcome to the subtitle workshop. Import a video, check every sentence, and export the final subtitles."
+      },
+      {
+        "start": 39.814,
+        "end": 41.83,
+        "text": "The meeting begins at nine thirty."
+      },
+      {
+        "start": 42.374,
+        "end": 45.35,
+        "text": "Keep the original recording and review the final version."
+      },
+      {
+        "start": 48.358,
+        "end": 55.077999999999996,
+        "text": "Welcome to the subtitle workshop. Import a video, check every sentence, and export the final subtitles."
+      },
+      {
+        "start": 55.942,
+        "end": 57.958,
+        "text": "The meeting begins at nine thirty."
+      },
+      {
+        "start": 58.502,
+        "end": 61.478,
+        "text": "Keep the original recording and review the final version."
+      },
+      {
+        "start": 64.486,
+        "end": 71.238,
+        "text": "Welcome to the subtitle workshop. Import a video, check every sentence, and export the final subtitles."
+      },
+      {
+        "start": 72.038,
+        "end": 74.086,
+        "text": "The meeting begins at nine thirty."
+      },
+      {
+        "start": 74.63,
+        "end": 77.63799999999999,
+        "text": "Keep the original recording and review the final version."
+      },
+      {
+        "start": 80.614,
+        "end": 87.366,
+        "text": "Welcome to the subtitle workshop. Import a video, check every sentence, and export the final subtitles."
+      },
+      {
+        "start": 88.166,
+        "end": 90.214,
+        "text": "The meeting begins at nine thirty."
+      },
+      {
+        "start": 90.47,
+        "end": 93.734,
+        "text": "Please keep the original recording and review the final version."
+      },
+      {
+        "start": 96.742,
+        "end": 103.334,
+        "text": "Welcome to the subtitle workshop. Import a video, check every sentence, and export the final subtitles."
+      },
+      {
+        "start": 104.294,
+        "end": 106.31,
+        "text": "The meeting begins at nine thirty."
+      },
+      {
+        "start": 106.598,
+        "end": 109.862,
+        "text": "Please keep the original recording and review the final version."
+      },
+      {
+        "start": 112.838,
+        "end": 119.46199999999999,
+        "text": "Welcome to the subtitle workshop. Import a video, check every sentence, and export the final subtitles."
+      },
+      {
+        "start": 120.422,
+        "end": 122.438,
+        "text": "The meeting begins at nine thirty."
+      },
+      {
+        "start": 122.694,
+        "end": 125.99000000000001,
+        "text": "Please keep the original recording and review the final version."
+      }
+    ],
+    "character_errors": 18,
+    "reference_characters": 1328,
+    "cer": 0.01355421686746988,
+    "out_of_bounds": 0,
+    "adjacent_duplicates": 0
+  }
+]

@@ -479,8 +479,10 @@ def execute_operation(
         conn.close()
 
 
-def import_segment_snapshot(project_id: str, expected_revision: int, cues: list[dict]) -> dict:
+def import_segment_snapshot(project_id: str, expected_revision: int, cues: list[dict], *, candidate_run_id: str | None = None) -> dict:
     """Replace the current track with imported cues as one persistent operation."""
+    from .transcription_results import candidate_result
+    partial_candidate = False
     conn = get_db()
     try:
         conn.execute("BEGIN IMMEDIATE")
@@ -490,6 +492,21 @@ def import_segment_snapshot(project_id: str, expected_revision: int, cues: list[
                 409, "EDIT_REVISION_CONFLICT", "字幕已发生变化", "请刷新后重新导入",
                 {"expected": expected_revision, "actual": revision},
             )
+        if candidate_run_id:
+            active = conn.execute("SELECT type,details FROM tasks WHERE project_id=? AND status IN ('pending','running','paused') AND type IN ('clean','translate','ocr','speaker_diarization','workflow')", (project_id,)).fetchall()
+            for task in active:
+                stages = json.loads(task['details'] or '{}').get('stages') or {}
+                if task['type'] != 'workflow' or any(stages.get(step) == 'running' for step in ('clean','translate')):
+                    raise EditorServiceError(409, "SUBTITLE_TASK_ACTIVE", "字幕正在被其他任务处理，请完成或取消后再采用候选结果")
+            draft = conn.execute("SELECT 1 FROM segment_drafts WHERE project_id=?", (project_id,)).fetchone()
+            if draft:
+                raise EditorServiceError(409, "DRAFT_PENDING", "请先保存或放弃字幕草稿，再替换候选结果")
+            candidate = candidate_result(conn, project_id, candidate_run_id)
+            if candidate is None:
+                raise EditorServiceError(409, "CANDIDATE_UNAVAILABLE", "候选结果已变化，请刷新")
+            cues, partial_candidate = candidate
+            if not cues:
+                raise EditorServiceError(409, "CANDIDATE_EMPTY", "候选结果为空")
         before = _snapshot(_rows(conn, project_id))
         conn.execute("DELETE FROM segments WHERE project_id=?", (project_id,))
         for index, cue in enumerate(cues, 1):
@@ -502,6 +519,9 @@ def import_segment_snapshot(project_id: str, expected_revision: int, cues: list[
                 (identifier, project_id, index, cue["start"], cue["end"], text, text),
             )
         _validate_timeline(conn, project_id)
+        if candidate_run_id:
+            conn.execute("UPDATE transcription_runs SET status='accepted' WHERE id=?", (candidate_run_id,))
+            conn.execute("UPDATE segments SET transcription_run_id=?,source_stage=? WHERE project_id=?", (candidate_run_id, 'recovered_partial' if partial_candidate else 'postprocessed', project_id))
         after_rows = _rows(conn, project_id)
         after = _snapshot(after_rows)
         operation_id = str(uuid.uuid4())

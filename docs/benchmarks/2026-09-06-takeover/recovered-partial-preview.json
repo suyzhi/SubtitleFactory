@@ -1,0 +1,101 @@
+{
+  "run": {
+    "id": "2f044d0a-e7c8-4cf1-8c64-2ade7fe2c66d",
+    "model": "small",
+    "language": "en",
+    "status": "cancelled",
+    "segments_count": 17,
+    "started_at": "2026-09-06 14:02:05",
+    "finished_at": "2026-09-06 14:05:27"
+  },
+  "result": {
+    "segments": [
+      {
+        "start": 0.0,
+        "end": 1.48,
+        "text": "Welcome to the subtitle workshop."
+      },
+      {
+        "start": 2.04,
+        "end": 6.26,
+        "text": "Import a video, check every sentence, and export the final subtitles."
+      },
+      {
+        "start": 7.39,
+        "end": 9.29,
+        "text": "The meeting begins at 9.30."
+      },
+      {
+        "start": 9.75,
+        "end": 12.91,
+        "text": "Please keep the original recording and review the final version."
+      },
+      {
+        "start": 16.13,
+        "end": 17.81,
+        "text": "Welcome to the subtitle workshop."
+      },
+      {
+        "start": 18.19,
+        "end": 22.35,
+        "text": "Import a video, check every sentence, and export the final subtitles."
+      },
+      {
+        "start": 23.54,
+        "end": 25.42,
+        "text": "The meeting begins at 9.30."
+      },
+      {
+        "start": 25.88,
+        "end": 29.06,
+        "text": "Please keep the original recording and review the final version."
+      },
+      {
+        "start": 32.06,
+        "end": 33.94,
+        "text": "Welcome to the subtitle workshop."
+      },
+      {
+        "start": 33.94,
+        "end": 38.48,
+        "text": "Import a video, check every sentence, and export the final subtitles."
+      },
+      {
+        "start": 39.69,
+        "end": 45.15,
+        "text": "The meeting begins at 9.30. Please keep the original recording and review the final version."
+      },
+      {
+        "start": 48.35,
+        "end": 54.59,
+        "text": "Welcome to the subtitle workshop. Import a video, check every sentence, and export the final subtitles."
+      },
+      {
+        "start": 55.87,
+        "end": 61.31,
+        "text": "The meeting begins at 9.30. Please keep the original recording and review the final version."
+      },
+      {
+        "start": 63.55,
+        "end": 70.75,
+        "text": "Welcome to the subtitle workshop. Import a video, check every sentence, and export the final subtitles."
+      },
+      {
+        "start": 71.94,
+        "end": 77.42,
+        "text": "The meeting begins at 9.30. Please keep the original recording and review the final version."
+      },
+      {
+        "start": 80.64,
+        "end": 86.86,
+        "text": "Welcome to the subtitle workshop. Import a video, check every sentence, and export the final subtitles."
+      },
+      {
+        "start": 88.03,
+        "end": 93.57,
+        "text": "The meeting begins at 9.30. Please keep the original recording and review the final version."
+      }
+    ],
+    "partial": true
+  }
+}

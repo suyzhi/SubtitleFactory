@@ -1,0 +1,31 @@
+{
+  "source_manifest_matches": true,
+  "artifacts": {
+    "字幕工厂.app/Contents/MacOS/app": {
+      "size": 9717328,
+      "sha256": "40a9f156fe4306a4e62f5f7646058a214b73d670dac5f0c401cab920fe5680d4"
+    },
+    "字幕工厂_0.4.1_aarch64.dmg": {
+      "size": 275850116,
+      "sha256": "33c8213064a26412767bd75a63df38ec20f354ce640fe81918322ef2adfd426e"
+    }
+  },
+  "backend_tests": 213,
+  "backend_subtests": 25,
+  "frontend_tests": 73,
+  "rust_tests": 7,
+  "minimum_macos": "14.0",
+  "mach_o_count": 315,
+  "app_dmg_equal_files": 2406,
+  "app_dmg_equal_links": 45,
+  "native_visual_qa": "passed",
+  "packaged_cpu_inference_runs": 2,
+  "packaged_cpu_warm_cache_hit": true,
+  "native_visual_checks": [
+    "library search and project open",
+    "local video playback with subtitle overlay",
+    "subtitle/timecode seek stays in editor",
+    "on-demand inspector and task/tools panel",
+    "native SRT save with human edit"
+  ]
+}

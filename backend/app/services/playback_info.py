@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from functools import lru_cache
 from pathlib import Path
 
 import av
@@ -12,9 +13,15 @@ FALLBACK_FRAME_RATE = 30.0
 
 
 def get_playback_info(video_path: str | Path) -> dict:
-    path = Path(video_path)
+    path = Path(video_path).resolve()
     if not path.is_file():
         raise ValueError("视频文件不存在")
+    stat = path.stat()
+    return dict(_cached_playback_info(str(path), stat.st_ino, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns))
+
+
+@lru_cache(maxsize=128)
+def _cached_playback_info(path: str, *identity: int) -> dict:
     try:
         with av.open(str(path)) as container:
             if not container.streams.video:

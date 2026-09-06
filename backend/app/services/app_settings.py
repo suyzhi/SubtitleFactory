@@ -67,6 +67,7 @@ def get_app_settings() -> dict[str, Any]:
     settings = dict(APP_SETTINGS_DEFAULTS)
     if row:
         settings.update(_decode_settings(row["settings_json"]))
+    settings["youtube_media_mode"] = "local"
     return settings
 
 
@@ -142,4 +143,5 @@ def save_app_settings(updates: Mapping[str, Any]) -> dict[str, Any]:
         db.commit()
     finally:
         db.close()
+    settings["youtube_media_mode"] = "local"
     return settings

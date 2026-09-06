@@ -17,7 +17,6 @@ if "SUBTITLE_FACTORY_DATA_DIR" not in os.environ:
 from fastapi.testclient import TestClient
 
 from app.main import app
-from app.security import API_TOKEN
 from app.services import model_catalog
 from app.services.model_catalog import (
     QWEN_ASR_CATALOG_BY_ID,
@@ -69,7 +68,7 @@ class CatalogContractTests(unittest.TestCase):
     def test_api_exposes_exactly_twenty_nine_grouped_release_models(self):
         response = TestClient(app).get(
             "/api/transcription/models",
-            headers={"Authorization": f"Bearer {API_TOKEN}"},
+            headers={},
         )
         self.assertEqual(response.status_code, 200)
         payload = response.json()

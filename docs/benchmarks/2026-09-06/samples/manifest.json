@@ -1,0 +1,44 @@
+[
+  {
+    "name": "short",
+    "path": "/Users/sdf2014/Hermes 工作文件夹/字幕工厂/docs/benchmarks/2026-09-06/samples/short.wav",
+    "reference": "Welcome to the subtitle workshop. Import a video, check every sentence, and export the final subtitles.",
+    "language": "en",
+    "duration": 6.57325
+  },
+  {
+    "name": "mixed",
+    "path": "/Users/sdf2014/Hermes 工作文件夹/字幕工厂/docs/benchmarks/2026-09-06/samples/mixed.wav",
+    "reference": "Welcome to the subtitle workshop. Import a video, check every sentence, and export the final subtitles.欢迎使用字幕工厂。请导入视频，检查每一句字幕，然后导出最终文件。",
+    "language": null,
+    "duration": 15.0031875
+  },
+  {
+    "name": "dialogue",
+    "path": "/Users/sdf2014/Hermes 工作文件夹/字幕工厂/docs/benchmarks/2026-09-06/samples/dialogue.wav",
+    "reference": "Welcome to the subtitle workshop. Import a video, check every sentence, and export the final subtitles. The meeting begins at nine thirty. Please keep the original recording and review the final version.",
+    "language": "en",
+    "duration": 13.12275
+  },
+  {
+    "name": "long_silence",
+    "path": "/Users/sdf2014/Hermes 工作文件夹/字幕工厂/docs/benchmarks/2026-09-06/samples/long_silence.wav",
+    "reference": "Welcome to the subtitle workshop. Import a video, check every sentence, and export the final subtitles. The meeting begins at nine thirty. Please keep the original recording and review the final version.",
+    "language": "en",
+    "duration": 57.12275
+  },
+  {
+    "name": "long",
+    "path": "/Users/sdf2014/Hermes 工作文件夹/字幕工厂/docs/benchmarks/2026-09-06/samples/long.wav",
+    "reference": " Welcome to the subtitle workshop. Import a video, check every sentence, and export the final subtitles. The meeting begins at nine thirty. Please keep the original recording and review the final version. Welcome to the subtitle workshop. Import a video, check every sentence, and export the final subtitles. The meeting begins at nine thirty. Please keep the original recording and review the final version. Welcome to the subtitle workshop. Import a video, check every sentence, and export the final subtitles. The meeting begins at nine thirty. Please keep the original recording and review the final version. Welcome to the subtitle workshop. Import a video, check every sentence, and export the final subtitles. The meeting begins at nine thirty. Please keep the original recording and review the final version. Welcome to the subtitle workshop. Import a video, check every sentence, and export the final subtitles. The meeting begins at nine thirty. Please keep the original recording and review the final version. Welcome to the subtitle workshop. Import a video, check every sentence, and export the final subtitles. The meeting begins at nine thirty. Please keep the original recording and review the final version. Welcome to the subtitle workshop. Import a video, check every sentence, and export the final subtitles. The meeting begins at nine thirty. Please keep the original recording and review the final version. Welcome to the subtitle workshop. Import a video, check every sentence, and export the final subtitles. The meeting begins at nine thirty. Please keep the original recording and review the final version.",
+    "language": "en",
+    "duration": 128.982
+  },
+  {
+    "name": "music",
+    "path": "/Users/sdf2014/Hermes 工作文件夹/字幕工厂/docs/benchmarks/2026-09-06/samples/music.wav",
+    "reference": "Welcome to the subtitle workshop. Import a video, check every sentence, and export the final subtitles. The meeting begins at nine thirty. Please keep the original recording and review the final version.",
+    "language": "en",
+    "duration": 13.12275
+  }
+]

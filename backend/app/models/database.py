@@ -11,7 +11,6 @@ import time
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
-from ..security import signed_media_url
 from ..utils.config import DB_PATH
 from .migrations import run_migrations
 
@@ -240,6 +239,10 @@ def _init_db_unlocked():
         except sqlite3.OperationalError:
             pass
 
+    run_columns = {row[1] for row in conn.execute("PRAGMA table_info(transcription_runs)")}
+    if "result_json" not in run_columns:
+        conn.execute("ALTER TABLE transcription_runs ADD COLUMN result_json TEXT")
+
     # Migrate the single v0.2 AI configuration into its provider card once.
     legacy = conn.execute("SELECT * FROM ai_settings WHERE id=1").fetchone()
     if legacy and not conn.execute("SELECT 1 FROM ai_provider_configs LIMIT 1").fetchone():
@@ -253,6 +256,9 @@ def _init_db_unlocked():
 
     conn.commit()
     run_migrations(conn, Path(DB_PATH))
+    # Legacy web projects retain subtitles/audio; local media can be downloaded on demand.
+    conn.execute("UPDATE projects SET media_mode='local' WHERE media_mode='web'")
+    conn.commit()
     conn.close()
     print(f"[DB] 数据库已初始化: {DB_PATH}")
 
@@ -458,19 +464,19 @@ def project_to_dict(row) -> dict:
     thumbnail_path = row["thumbnail_path"] if "thumbnail_path" in row_keys else None
     group_name = row["group_name"] if "group_name" in row_keys else None
     deleted_at = row["deleted_at"] if "deleted_at" in row_keys else None
-    media_mode = row["media_mode"] if "media_mode" in row_keys else "local"
-    if media_mode not in {"local", "web"}:
-        media_mode = "local"
+    media_mode = "local"
     thumbnail_url = source_thumbnail_url
     if not thumbnail_url and row["source_type"] == "youtube":
         thumbnail_url = _youtube_thumbnail_url(row["source_url"])
     thumbnail_access_url = None
     if thumbnail_path and os.path.isfile(thumbnail_path):
         thumbnail_url = f"/api/projects/{row['id']}/thumbnail"
+        from ..security import signed_media_url
         thumbnail_access_url = signed_media_url(thumbnail_url)
 
     video_url = None
     if row["video_path"] and os.path.isfile(row["video_path"]):
+        from ..security import signed_media_url
         video_url = signed_media_url(f"/api/projects/{row['id']}/video")
 
     return {

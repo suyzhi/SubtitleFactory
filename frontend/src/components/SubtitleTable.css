@@ -79,9 +79,10 @@
 .subtitle-draft-bar button.primary, .replace-preview button.primary { background: var(--accent); color: white; border-color: transparent; }
 .replace-preview div { display: grid; gap: 2px; }
 .replace-preview span { color: var(--text-2); }
-.subtitle-table .col-idx { display: table-cell; white-space: nowrap; }
+.subtitle-table .col-idx { display: table-cell; width: 92px; white-space: nowrap; }
 .subtitle-table .col-idx input { margin-right: 6px; vertical-align: middle; }
-.subtitle-row-identity { display: inline-flex; align-items: center; justify-content: center; gap: 10px; min-width: 48px; }
+.subtitle-row-identity { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+.subtitle-row-identity > * { flex-shrink: 0; }
 .subtitle-table .subtitle-row-identity input { flex: 0 0 auto; width: 14px; height: 14px; margin: 0; }
 .time-seek, .time-edit {
   border: 0; background: transparent; color: inherit; font: inherit; padding: 0;

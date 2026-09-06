@@ -13,7 +13,7 @@ import { fmtTime } from '../utils/library';
 import './SubtitleTable.css';
 
 function SubtitleTable({
-  segments, currentTime, activeIdx, onSeek, onUpdate, onReplaceAll, onSplit, onMerge,
+  segments, currentTime, activeIdx, onSeek, onInspect, onUpdate, onReplaceAll, onSplit, onMerge,
   onUndo, onRedo, saveState, draftCount, draftIsStale, onPreviewDraft,
   onCommitDraft, onDiscardDraft,
   onAutoScrollChange, autoScroll, entryFocusIdx, entryFocusRequest, disabled
@@ -24,6 +24,7 @@ function SubtitleTable({
   entryFocusIdx?: number;
   entryFocusRequest?: number;
   onSeek: (time: number) => void;
+  onInspect?: (index: number) => void;
   onUpdate: (idx: number, data: SegmentUpdate) => void;
   onReplaceAll: (search: string, replacement: string, fields: Array<'clean_text' | 'translated_text'>, options: {matchCase: boolean; includeLocked: boolean}) => Promise<void>;
   onSplit: (index: number, splitAt: number) => Promise<void>;
@@ -50,6 +51,8 @@ function SubtitleTable({
   const [replaceTranslation, setReplaceTranslation] = useState(true);
   const [replaceMatchCase, setReplaceMatchCase] = useState(false);
   const [replaceIncludeLocked, setReplaceIncludeLocked] = useState(false);
+  const [translationVisible, setTranslationVisible] = useState<boolean | null>(null);
+  const showTranslation = translationVisible ?? segments.some(segment => Boolean(segment.translated_text));
   const [selectedIndices, setSelectedIndices] = useState<Set<number>>(() => new Set());
   const tableRef = useRef<HTMLDivElement>(null);
   const userScrolling = useRef(false);
@@ -290,6 +293,7 @@ function SubtitleTable({
       <div className="subtitle-table-header">
         <h3>字幕时间轴与编辑 ({segments.length} 条)</h3>
         <div className="table-header-right">
+          <button className="btn btn-ghost btn-xs" aria-pressed={showTranslation} onClick={() => setTranslationVisible(!showTranslation)}>译文列</button>
           <button className="btn btn-ghost btn-xs" disabled={disabled} onClick={() => void onUndo()} title="撤销上次编辑">↶ 撤销</button>
           <button className="btn btn-ghost btn-xs" disabled={disabled} onClick={() => void onRedo()} title="重做上次编辑">↷ 重做</button>
           <button className="btn btn-ghost btn-xs" disabled={disabled || !canSplit} onClick={() => {
@@ -311,10 +315,12 @@ function SubtitleTable({
       {draftCount > 0 && <div className="subtitle-draft-bar" role="status"><span>{draftIsStale ? `${draftCount} 条旧草稿已保留；正式字幕已变化` : `${draftCount} 条未提交草稿已安全保存在本机`}</span>{onPreviewDraft && <button onClick={onPreviewDraft}>预览</button>}<button onClick={() => void onDiscardDraft()}>放弃</button><button className="primary" onClick={() => void onCommitDraft()}>{draftIsStale ? '确认恢复' : '保存全部'}</button></div>}
       <div className="subtitle-findbar">
         <input value={searchText} onChange={event => setSearchText(event.target.value)} placeholder="搜索字幕" />
+        {searchText && <span>{visibleSegments.length} 条匹配</span>}
+        <details className="subtitle-replace-options"><summary>替换与选项</summary><div>
         <input value={replaceText} onChange={event => setReplaceText(event.target.value)} placeholder="替换为" />
         <button disabled={disabled || !searchText || !replaceMatchCount} onClick={() => setReplacePreview(true)}>全部替换</button>
-        {searchText && <span>{visibleSegments.length} 条匹配</span>}
         <label><input type="checkbox" checked={replaceOriginal} onChange={event => setReplaceOriginal(event.target.checked)}/> 原文/整理</label><label><input type="checkbox" checked={replaceTranslation} onChange={event => setReplaceTranslation(event.target.checked)}/> 译文</label><label><input type="checkbox" checked={replaceMatchCase} onChange={event => setReplaceMatchCase(event.target.checked)}/> 区分大小写</label><label><input type="checkbox" checked={replaceIncludeLocked} onChange={event => setReplaceIncludeLocked(event.target.checked)}/> 覆盖锁定项</label>
+        </div></details>
       </div>
       {replacePreview && <div className="replace-preview" role="dialog" aria-label="确认全部替换"><div><strong>预览全部替换</strong><span>将在{replaceOriginal ? '原文/整理' : ''}{replaceOriginal && replaceTranslation ? '和' : ''}{replaceTranslation ? '译文' : ''}中修改 {replaceMatchCount} 条字幕，{replaceIncludeLocked ? '包括锁定字幕' : '锁定字幕不会改变'}。此操作可撤销。</span></div><button onClick={() => setReplacePreview(false)}>取消</button><button className="primary" onClick={() => void onReplaceAll(searchText, replaceText, [...(replaceOriginal ? ['clean_text' as const] : []), ...(replaceTranslation ? ['translated_text' as const] : [])], { matchCase: replaceMatchCase, includeLocked: replaceIncludeLocked }).then(() => setReplacePreview(false)).catch(() => undefined)}>确认替换</button></div>}
       <div className="subtitle-table-scroll" ref={tableRef} onScroll={handleScroll}
@@ -327,12 +333,12 @@ function SubtitleTable({
               <th className="col-time">开始</th>
               <th className="col-time">结束</th>
               <th className="col-text">原文/整理</th>
-              <th className="col-text">译文</th>
+              {showTranslation && <th className="col-text">译文</th>}
               <th className="col-lock">🔒</th>
             </tr>
           </thead>
           <tbody>
-            {topSpacer > 0 && <tr className="virtual-spacer" aria-hidden="true"><td colSpan={6} style={{ height: topSpacer }}/></tr>}
+            {topSpacer > 0 && <tr className="virtual-spacer" aria-hidden="true"><td colSpan={showTranslation ? 6 : 5} style={{ height: topSpacer }}/></tr>}
             {renderedSegments.map(seg => {
               const isActive = seg.index === activeIdx;
               const isEditing = seg.index === editingIdx;
@@ -347,14 +353,14 @@ function SubtitleTable({
                   title={qualityIssue}
                   className={`${isActive ? 'active-row' : ''} ${seg.locked ? 'locked-row' : ''} ${qualityIssue ? 'quality-warning' : ''}`}
                 >
-                  <td className="col-idx"><span className="subtitle-row-identity"><input type="checkbox" aria-label={`选择第 ${seg.index} 条字幕`} checked={selectedIndices.has(seg.index)} onChange={() => toggleSelected(seg.index)}/><span>{seg.index}</span></span></td>
+                  <td className="col-idx"><span className="subtitle-row-identity"><input type="checkbox" aria-label={`选择第 ${seg.index} 条字幕`} checked={selectedIndices.has(seg.index)} onChange={() => toggleSelected(seg.index)}/><span>{seg.index}</span><button className="btn btn-ghost btn-xs" aria-label={`第 ${seg.index} 条字幕属性`} onClick={() => onInspect?.(seg.index)}>⋯</button></span></td>
                   <td className="col-time">
                     {isEditing && editField === 'start' ? <input className="time-edit-input" type="number" min="0" step="0.001" autoFocus value={editValue} onChange={event => setEditValue(event.target.value)} onBlur={saveEdit} onKeyDown={event => event.key === 'Enter' ? saveEdit() : event.key === 'Escape' ? cancelEdit() : undefined}/>
-                      : <><button className="time-seek" onClick={() => onSeek(seg.start)}>{fmtTime(seg.start)}</button><button className="time-edit" aria-label={`编辑第 ${seg.index} 条开始时间`} onClick={() => startEdit(seg, 'start')}>✎</button></>}
+                      : <><button className="time-seek" onMouseDown={event => event.preventDefault()} onClick={() => onSeek(seg.start)}>{fmtTime(seg.start)}</button><button className="time-edit" aria-label={`编辑第 ${seg.index} 条开始时间`} onClick={() => startEdit(seg, 'start')}>✎</button></>}
                   </td>
                   <td className="col-time">
                     {isEditing && editField === 'end' ? <input className="time-edit-input" type="number" min="0" step="0.001" autoFocus value={editValue} onChange={event => setEditValue(event.target.value)} onBlur={saveEdit} onKeyDown={event => event.key === 'Enter' ? saveEdit() : event.key === 'Escape' ? cancelEdit() : undefined}/>
-                      : <><button className="time-seek" onClick={() => onSeek(seg.end)}>{fmtTime(seg.end)}</button><button className="time-edit" aria-label={`编辑第 ${seg.index} 条结束时间`} onClick={() => startEdit(seg, 'end')}>✎</button></>}
+                      : <><button className="time-seek" onMouseDown={event => event.preventDefault()} onClick={() => onSeek(seg.end)}>{fmtTime(seg.end)}</button><button className="time-edit" aria-label={`编辑第 ${seg.index} 条结束时间`} onClick={() => startEdit(seg, 'end')}>✎</button></>}
                   </td>
                   <td className="col-text editable"
                     onClick={() => !isEditing && startEdit(seg, 'clean_text')}>
@@ -369,7 +375,7 @@ function SubtitleTable({
                       <span className="text-preview">{displayText || '...'}</span>
                     )}
                   </td>
-                  <td className="col-text editable"
+                  {showTranslation && <td className="col-text editable"
                     onClick={() => !isEditing && startEdit(seg, 'translated_text')}>
                     {isEditing && editField === 'translated_text' ? (
                       <input className="edit-input" autoFocus
@@ -381,7 +387,7 @@ function SubtitleTable({
                     ) : (
                       <span className="text-preview">{seg.translated_text || '...'}</span>
                     )}
-                  </td>
+                  </td>}
                   <td className="col-lock">
                     <input type="checkbox" checked={seg.locked} disabled={disabled}
                       onChange={e => onUpdate(seg.index, { locked: e.target.checked })} />
@@ -389,7 +395,7 @@ function SubtitleTable({
                 </tr>
               );
             })}
-            {bottomSpacer > 0 && <tr className="virtual-spacer" aria-hidden="true"><td colSpan={6} style={{ height: bottomSpacer }}/></tr>}
+            {bottomSpacer > 0 && <tr className="virtual-spacer" aria-hidden="true"><td colSpan={showTranslation ? 6 : 5} style={{ height: bottomSpacer }}/></tr>}
           </tbody>
         </table>
       </div>

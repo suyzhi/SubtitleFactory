@@ -1,0 +1,13 @@
+{
+  "machdep.cpu.brand_string": "Apple M5",
+  "hw.memsize": "25769803776",
+  "hw.logicalcpu": "10",
+  "macos": "ProductName:\t\tmacOS\nProductVersion:\t\t26.6.2\nBuildVersion:\t\t25G83",
+  "libraries": {
+    "faster-whisper": "1.2.1",
+    "ctranslate2": "4.8.1",
+    "mlx": "0.32.0",
+    "mlx-qwen3-asr": "0.3.5",
+    "numpy": "2.4.6"
+  }
+}

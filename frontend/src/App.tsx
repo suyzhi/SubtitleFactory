@@ -1,3 +1,6 @@
+import TaskWorkspace from './components/TaskWorkspace';
+import {useSelectedTask,useActiveTaskCount} from './taskStore';
+import ExportWorkspace from './components/ExportWorkspace';
 // 字幕工厂 - 主应用组件（集成字幕播放器 + 流程可视化）
 
 import {
@@ -6,7 +9,7 @@ import {
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import type {
   Project, SubtitleSegment, TaskStatus, ProcessingConfig,
-  ModelSize, ExportFormat,
+  ExportFormat,
   ProcessStep, ProcessLogEntry, TaskStepStatus,
   SubtitleStyleSettings, SubtitleStats,
   HealthStatus, AppSettings,
@@ -23,6 +26,13 @@ import {
   writeRecoveredSegmentDraft,
 } from './draftRecovery';
 import './App.css';
+import TranscriptionCandidates from './components/TranscriptionCandidates';
+import LibraryControls from './components/LibraryControls';
+import { projectReadiness, taskLabel, taskProgressLabel, taskIsActive } from './projectState';
+import ImportFlow, { type ImportSource } from './components/ImportFlow';
+import TranscriptionSetup from './components/TranscriptionSetup';
+import EditorWorkbench from './components/EditorWorkbench';
+import WorkspacePanel from './components/WorkspacePanel';
 import DeferredPanel from './components/DeferredPanel';
 import SubtitleTable from './components/SubtitleTable';
 import {
@@ -36,7 +46,6 @@ import type { PlayerPresentationMode, SubtitlePlayerHandle } from './components/
 import { loadSubtitleStyle, saveSubtitleStyle } from './subtitleStyle';
 import ProcessTimeline from './components/ProcessTimeline';
 import ProcessLogViewer from './components/ProcessLogViewer';
-import SubtitleStatsPanel from './components/SubtitleStatsPanel';
 import SubtitleTimeline from './components/SubtitleTimeline';
 import QualityPanel from './components/QualityPanel';
 import GlobalTaskDrawer from './components/GlobalTaskDrawer';
@@ -65,7 +74,7 @@ const ContentCenter = lazy(() => import('./components/ContentCenter'));
 
 const DEFAULT_CONFIG: ProcessingConfig = {
   model: 'auto', language: 'auto', target_language: 'zh',
-  enable_clean: true, enable_translate: true, bilingual: false, clean_target_length: 42,
+  enable_clean: false, enable_translate: false, bilingual: localStorage.getItem('subtitle_factory_export_bilingual') === 'true', clean_target_length: 42,
 };
 
 // ── 步骤 ID 到任务类型的映射 ──
@@ -93,17 +102,20 @@ function App() {
   const [youtubeUrl, setYoutubeUrl] = useState('');
   const [config, setConfig] = useState<ProcessingConfig>(() => ({
     ...DEFAULT_CONFIG,
+    enable_clean: localStorage.getItem('subtitle_factory_flow_clean') === 'true',
+    enable_translate: localStorage.getItem('subtitle_factory_flow_translate') === 'true',
     clean_target_length: Number(localStorage.getItem('subtitle_factory_clean_target_length')) || DEFAULT_CONFIG.clean_target_length,
   }));
   const [subtitleStyle, setSubtitleStyle] = useState<SubtitleStyleSettings>(loadSubtitleStyle);
 
   // ── Task State ──
-  const [currentTask, setCurrentTask] = useState<TaskStatus | null>(null);
+  const [currentTask, setCurrentTask] = useSelectedTask();
+  const activeTaskCount = useActiveTaskCount();
   const [pollInterval, setPollInterval] = useState<number | null>(null);
   const [processLogs, setProcessLogs] = useState<ProcessLogEntry[]>([]);
   const [processSteps, setProcessSteps] = useState<ProcessStep[]>(emptyProcess);
   const [selectedStep, setSelectedStep] = useState<string | null>(null);
-  const [subtitleStats, setSubtitleStats] = useState<SubtitleStats | null>(null);
+  const [, setSubtitleStats] = useState<SubtitleStats | null>(null);
   const [failedCleanBatches, setFailedCleanBatches] = useState<FailedCleanBatch[]>([]);
 
   // ── UI State ──
@@ -120,6 +132,8 @@ function App() {
   const [toast, setToast] = useState('');
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const [taskStarting, setTaskStarting] = useState(false);
+  const [modelError,setModelError]=useState('');
+  const modelRequest=useRef(0);
   const [modelStatus, setModelStatus] = useState<Awaited<ReturnType<typeof api.getTranscriptionModels>> | null>(null);
   const [health, setHealth] = useState<HealthStatus | null>(null);
   const [appSettings, setAppSettings] = useState<AppSettings>({
@@ -142,11 +156,26 @@ function App() {
   const [librarySearchSelection, setLibrarySearchSelection] = useState(-1);
   const [librarySearchFacets, setLibrarySearchFacets] = useState<api.SegmentSearchFacets>({});
   const [librarySearchFilters, setLibrarySearchFilters] = useState<api.SegmentSearchFilters>({});
+  const [libraryPage,setLibraryPage] = useState(1);
+  const [libraryTotal,setLibraryTotal] = useState(0);
+  const [libraryPages,setLibraryPages] = useState(1);
+  const [libraryLoading,setLibraryLoading] = useState(false);
+  const [libraryError,setLibraryError] = useState('');
+  const [libraryStatus,setLibraryStatus] = useState('');
+  const [libraryRefresh,setLibraryRefresh] = useState(0);
+  const [compactLibrary,setCompactLibrary] = useState(() => localStorage.getItem('subtitle_factory_library_compact') === 'true');
   const [librarySort, setLibrarySort] = useState('updated_desc');
   const [showProjectWorkspace, setShowProjectWorkspace] = useState(false);
-  const [projectWorkspace, setProjectWorkspace] = useState<'preview' | 'subtitles' | 'quality' | 'smart' | 'process' | 'content' | 'style' | 'export'>('preview');
+  const [projectWorkspace, setProjectWorkspace] = useState<'subtitles' | 'style' | 'export'>('subtitles');
   const [subtitleFocusRequest, setSubtitleFocusRequest] = useState(0);
-  const [bottomTab, setBottomTab] = useState<'subtitles' | 'style' | 'export' | 'logs'>('subtitles');
+  const [pendingImport, setPendingImport] = useState<ImportSource | null>(null);
+  const [importBusy, setImportBusy] = useState(false);
+  const [quickImport, setQuickImport] = useState(() => localStorage.getItem('subtitle_factory_quick_import') || '');
+  const [toolsOpen, setToolsOpen] = useState(false);
+  const [toolsTab, setToolsTab] = useState<'process' | 'quality' | 'smart' | 'content'>('process');
+  const [segmentInspector, setSegmentInspector] = useState<number | null>(null);
+  const [segmentsLoading, setSegmentsLoading] = useState(false);
+  const [segmentsError, setSegmentsError] = useState('');
   const [inspectorMode, setInspectorMode] = useState<'style' | 'step' | null>(null);
   const [showLinkPopover, setShowLinkPopover] = useState(false);
   const [playlistDialogUrl, setPlaylistDialogUrl] = useState<string | null>(null);
@@ -157,11 +186,10 @@ function App() {
   const [renameDraft, setRenameDraft] = useState('');
   const [removingProjectIds, setRemovingProjectIds] = useState<Set<string>>(() => new Set());
   const [presentationMode, setPresentationMode] = useState<PlayerPresentationMode>('normal');
-  const [forceLocalPlayback, setForceLocalPlayback] = useState(false);
   const [leftPanelWidth, setLeftPanelWidth] = useState(() => Number(localStorage.getItem('subtitle_factory_left_width')) || 258);
   const [rightPanelWidth, setRightPanelWidth] = useState(() => Number(localStorage.getItem('subtitle_factory_right_width')) || 336);
   const [viewerHeight, setViewerHeight] = useState(() => Number(localStorage.getItem('subtitle_factory_viewer_height')) || 470);
-  const [subtitleFocus, setSubtitleFocus] = useState(false);
+  const subtitleFocus = false;
   const [transcriptionRuntimes, setTranscriptionRuntimes] = useState<Record<string,string>>(() => { try{return JSON.parse(localStorage.getItem('subtitle_factory_transcription_runtimes')||'{}');}catch{return {};}});
   const [collapsedProjectGroups, setCollapsedProjectGroups] = useState<Set<string>>(() => {
     try { return new Set(JSON.parse(localStorage.getItem('subtitle_factory_collapsed_groups') || '[]')); }
@@ -188,7 +216,6 @@ function App() {
   const downloadedRenderTask = useRef('');
   const restoredStartupProject = useRef(false);
   const taskStartLock = useRef(false);
-  const sourceActionLock = useRef(false);
   const importActionLock = useRef(false);
   const exportActionLock = useRef(false);
   const ownsWindowFullscreen = useRef(false);
@@ -204,7 +231,6 @@ function App() {
   const activeProjectIdRef = useRef<string | null>(null);
   const projectSelectionIntent = useRef(0);
   const styleSaveTimer = useRef<number | null>(null);
-  const webFallbackAttempted = useRef(false);
   const pendingSearchJump = useRef<SegmentSearchHit | null>(null);
   const toastTimer = useRef<number | null>(null);
 
@@ -332,8 +358,7 @@ function App() {
       );
 
       const canPlay = Boolean(
-        activeProject?.video_path
-        || (activeProject?.media_mode === 'web' && activeProject.youtube_video_id),
+        activeProject?.video_path,
       );
 
       if (event.key.toLowerCase() === 't' && !isEditing && canPlay) {
@@ -407,14 +432,20 @@ function App() {
   const hasActivePlaylistBatch = playlistBatches.some(({ batch }) =>
     batch.status === 'running' || batch.status === 'pending');
 
+  useEffect(() => { setLibraryPage(1); },[librarySearch,librarySort,libraryStatus,libraryView]);
   useEffect(() => {
-    if (backendStatus !== 'connected' || libraryView !== 'projects') return;
-    const timer = window.setTimeout(() => {
-      void api.listProjects({ search: librarySearch.trim(), sort: librarySort, page_size: 200 })
-        .then(result => setProjects(result.projects)).catch(() => undefined);
-    }, 250);
-    return () => window.clearTimeout(timer);
-  }, [backendStatus, librarySearch, librarySort, libraryView]);
+    if (backendStatus !== 'connected' || showProjectWorkspace) return;
+    let cancelled=false;
+    setLibraryLoading(true); setLibraryError('');
+    const timer=window.setTimeout(() => {
+      void api.listProjects({deleted:libraryView === 'trash',search:librarySearch.trim(),sort:librarySort,page_size:40,page:libraryPage,readiness:libraryStatus})
+        .then(result => { if (cancelled) return; (libraryView === 'trash' ? setTrashProjects : setProjects)(result.projects); setLibraryTotal(result.total ?? result.projects.length); setLibraryPages(result.pages || 1); if (libraryPage > (result.pages || 1)) setLibraryPage(result.pages || 1); })
+        .catch(error => { if (!cancelled) setLibraryError(error.message); })
+        .finally(() => { if (!cancelled) setLibraryLoading(false); });
+    },200);
+    return () => { cancelled=true; window.clearTimeout(timer); };
+  },[backendStatus,librarySearch,librarySort,libraryStatus,libraryView,libraryPage,showProjectWorkspace,libraryRefresh]);
+
 
   useEffect(() => {
     setLibrarySearchPage(1);
@@ -469,7 +500,9 @@ function App() {
 
   const refreshModels = useCallback(() => {
     if (backendStatus !== 'connected') return;
-    api.getTranscriptionModels(activeProject?.id, config.language).then(setModelStatus).catch(() => setModelStatus(null));
+    const sequence=++modelRequest.current;
+    setModelError('');
+    api.getTranscriptionModels(activeProject?.id, config.language).then(result => {if(sequence === modelRequest.current)setModelStatus(result);}).catch(error => {if(sequence === modelRequest.current)setModelError(error.message);});
   }, [activeProject?.id, backendStatus, config.language]);
 
   const refreshAIProviders = useCallback(async () => {
@@ -492,13 +525,9 @@ function App() {
   }, []);
 
   const refreshLibraries = useCallback(async () => {
-    const [active, deleted, batches] = await Promise.all([
-      api.listProjects(), api.listProjects({ deleted: true }).catch(() => ({ projects: [] as Project[] })),
-      api.getPlaylistBatches().catch(() => ({ batches: [] as PlaylistBatchDetail[] })),
-    ]);
-    setProjects(active.projects);
-    setTrashProjects(deleted.projects);
-    setPlaylistBatches(batches.batches);
+    setLibraryRefresh(value => value + 1);
+    const result = await api.getPlaylistBatches().catch(() => ({ batches: [] as PlaylistBatchDetail[] }));
+    setPlaylistBatches(result.batches);
   }, []);
 
   useEffect(refreshModels, [refreshModels]);
@@ -540,7 +569,8 @@ function App() {
     if (task.type === 'workflow' && task.details?.stages) {
       const stageMap = task.details.stages as Record<string, TaskStepStatus>;
       for (const [stepId, status] of Object.entries(stageMap)) {
-        setStepStatus(stepId, status, status === 'success' ? 100 : status === 'running' ? task.progress : 0);
+        const displayedStatus = status === 'running' && task.status === 'paused' ? 'paused' : status;
+        setStepStatus(stepId, displayedStatus, status === 'success' ? 100 : status === 'running' ? task.progress : 0);
       }
       return;
     }
@@ -563,7 +593,7 @@ function App() {
     }
     // Map backend task type to step
     for (const [stepId, taskType] of Object.entries(STEP_TASK_MAP)) {
-      if (taskType === task.type) {
+      if (taskType === task.type || (task.type === 'render' && stepId === 'export')) {
         const taskStatusMap: Record<string, TaskStepStatus> = {
           pending: 'waiting',
           running: 'running',
@@ -585,15 +615,16 @@ function App() {
   }, []);
 
   // ── Poll task status ──
+  const pollingTaskId = currentTask?.id;
   useEffect(() => {
-    if (!pollInterval || !currentTask) return;
+    if (!pollInterval || !pollingTaskId) return;
     let cancelled = false;
     let requestedSequence = 0;
     let appliedSequence = 0;
     const id = window.setInterval(async () => {
       const sequence = ++requestedSequence;
       try {
-        const status = await api.getTaskStatus(currentTask.id);
+        const status = await api.getTaskStatus(pollingTaskId);
         if (
           cancelled
           || sequence < appliedSequence
@@ -616,7 +647,7 @@ function App() {
           }
         }
 
-        if (status.type === 'transcribe' && (status.status === 'running' || status.status === 'paused') && activeProject) {
+        if (['transcribe','workflow'].includes(status.type) && (status.status === 'running' || status.status === 'paused') && activeProject) {
           const projectId = activeProject.id;
           api.getSegments(projectId).then(result => {
             if (activeProjectIdRef.current === projectId) setSegments(result.segments);
@@ -667,16 +698,8 @@ function App() {
           }
         }
 
-        if (status.status === 'success' || status.status === 'failed' || status.status === 'cancelled' || status.status === 'partial') {
+        if (!taskIsActive(status)) {
           setPollInterval(null);
-          if (
-            status.status === 'success'
-            && status.details?.materialization_reason === 'player_fallback'
-          ) {
-            setForceLocalPlayback(true);
-            setToast('网页播放器不可用，已切换到本地视频继续工作');
-            window.setTimeout(() => setToast(''), 3600);
-          }
           if (activeProject) {
             const projectId = activeProject.id;
             api.getSegments(projectId)
@@ -689,7 +712,7 @@ function App() {
               setActiveProject(project);
               editorRevision.current = Number(project.edit_revision || 0);
             }).catch(() => {});
-            api.listProjects().then(result => setProjects(result.projects)).catch(() => {});
+            setLibraryRefresh(value => value + 1);
           }
         }
       } catch (e: any) {
@@ -702,7 +725,7 @@ function App() {
       cancelled = true;
       clearInterval(id);
     };
-  }, [pollInterval, currentTask, activeProject, addLog, ingestTaskLogs, syncProcessFromTask]);
+  }, [setCurrentTask, pollInterval, pollingTaskId, activeProject, addLog, ingestTaskLogs, syncProcessFromTask]);
 
   useEffect(() => {
     let cancelled = false;
@@ -728,10 +751,9 @@ function App() {
         if (stopped) return;
         setHealth(healthResult);
         setBackendStatus('connected');
-        const startup = await loadAppBootstrap();
+        const startup = await loadAppBootstrap(false);
         if (!stopped) {
-          setProjects(startup.projects);
-          setTrashProjects(startup.trashProjects);
+          setLibraryRefresh(value => value + 1);
           applyAppSettings(startup.app.settings);
           setConfig(current => ({
             ...current,
@@ -755,10 +777,15 @@ function App() {
 
   // ── Refresh segments ──
   const refreshSegments = useCallback(async (projectId: string) => {
+    if (activeProjectIdRef.current === projectId) { setSegmentsLoading(true); setSegmentsError(''); }
     try {
       const r = await api.getSegments(projectId);
       if (activeProjectIdRef.current === projectId) setSegments(r.segments);
-    } catch { }
+    } catch (error) {
+      if (activeProjectIdRef.current === projectId) setSegmentsError(error instanceof Error ? error.message : '字幕加载失败');
+    } finally {
+      if (activeProjectIdRef.current === projectId) setSegmentsLoading(false);
+    }
   }, []);
 
   const refreshActiveProject = useCallback(async (projectId: string) => {
@@ -786,8 +813,6 @@ function App() {
     if (selectionIntent !== projectSelectionIntent.current) return;
     activeProjectIdRef.current = p.id;
     setActiveProject(p);
-    setForceLocalPlayback(false);
-    webFallbackAttempted.current = false;
     editorRevision.current = Number(p.edit_revision || 0);
     draftItemsRef.current = {};
     draftBaseRevisionRef.current = null;
@@ -795,7 +820,8 @@ function App() {
     setDraftIsStale(false);
     setEditorSaveState('idle');
     setShowProjectWorkspace(true);
-    setProjectWorkspace(p.segments_count > 0 ? 'subtitles' : 'preview');
+    setProjectWorkspace('subtitles');
+    setToolsOpen(false); setSegmentInspector(null); setSegments([]);
     localStorage.setItem('subtitle_factory_last_project_id', p.id);
     lastTaskMessage.current = '';
     lastTaskBatch.current = '';
@@ -829,11 +855,11 @@ function App() {
         setCurrentTask(latestTask);
         syncProcessFromTask(latestTask);
         ingestTaskLogs(latestTask);
-        if (['pending', 'running', 'paused'].includes(latestTask.status)) setPollInterval(1000);
+        if (taskIsActive(latestTask)) setPollInterval(1000);
       }
     } catch { /* projects created by older builds may not have task history */ }
     if (activeProjectIdRef.current === p.id) addLog('info', '项目', `打开项目: ${p.title}`);
-  }, [refreshSegments, addLog, ingestTaskLogs, refreshProcessSteps, syncProcessFromTask]);
+  }, [setCurrentTask, refreshSegments, addLog, ingestTaskLogs, refreshProcessSteps, syncProcessFromTask]);
 
   const selectProjectById = useCallback(async (projectId: string) => {
     const selectionIntent = ++projectSelectionIntent.current;
@@ -970,7 +996,7 @@ function App() {
       taskStartLock.current = false;
       setTaskStarting(false);
     }
-  }, [addLog, ingestTaskLogs, setStepStatus, syncProcessFromTask]);
+  }, [setCurrentTask, addLog, ingestTaskLogs, setStepStatus, syncProcessFromTask]);
 
   const compatibleModel = useCallback((): string | null => {
     const requestedModel = resolveConfiguredModel(config.model, modelStatus?.recommended_model);
@@ -988,32 +1014,6 @@ function App() {
   }, [config.language, config.model, modelStatus, showToast]);
 
   // ── Create project ──
-  const handleCreateProject = useCallback(async () => {
-    setStepStatus('create', 'running', 50);
-    try {
-      const r = await api.createProject({
-        source_type: youtubeUrl ? 'youtube' : 'local',
-        source_url: youtubeUrl || undefined,
-        title: youtubeUrl ? `YouTube - ${youtubeUrl.slice(0, 50)}` : '新项目',
-        language: config.language,
-        target_language: config.target_language,
-        media_mode: youtubeUrl
-          ? (appSettings.youtube_media_mode === 'web' ? 'web' : 'local')
-          : 'local',
-      });
-      addLog('info', '创建项目', `项目已创建: ${r.project_id.slice(0, 8)}`);
-      setStepStatus('create', 'success', 100);
-      const d = await api.listProjects();
-      setProjects(d.projects);
-      const newProj = d.projects.find(p => p.id === r.project_id);
-      if (newProj) await selectProject(newProj);
-      return r.project_id;
-    } catch (e: any) {
-      addLog('error', '创建项目', `创建失败: ${e.message}`);
-      setStepStatus('create', 'failed', 0, e.message);
-    }
-  }, [youtubeUrl, config, appSettings.youtube_media_mode, addLog, selectProject, setStepStatus]);
-
   const runtimeForModel = useCallback((model:string) => resolveRuntimeSelection(
     model,
     appSettings.transcription_runtime_by_model,
@@ -1033,100 +1033,78 @@ function App() {
   },[applyAppSettings,showToast]);
   const requireRuntime = useCallback((model:string)=>{
     const runtime=runtimeForModel(model); const option=modelStatus?.models.find(item=>item.id===model)?.runtimes?.find(item=>item.id===runtime);
-    if(!runtime||!option?.available){setSelectedStep('transcribe');setInspectorMode('step');showToast(!runtime?'请选择转写运行设备：CPU、Apple GPU 或 Core ML':'所选运行设备当前不可用，请重新选择',4200);return '';}
+    if(!runtime||!option?.available){setSelectedStep('transcribe');setToolsTab('process');setToolsOpen(true);showToast(!runtime?'请选择转写运行设备：CPU、Apple GPU 或 Core ML':'所选运行设备当前不可用，请重新选择',4200);return '';}
     return runtime;
   },[modelStatus,runtimeForModel,showToast]);
 
-  // ── Full pipeline ──
-  const handleFullPipeline = useCallback(async () => {
-    if (sourceActionLock.current) return;
-    sourceActionLock.current = true;
-    setTaskStarting(true);
-    const model = appSettings.default_workflow === 'manual' ? config.model : compatibleModel();
-    try {
-      if (!model) return;
-      const workflowRuntime=appSettings.default_workflow==='manual'?'':requireRuntime(model);
-      if(appSettings.default_workflow!=='manual'&&!workflowRuntime)return;
-      const pid = await handleCreateProject();
-      if (!pid) return;
-      if (youtubeUrl) {
-        if (appSettings.default_workflow === 'manual') {
-          if (appSettings.youtube_media_mode === 'web') {
-            await startTask('准备音频', 'download', () => api.prepareProjectAudio(pid));
-          } else {
-            await startTask('下载视频', 'download', () => api.startDownload(pid, youtubeUrl));
-          }
-        } else {
-          await startTask('自动生成字幕', 'download', () => api.startWorkflow(pid, {
-            source_url: youtubeUrl, model, language: config.language, runtime:workflowRuntime,
-          }));
-        }
-      }
-    } finally {
-      sourceActionLock.current = false;
-      setTaskStarting(false);
-    }
-  }, [appSettings.default_workflow, appSettings.youtube_media_mode, youtubeUrl, config.language, config.model, compatibleModel, handleCreateProject, requireRuntime, startTask]);
-
-  // ── Import local videos; a project is created only after a real selection. ──
-  const importFiles = useCallback(async (files: File[]) => {
+  const flowOptions = useMemo(() => ({enable_clean:config.enable_clean,enable_translate:config.enable_translate,target_language:config.target_language,clean_target_length:config.clean_target_length,text_processing_consent:config.enable_clean || config.enable_translate}),[config.enable_clean,config.enable_translate,config.target_language,config.clean_target_length]);
+  useEffect(() => {localStorage.setItem('subtitle_factory_flow_clean',String(config.enable_clean));localStorage.setItem('subtitle_factory_flow_translate',String(config.enable_translate));},[config.enable_clean,config.enable_translate]);
+  const importSignature = JSON.stringify([config.model, config.language, runtimeForModel(config.model === 'auto' ? modelStatus?.recommended_model || '' : config.model),flowOptions]);
+  const preparedImports = useRef(new Map<File|string,{projectId:string;uploaded:boolean;started:boolean}>());
+  const executeImport = useCallback(async (source: ImportSource, generate: boolean, remember = false) => {
     if (importActionLock.current) return;
-    const supported = files.filter(file => /\.(mp4|mkv|mov|webm|avi)$/i.test(file.name));
-    if (!supported.length) {
-      showToast('请选择 MP4、MKV、MOV、WebM 或 AVI 视频');
-      return;
-    }
-    const workflowModel=compatibleModel();
-    const workflowRuntime=appSettings.default_workflow==='manual'||!workflowModel?'':requireRuntime(workflowModel);
-    if(appSettings.default_workflow!=='manual'&&!workflowRuntime)return;
-    importActionLock.current = true;
-    setTaskStarting(true);
+    const model = generate ? compatibleModel() : config.model;
+    if (!model) throw new Error('当前语言没有可用模型，请选择模型');
+    const runtime = generate ? requireRuntime(model) : '';
+    if (generate && !runtime) throw new Error('请选择可用的运行设备');
+    importActionLock.current = true; setImportBusy(true);
+    const items = source.kind === 'files' ? source.files : [source.url];
     try {
-      for (const file of supported) {
-        try {
-        const created = await api.createProject({
-          source_type: 'local', title: file.name,
-          language: config.language, target_language: config.target_language,
-        });
-        setUploadProgress(0);
-        addLog('info', '导入视频', `正在导入 ${file.name}`);
-        const result = await api.importLocalVideo(created.project_id, file, {
-          autostart: appSettings.default_workflow !== 'manual', model: workflowModel||config.model, language: config.language, runtime:workflowRuntime,
-          onProgress: setUploadProgress,
-        });
-        setUploadProgress(null);
-        const listing = await api.listProjects();
-        setProjects(listing.projects);
-        const project = listing.projects.find(item => item.id === created.project_id);
-        if (project) await selectProject(project);
-        if (result.task_id) {
-          const status = await api.getTaskStatus(result.task_id);
-          if (activeProjectIdRef.current !== created.project_id) continue;
-          backendLogTaskId.current = result.task_id;
-          lastBackendLogCount.current = 0;
-          setCurrentTask(status);
-          syncProcessFromTask(status);
-          ingestTaskLogs(status);
-          setPollInterval(1000);
+      for (const item of items) {
+        const title = typeof item === 'string' ? `YouTube - ${item}` : item.name;
+        let prepared = preparedImports.current.get(item);
+        if (!prepared) {
+        const created = await api.createProject({source_type:source.kind === 'files' ? 'local' : 'youtube', source_url:source.kind === 'link' ? source.url : undefined, title, language:config.language, target_language:config.target_language, media_mode:'local'});
+        prepared = {projectId:created.project_id,uploaded:false,started:false};
+        preparedImports.current.set(item,prepared);
         }
-        } catch (error: any) {
+        if (prepared.started) continue;
+        let taskId: string | undefined;
+        if (typeof item !== 'string' && !prepared.uploaded) {
+          setUploadProgress(0);
+          await api.importLocalVideo(prepared.projectId,item,{autostart:false,onProgress:setUploadProgress});
           setUploadProgress(null);
-          addLog('error', '导入视频', error.message);
-          showToast(error.message, 4200);
+          prepared.uploaded = true;
+        }
+        const project = await api.getProject(prepared.projectId);
+        setProjects(current => [project,...current.filter(item => item.id !== project.id)]);
+        await selectProject(project);
+        if (generate) {
+          taskId = (await api.startWorkflow(project.id,{model,language:config.language,runtime,...flowOptions, ...(source.kind === 'link' ? {source_url:source.url} : {})})).task_id;
+        } else if (source.kind === 'link') {
+          taskId = (await api.startDownload(project.id,source.url)).task_id;
+        }
+        prepared.started = true;
+        if (taskId) {
+          const status = await api.getTaskStatus(taskId);
+          if (activeProjectIdRef.current === project.id) { setCurrentTask(status); syncProcessFromTask(status); ingestTaskLogs(status); setPollInterval(1000); }
         }
       }
-    } finally {
-      importActionLock.current = false;
-      setTaskStarting(false);
+      if (remember && generate) { localStorage.setItem('subtitle_factory_quick_import',importSignature); setQuickImport(importSignature); }
+      await api.saveAppSettings({default_model:config.model,source_language:config.language});
+      setPendingImport(null);
+      preparedImports.current.clear();
+    } finally { importActionLock.current=false; setImportBusy(false); setUploadProgress(null); }
+  },[setCurrentTask, compatibleModel,config.language,config.model,config.target_language,flowOptions,importSignature,ingestTaskLogs,requireRuntime,selectProject,syncProcessFromTask]);
+  const prepareImport = useCallback((source:ImportSource) => {
+    if (source.kind === 'files') {
+      source = {...source,files:source.files.filter(file => /\.(mp4|mkv|mov|webm|avi)$/i.test(file.name))};
+      if (!source.files.length) { showToast('请选择支持的视频文件'); return; }
     }
-  }, [addLog, appSettings.default_workflow, compatibleModel, config.language, config.model, config.target_language, ingestTaskLogs, requireRuntime, selectProject, showToast, syncProcessFromTask]);
+    if (quickImport === importSignature) void executeImport(source,true).catch(error => { setPendingImport(source); showToast(error.message); });
+    else setPendingImport(source);
+  },[executeImport,importSignature,quickImport,showToast]);
+  const importFiles = useCallback((files:File[]) => prepareImport({kind:'files',files}),[prepareImport]);
 
   const handleImportLocal = useCallback(() => {
     const input = document.createElement('input');
     input.type = 'file';
     input.multiple = true;
     input.accept = '.mp4,.mkv,.mov,.webm,.avi,video/*';
-    input.onchange = () => void importFiles(Array.from(input.files || []));
+    input.hidden = true;
+    input.onchange = () => { const files = Array.from(input.files || []); input.remove(); importFiles(files); };
+    input.oncancel = () => input.remove();
+    document.body.appendChild(input);
     input.click();
   }, [importFiles]);
 
@@ -1153,9 +1131,9 @@ function App() {
     const runtime=requireRuntime(model);if(!runtime)return;
     setSubtitleStats(null);
     startTask('自动生成字幕', 'transcribe', () => api.startWorkflow(activeProject.id, {
-      model, language: config.language, runtime,
+      model, language: config.language, runtime, ...flowOptions,
     }));
-  }, [activeProject, compatibleModel, config.language, requireRuntime, startTask]);
+  }, [activeProject, compatibleModel, config.language, flowOptions, requireRuntime, startTask]);
 
   const recoverTranscription = useCallback(async (preserveModel = false) => {
     if (!activeProject || !currentTask?.recoverable) return;
@@ -1172,14 +1150,14 @@ function App() {
         const selected = status.models.find(item => item.id === failedModel);
         if (!selected?.ready) {
           setSelectedStep('transcribe');
-          setProjectWorkspace('process');
+          setToolsTab('process'); setToolsOpen(true);
           setToast('原转写模型当前未就绪，请检查模型与运行设备后重试');
           return;
         }
         const runtime = String(currentTask.details?.runtime || runtimeForModel(failedModel) || '');
         if (!runtime) {
           setSelectedStep('transcribe');
-          setProjectWorkspace('process');
+          setToolsTab('process'); setToolsOpen(true);
           setToast('请重新选择转写运行设备后再重试');
           return;
         }
@@ -1236,15 +1214,14 @@ function App() {
     } finally {
       setTaskStarting(false);
     }
-  }, [currentTask, ingestTaskLogs, syncProcessFromTask, taskStarting]);
+  }, [setCurrentTask, currentTask, ingestTaskLogs, syncProcessFromTask, taskStarting]);
 
   const undoClean = useCallback(async () => {
     if (!activeProject || (currentTask && ['running', 'pending', 'paused'].includes(currentTask.status))) return;
     try {
       const result = await api.undoClean(activeProject.id);
       await refreshSegments(activeProject.id);
-      const listing = await api.listProjects();
-      setProjects(listing.projects);
+      setLibraryRefresh(value => value + 1);
       setToast(result.message);
       window.setTimeout(() => setToast(''), 3000);
     } catch (error: any) {
@@ -1311,16 +1288,18 @@ function App() {
         );
         if (activeProjectIdRef.current !== projectId) return;
         addLog('info', '导出', saved ? `${fmt.toUpperCase()} 已保存` : `已取消保存 ${fmt.toUpperCase()}`);
+        showToast(saved ? `${fmt.toUpperCase()} 字幕已导出` : '已取消保存');
       }
     } catch (e: any) {
       if (activeProjectIdRef.current !== projectId) return;
       addLog('error', '导出', `${fmt} 导出失败: ${e.message}`);
+      showToast(`导出失败：${e.message}`,5000);
       setStepStatus('export', 'failed', 0, e.message, '检查文件权限和 ffmpeg');
     } finally {
       exportActionLock.current = false;
       setTaskStarting(false);
     }
-  }, [activeProject, config.bilingual, subtitleStyle, addLog, ingestTaskLogs, setStepStatus]);
+  }, [setCurrentTask, activeProject, config.bilingual, subtitleStyle, addLog, ingestTaskLogs, setStepStatus, showToast]);
 
   const acceptEditorResult = useCallback((projectId: string, result: Awaited<ReturnType<typeof api.applySegmentOperation>>) => {
     setProjects(current => current.map(project => project.id === projectId
@@ -1656,7 +1635,7 @@ function App() {
       const file = input.files?.[0]; if (!file) return;
       try {
         const result = await api.importProjectPackage(file);
-        const listing = await api.listProjects(); setProjects(listing.projects);
+        setLibraryRefresh(value => value + 1);
         setToast(result.media_status === 'relink_required' ? '项目已导入，需要重新关联媒体' : '项目已完整导入');
       } catch (error: any) { setToast(error.message); }
     };
@@ -1673,8 +1652,9 @@ function App() {
   // ── Seek video from table ──
   const handleSeek = useCallback((time: number) => {
     setCurrentTime(time);
+    setActiveSegmentIdx(segments.findLastIndex(segment => segment.start <= time && segment.end >= time));
     videoPlayerRef.current?.seekTo(time);
-  }, []);
+  }, [segments]);
 
   const openLibrarySearchHit = useCallback(async (hit: SegmentSearchHit) => {
     const selectionIntent = ++projectSelectionIntent.current;
@@ -1695,7 +1675,7 @@ function App() {
     if (!hit || activeProject?.id !== hit.project_id) return;
     if (!segments.some(segment => segment.id === hit.segment_id || segment.index === hit.segment_index)) return;
     const frame = window.requestAnimationFrame(() => {
-      setProjectWorkspace('preview');
+      setProjectWorkspace('subtitles');
       setShowProjectWorkspace(true);
       setActiveSegmentIdx(Math.max(0, segments.findIndex(segment => segment.id === hit.segment_id)));
       handleSeek(hit.start);
@@ -1706,7 +1686,7 @@ function App() {
   }, [activeProject?.id, handleSeek, segments]);
 
   const previewClipRange = useCallback((start: number, end: number) => {
-    setProjectWorkspace('preview');
+    setProjectWorkspace('subtitles');
     setShowProjectWorkspace(true);
     window.requestAnimationFrame(() => videoPlayerRef.current?.previewRange(start, end));
   }, []);
@@ -1726,7 +1706,7 @@ function App() {
     } catch (error: any) {
       addLog('error', currentTask.type, error.message);
     }
-  }, [currentTask, syncProcessFromTask, addLog]);
+  }, [setCurrentTask, currentTask, syncProcessFromTask, addLog]);
 
   const cancelCurrentTask = useCallback(async () => {
     if (!currentTask || !['pending', 'running', 'paused'].includes(currentTask.status)) return;
@@ -1737,16 +1717,16 @@ function App() {
       if (activeProjectIdRef.current !== projectId || next.id !== taskId) return;
       setCurrentTask(next);
       ingestTaskLogs(next);
-      setPollInterval(null);
+      setPollInterval(taskIsActive(next) ? 1000 : null);
       syncProcessFromTask(next);
-      addLog('warning', next.type, '任务已终止');
-      setToast('任务已安全终止');
+      addLog('warning', next.type, taskProgressLabel(next));
+      setToast(taskProgressLabel(next));
       window.setTimeout(() => setToast(''), 2600);
       if (projectId) {
         api.getProject(projectId).then(project => {
           if (activeProjectIdRef.current === projectId) setActiveProject(project);
         }).catch(() => {});
-        api.listProjects().then(listing => setProjects(listing.projects)).catch(() => {});
+        setLibraryRefresh(value => value + 1);
         api.getSegments(projectId).then(result => {
           if (activeProjectIdRef.current === projectId) setSegments(result.segments);
         }).catch(() => {});
@@ -1756,7 +1736,7 @@ function App() {
       setToast('无法终止当前任务');
       window.setTimeout(() => setToast(''), 3000);
     }
-  }, [currentTask, activeProject, syncProcessFromTask, addLog, ingestTaskLogs]);
+  }, [setCurrentTask, currentTask, activeProject, syncProcessFromTask, addLog, ingestTaskLogs]);
 
   const handleStyleChange = useCallback((style: SubtitleStyleSettings) => {
     setSubtitleStyle(style);
@@ -1777,7 +1757,7 @@ function App() {
 
   const projectGroups = useMemo(() => {
     const groups = new Map<string, { key: string; label: string; projects: Project[]; rank: number }>();
-    for (const project of projects) {
+    for (const project of projects.slice(0,40)) {
       const namedGroup = project.source_type === 'youtube' ? project.group_name?.trim() : '';
       const key = project.source_type === 'local'
         ? 'local'
@@ -1871,8 +1851,8 @@ function App() {
     setSelectedStep(null);
     setInspectorMode(null);
     setShowProjectWorkspace(false);
-    setProjectWorkspace('preview');
-  }, []);
+    setProjectWorkspace('subtitles');
+  }, [setCurrentTask]);
 
   const animateProjectRemoval = useCallback(async (projectIds: string[]) => {
     setRemovingProjectIds(current => new Set([...current, ...projectIds]));
@@ -1940,7 +1920,7 @@ function App() {
     if (!trashProjects.length || !window.confirm(`永久删除回收站中的 ${trashProjects.length} 个项目？此操作无法撤销。`)) return;
     try {
       const result = await api.emptyTrash();
-      await animateProjectRemoval(trashProjects.map(project => project.id));
+      await animateProjectRemoval(trashProjects.slice(0,40).map(project => project.id));
       await refreshLibraries();
       setRemovingProjectIds(new Set());
       showToast(result.message || '回收站已清空');
@@ -1960,14 +1940,10 @@ function App() {
 
   const retryDownload = useCallback(() => {
     if (!activeProject?.source_url) return;
-    if (activeProject.media_mode === 'web') {
-      startTask('重新准备音频', 'download', () => api.prepareProjectAudio(activeProject.id));
-    } else {
-      startTask('重新下载', 'download', () => api.startDownload(activeProject.id, activeProject.source_url as string));
-    }
+    startTask('重新下载', 'download', () => api.startDownload(activeProject.id, activeProject.source_url as string));
   }, [activeProject, startTask]);
 
-  const changeProjectMediaMode = useCallback(async (mediaMode: 'local' | 'web') => {
+  const changeProjectMediaMode = useCallback(async (mediaMode: 'local') => {
     if (
       !activeProject
       || activeProject.source_type !== 'youtube'
@@ -1981,8 +1957,6 @@ function App() {
       if (activeProjectIdRef.current !== projectId) return;
       setActiveProject(result.project);
       setProjects(current => current.map(project => project.id === result.project.id ? result.project : project));
-      setForceLocalPlayback(false);
-      webFallbackAttempted.current = false;
       setToast(result.message);
       window.setTimeout(() => setToast(''), 3200);
       if (result.task_id) {
@@ -2000,7 +1974,7 @@ function App() {
     } finally {
       setTaskStarting(false);
     }
-  }, [activeProject, currentTask, ingestTaskLogs, syncProcessFromTask, taskStarting]);
+  }, [setCurrentTask, activeProject, currentTask, ingestTaskLogs, syncProcessFromTask, taskStarting]);
 
   const beginMaterialization = useCallback(async (
     reason: 'manual' | 'player_fallback' | 'offline',
@@ -2027,7 +2001,6 @@ function App() {
       setActiveProject(project);
       setProjects(current => current.map(item => item.id === project.id ? project : item));
       setStepStatus('download', 'success', 100);
-      if (reason === 'player_fallback') setForceLocalPlayback(true);
       setToast(result.message || `${label}已完成`);
       window.setTimeout(() => setToast(''), 3200);
     } catch (error: any) {
@@ -2038,7 +2011,7 @@ function App() {
     } finally {
       setTaskStarting(false);
     }
-  }, [activeProject, ingestTaskLogs, setStepStatus, syncProcessFromTask, taskStarting]);
+  }, [setCurrentTask, activeProject, ingestTaskLogs, setStepStatus, syncProcessFromTask, taskStarting]);
 
   const downloadLocalCopy = useCallback(() => {
     void beginMaterialization('manual', '下载本地副本');
@@ -2055,8 +2028,10 @@ function App() {
       void changeProjectMediaMode('local');
       return;
     }
-    if (action === 'workflow') {
-      doGenerateSubtitles();
+    if (action === 'workflow' && activeProject) {
+      const payload = currentTask.details?.resume_payload;
+      if (payload) startTask('从失败步骤重试','transcribe',() => api.startWorkflow(activeProject.id,{model:payload.model,language:payload.language,runtime:payload.runtime,...payload.options,resume_task_id:currentTask.id}));
+      else doGenerateSubtitles();
       return;
     }
     if (action === 'download') {
@@ -2085,12 +2060,12 @@ function App() {
       return;
     }
     if (action === 'smart_tools') {
-      setProjectWorkspace('smart');
+      setToolsTab('smart'); setToolsOpen(true);
       setToast('已打开智能工具；请检查范围与模型后重新开始');
       return;
     }
     if (action === 'content') {
-      setProjectWorkspace('content');
+      setToolsTab('content'); setToolsOpen(true);
       setToast('已打开内容工作区；已完成结果仍在，请手动重试中断的部分');
       return;
     }
@@ -2098,32 +2073,18 @@ function App() {
       setShowAISettings(true);
       return;
     }
-    setProjectWorkspace('process');
+    setToolsTab('process'); setToolsOpen(true);
     setToast('已打开处理流程，请检查参数后重新开始');
-  }, [
+  }, [activeProject, startTask,
     beginMaterialization, changeProjectMediaMode, currentTask, doClean, doExport,
     doExtractAudio, doGenerateSubtitles, doTranslate, recoverTranscription, retryDownload,
   ]);
 
   const recoveryActionLabel = taskRecoveryActionLabel(currentTask);
 
-  const handleWebPlayerError = useCallback((code: number) => {
-    if (!activeProject || webFallbackAttempted.current) return;
-    if (activeProject.video_available || activeProject.video_path) {
-      webFallbackAttempted.current = true;
-      setForceLocalPlayback(true);
-      setToast(`网页播放器不可用（${code}），已改用现有本地视频`);
-      window.setTimeout(() => setToast(''), 3600);
-      return;
-    }
-    webFallbackAttempted.current = true;
-    setToast(`网页播放器不可用（${code}），正在准备本地视频…`);
-    void beginMaterialization('player_fallback', '准备本地视频');
-  }, [activeProject, beginMaterialization]);
-
   const openWorkflowStep = useCallback((stepId: string) => {
     setSelectedStep(stepId);
-    setProjectWorkspace('process');
+    setToolsTab('process'); setToolsOpen(true);
     setShowProjectWorkspace(true);
     setInspectorMode(null);
   }, []);
@@ -2131,16 +2092,11 @@ function App() {
   // ── Step indicators ──
   const hasAudio = activeProject?.audio_path;
   const hasSegments = segments.length > 0;
-  const isProcessing = taskStarting || !!(currentTask && (currentTask.status === 'running' || currentTask.status === 'pending' || currentTask.status === 'paused'));
+  const isProcessing = taskStarting || taskIsActive(currentTask);
+  const editorBusy = isProcessing && (!currentTask || ['clean','translate','speaker_diarization','ocr'].includes(currentTask.type) || (currentTask.type === 'workflow' && ['clean','translate'].some(stage => currentTask.details?.stages?.[stage] === 'running')));
   const hasLocalVideo = Boolean(activeProject?.video_available || activeProject?.video_path);
   const activeProjectIsYoutube = youtubeEnabled && activeProject?.source_type === 'youtube';
-  const useWebPlayback = Boolean(
-    activeProject?.source_type === 'youtube'
-    && activeProject.media_mode === 'web'
-    && activeProject.youtube_video_id
-    && !forceLocalPlayback,
-  );
-  const canPlayMedia = useWebPlayback || hasLocalVideo;
+  const canPlayMedia = hasLocalVideo;
   const activeSegmentIndex = activeSegmentIdx >= 0 ? segments[activeSegmentIdx]?.index ?? -1 : -1;
   const subtitleEntryFocusIndex = findSubtitleFocusIndex(segments, currentTime);
   const cleanAIProvider = aiProviderState?.providers.find(
@@ -2158,8 +2114,9 @@ function App() {
       const values = ids.map(find).filter(Boolean) as ProcessStep[];
       const failed = values.find(step => step.status === 'failed');
       const running = values.find(step => step.status === 'running' || step.status === 'paused');
-      const allDone = values.length > 0 && values.every(step => step.status === 'success');
-      return failed || running || { ...(values.at(-1) || emptyProcess()[0]), status: allDone ? 'success' : 'waiting', progress: allDone ? 100 : 0 };
+      const allDone = values.length > 0 && (ids.includes('export') ? values.some(step => step.status === 'success') : values.every(step => step.status === 'success'));
+      const interrupted = values.find(step => ['cancelled','partial'].includes(step.status));
+      return failed || running || interrupted || { ...(values.at(-1) || emptyProcess()[0]), status: allDone ? 'success' : 'waiting', progress: allDone ? 100 : 0 };
     };
     return [
       { id: 'download', label: activeProjectIsYoutube ? '下载' : '媒体', icon: '⇩', state: combine('download', 'extract_audio') },
@@ -2170,9 +2127,7 @@ function App() {
     ];
   }, [activeProjectIsYoutube, processSteps]);
   const inspectorModelId=config.model==='auto'?(modelStatus?.recommended_model||'small'):config.model;
-  const inspectorModel=modelStatus?.models.find(item=>item.id===inspectorModelId);
-  const inspectorRuntime=inspectorModel?.runtimes?.find(item=>item.id===runtimeForModel(inspectorModelId));
-  const modelOptions=[{value:'auto',label:'智能自动选择',description:`只选已下载且匹配语言的模型 · 当前推荐 ${modelStatus?.models.find(item=>item.id===modelStatus.recommended_model)?.name||'Whisper Small'} · 不暗中下载`},...(modelStatus?.models||[]).map(item=>({value:item.id,label:item.name,description:[item.category_name,item.language_description,item.tags?.filter(tag=>['CPU','Apple GPU','Core ML'].includes(tag)).join(' / ')].filter(Boolean).join(' · ')}))];
+
   const playlistWorkflow = {
     model: inspectorModelId,
     runtime: runtimeForModel(inspectorModelId),
@@ -2180,23 +2135,6 @@ function App() {
     target_language: config.target_language,
     clean_target_length: config.clean_target_length,
   };
-
-  const primaryActionLabel = !activeProject ? '生成字幕'
-    : currentTask?.status === 'paused' ? '继续'
-      : currentTask?.status === 'failed' ? '重试'
-        : !hasSegments ? '生成字幕' : '继续';
-
-  const runPrimaryAction = useCallback(() => {
-    if (!activeProject) {
-      if (youtubeEnabled) setShowLinkPopover(true);
-      else handleImportLocal();
-      return;
-    }
-    if (currentTask?.status === 'paused') { void toggleTaskPause(); return; }
-    if (currentTask?.status === 'failed' && currentTask.recoverable) { retryCurrentFailure(); return; }
-    if (!hasSegments || currentTask?.status === 'failed') { doGenerateSubtitles(); return; }
-    openWorkflowStep(config.target_language === 'none' ? 'clean' : 'translate');
-  }, [activeProject, config.target_language, currentTask, doGenerateSubtitles, handleImportLocal, hasSegments, openWorkflowStep, retryCurrentFailure, toggleTaskPause, youtubeEnabled]);
 
   // 总进度计算
   const totalProgress = Math.round(
@@ -2222,50 +2160,43 @@ function App() {
   const renderMediaInspector = () => <section className="inspector-section media-mode-inspector">
     <h3>播放与音频来源</h3>
     {activeProjectIsYoutube && <label>项目链接<input value={activeProject?.source_url || youtubeUrl} placeholder="YouTube URL" onChange={event => setYoutubeUrl(event.target.value)}/></label>}
-    {activeProjectIsYoutube && <div className="project-media-mode">
-      <span><strong>此项目使用</strong><small>只影响当前项目，可随时切换</small></span>
-      <div className="segmented-control" role="group" aria-label="当前项目媒体模式">
-        <button className={activeProject.media_mode === 'web' ? 'active' : ''} disabled={isProcessing} onClick={() => void changeProjectMediaMode('web')}>网页播放</button>
-        <button className={activeProject.media_mode === 'local' ? 'active' : ''} disabled={isProcessing} onClick={() => void changeProjectMediaMode('local')}>本地视频</button>
-      </div>
-    </div>}
     <div className="runtime-mini">
       <span className={health?.runtime?.ffmpeg?.ok ? 'ok' : 'error'}>FFmpeg {health?.runtime?.ffmpeg?.ok ? '可用' : '需检查'}</span>
       {activeProjectIsYoutube && <span className={health?.runtime?.yt_dlp?.ok ? 'ok' : 'error'}>yt-dlp {health?.runtime?.yt_dlp?.ok ? '可用' : '需检查'}</span>}
       {activeProjectIsYoutube && <span className={health?.runtime?.deno?.ok && health?.runtime?.ejs?.ok ? 'ok' : 'error'}>YouTube 挑战组件 {health?.runtime?.deno?.ok && health?.runtime?.ejs?.ok ? '可用' : '需检查'}</span>}
     </div>
-    {activeProjectIsYoutube && activeProject?.media_mode === 'web'
-      ? <p>视频由网页播放器呈现，字幕、时间轴、倍速、循环和样式预览保持一致；本机只准备转写音频。网页受限或导出成片时会按需下载视频。</p>
-      : activeProject?.source_type === 'local'
+    {activeProject?.source_type === 'local'
         ? <p>用户导入的视频只保存在此项目，可离线播放并选择音轨或截取范围。</p>
         : <p>完整视频保存在本机，可离线播放并选择音轨或截取范围。</p>}
-    {activeProject?.video_path && activeProject.media_mode !== 'web' && <MediaSelectionPanel
+    {activeProject?.video_path && <MediaSelectionPanel
       projectId={activeProject.id}
-      onChanged={() => {
+      onChanged={changed => {
         const projectId = activeProject.id;
-        setActiveProject(current => current?.id === projectId
-          ? { ...current, audio_path: null, audio_available: false }
-          : current);
-        if (activeProjectIdRef.current === projectId) {
-          setToast('音轨或范围已更新，请重新提取音频');
-        }
+        void api.getProject(projectId).then(project => {
+          if (activeProjectIdRef.current !== projectId) return;
+          setActiveProject(project);
+          refreshProcessSteps(project);
+          showToast(changed ? '音轨或范围已更新；下次生成字幕将自动准备音频，现有字幕已保留' : '设置未改变，可继续复用现有音频');
+        }).catch(error => showToast(error.message));
       }}
     />}
     <div className="media-mode-actions">
       {activeProjectIsYoutube && <button className="button primary" disabled={!activeProject?.source_url || isProcessing} onClick={retryDownload}>
-        {activeProject?.media_mode === 'web' ? '重新准备音频' : '重新下载视频'}
+        重新下载视频
       </button>}
-      {activeProjectIsYoutube && activeProject?.media_mode === 'web' && !hasLocalVideo && <button className="button secondary" disabled={isProcessing} onClick={downloadLocalCopy}>下载本地副本</button>}
-      {activeProject?.video_path && activeProject.media_mode !== 'web' && <button className="button secondary" disabled={isProcessing} onClick={doExtractAudio}>重新提取音频</button>}
+      {activeProjectIsYoutube && !hasLocalVideo && <button className="button secondary" disabled={isProcessing} onClick={downloadLocalCopy}>下载本地副本</button>}
+      {activeProject?.video_path && <button className="button secondary" disabled={isProcessing} onClick={doExtractAudio}>重新提取音频</button>}
     </div>
   </section>;
+  const renderTranscriptionSetup = () => <>{modelError && <p role="alert">模型列表暂时无法刷新：{modelError}<button onClick={refreshModels}>重新加载模型</button></p>}<TranscriptionSetup models={modelStatus?.models || []} model={config.model} language={config.language} recommended={modelStatus?.recommended_model} runtime={runtimeForModel(inspectorModelId)} onModel={model => setConfig(current => ({...current,model}))} onLanguage={language => setConfig(current => ({...current,language}))} onRuntime={chooseRuntime}/></>;
+  const renderFlowOptions = () => <details className="flow-options"><summary>生成后流程：{config.enable_clean || config.enable_translate ? "含文本处理" : "仅转写"}</summary><label className="check-row"><input type="checkbox" checked={config.enable_clean} disabled={!cleanAIReady} onChange={event => setConfig(current => ({...current,enable_clean:event.target.checked}))}/>自动整理</label><label className="check-row"><input type="checkbox" checked={config.enable_translate} disabled={!translateAIReady} onChange={event => setConfig(current => ({...current,enable_translate:event.target.checked}))}/>自动翻译</label>{config.enable_translate && <LanguagePicker mode="target" value={config.target_language} onChange={target_language => setConfig(current => ({...current,target_language}))}/>}<p>勾选即同意在此流程中将字幕文本发送至设置中的服务商（整理：{cleanAIProvider?.name || '未配置'}；翻译：{translateAIProvider?.name || '未配置'}）。可能产生服务商费用，处理地区依服务商设置；取消勾选后，新任务不再自动执行相应步骤；正在运行的任务请在任务面板中终止。音视频不会随这两个步骤上传。</p>{(!cleanAIReady || !translateAIReady) && <button className="button secondary" onClick={() => setShowAISettings(true)}>配置文本服务</button>}</details>;
   const renderProcessSettings = () => <div className="process-settings-content">
     {activeProcessStep === 'download' && renderMediaInspector()}
-    {activeProcessStep === 'transcribe' && <section className="inspector-section transcription-inspector"><h3>语音转写</h3><label>转写模型<AppSelect value={config.model} onChange={model=>setConfig({...config,model:model as ModelSize})} options={modelOptions} label="转写模型" searchable/></label><div className="runtime-picker"><header><strong>运行设备</strong><small>{runtimeForModel(inspectorModelId)?'已为此模型记住':'首次使用必须选择'}</small></header><div className="runtime-choice-grid">{inspectorModel?.runtimes?.map(runtime=><button type="button" key={runtime.id} disabled={!runtime.available} className={runtimeForModel(inspectorModelId)===runtime.id?'selected':''} onClick={()=>chooseRuntime(inspectorModelId,runtime.id)}><i>{runtime.id==='cpu'?'CPU':runtime.id==='mlx'?'GPU':runtime.id==='coreml'?'ANE':'ML'}</i><span><strong>{runtime.name}</strong><small>{runtime.engine}</small>{!runtime.available&&<em>{runtime.reason}</em>}</span>{runtimeForModel(inspectorModelId)===runtime.id&&<b>✓</b>}</button>)}</div>{!inspectorModel?.runtimes?.length&&<p className="runtime-empty">正在读取此模型支持的运行设备…</p>}</div><label>源语言<LanguagePicker value={config.language} onChange={language => setConfig({ ...config, language })}/></label>{modelStatus && <div className="model-readiness"><strong>{inspectorModel?.name||inspectorModelId}</strong><small>{inspectorModel?.ready?'模型已就绪':inspectorModel?.download_required?'首次运行时下载到 App 数据目录':'模型不可用'}</small>{config.model==='auto'&&modelStatus.recommendation_reason&&<small>{modelStatus.recommendation_reason}</small>}</div>}<button className="button primary" disabled={!hasAudio || isProcessing || !runtimeForModel(inspectorModelId)} onClick={doTranscribe}>开始转写</button>{!runtimeForModel(inspectorModelId)&&<p className="runtime-required">请选择上方运行设备后再开始转写。</p>}</section>}
+    {activeProcessStep === 'transcribe' && <section className="inspector-section"><h3>生成字幕</h3><p>{hasSegments ? "重新转写会生成候选结果，当前人工字幕会保留。" : "转写完成后结果会出现在编辑页。"}</p>{renderTranscriptionSetup()}{renderFlowOptions()}<button className="button primary" disabled={isProcessing || !runtimeForModel(inspectorModelId)} onClick={hasAudio && !config.enable_clean && !config.enable_translate ? doTranscribe : doGenerateSubtitles}>开始转写</button><button className="button secondary" onClick={() => { setQuickImport(''); localStorage.removeItem('subtitle_factory_quick_import'); }}>下次导入时重新确认配置</button>{activeProject && <TranscriptionCandidates key={`${activeProject.id}-${currentTask?.status}-${currentTask?.details?.worker_stopped}`} projectId={activeProject.id} revision={editorRevision.current} segments={segments} hasDraft={Object.keys(draftItems).length > 0} onSeek={handleSeek} onAccept={result => acceptEditorResult(activeProject.id,result)}/>}</section>}
     {activeProcessStep === 'clean' && <section className="inspector-section"><h3>AI 忠实整理</h3><div className="ai-summary-row"><span className="ai-logo">✦</span><div><strong>{cleanAIProvider?.name || (aiProviderState ? '未配置 AI' : '正在读取 AI 服务')}</strong><small>{cleanAIProvider?.model || '请先打开设置中心'}</small></div></div><label>参考单句长度 <span>{config.clean_target_length} 字</span><input type="range" min={16} max={100} step={2} value={config.clean_target_length} onChange={event => setConfig({ ...config, clean_target_length: Number(event.target.value) })}/></label><p>只修正明显错词、标点和断句，不改变原意。</p><button className="button primary" disabled={!hasSegments || isProcessing || !cleanAIReady} onClick={doClean}>确认并开始整理</button><button className="button secondary" disabled={!hasSegments || isProcessing} onClick={undoClean}>撤销上次整理</button></section>}
     {activeProcessStep === 'clean' && renderFailedBatchRecovery()}
-    {activeProcessStep === 'translate' && <section className="inspector-section"><h3>AI 翻译</h3><label>目标语言<LanguagePicker mode="target" allowCustom allowNone value={config.target_language} onChange={target_language => setConfig({ ...config, target_language })}/></label><label className="check-row"><input type="checkbox" checked={config.bilingual} onChange={event => setConfig({ ...config, bilingual: event.target.checked })}/> 导出时包含原文与译文</label><p>翻译结果会单独保存，可继续逐句校对。</p><button className="button primary" disabled={!hasSegments || isProcessing || !translateAIReady || config.target_language === 'none'} onClick={doTranslate}>确认并开始翻译</button></section>}
-    {activeProcessStep === 'export' && <section className="inspector-section"><h3>快速导出</h3><p>{activeProjectIsYoutube ? '字幕文件立即生成；带字幕视频会在后台压制。网页模式首次导出成片时会先下载并保留本地视频。' : '字幕文件立即生成；带字幕视频只在本机后台压制，不上传媒体。'}</p><button className="button primary" onClick={() => setProjectWorkspace('export')}>前往导出工作区</button></section>}
+    {activeProcessStep === 'translate' && <section className="inspector-section"><h3>AI 翻译</h3><label>目标语言<LanguagePicker mode="target" allowCustom allowNone value={config.target_language} onChange={target_language => void updateTargetLanguage(target_language)}/></label><label className="check-row"><input type="checkbox" checked={config.bilingual} onChange={event => setConfig({ ...config, bilingual: event.target.checked })}/> 导出时包含原文与译文</label><p>翻译结果会单独保存，可继续逐句校对。</p><button className="button primary" disabled={!hasSegments || isProcessing || !translateAIReady || config.target_language === 'none'} onClick={doTranslate}>确认并开始翻译</button></section>}
+    {activeProcessStep === 'export' && <section className="inspector-section"><h3>快速导出</h3><p>字幕文件立即生成；带字幕视频只在本机后台压制，不上传媒体。</p><button className="button primary" onClick={() => setProjectWorkspace('export')}>前往导出工作区</button></section>}
     {currentTask?.status === 'failed' && <section className="recovery-card"><strong>{currentTask.error_code || '任务失败'}</strong><span>{currentTask.error || currentTask.message}</span>{currentTask.suggestion && <small>{currentTask.suggestion}</small>}<small>尝试次数：{currentTask.attempt || 1}</small>{currentTask.recoverable && <button onClick={retryCurrentFailure}>{recoveryActionLabel}</button>}{currentTask.available_actions?.includes('open_settings') && <button onClick={() => setShowAISettings(true)}>打开下载与存储设置</button>}</section>}
   </div>;
 
@@ -2288,7 +2219,7 @@ function App() {
           <button className="topbar-button" disabled={backendStatus !== 'connected'} onClick={handleImportLocal}><span>＋</span>导入</button>
           {youtubeEnabled && <button className={`topbar-button ${showLinkPopover ? 'active' : ''}`} disabled={backendStatus !== 'connected'} onClick={() => setShowLinkPopover(value => !value)}><span>⌁</span>链接</button>}
           <button className={`task-status-pill ${backendStatus}`} onClick={() => setShowTaskDrawer(value => !value)} aria-expanded={showTaskDrawer}>
-            <i className={`backend-dot ${backendStatus}`}/><span>{isProcessing ? `${currentTask?.message || '正在处理'} · ${Math.round(currentTask?.progress || 0)}%` : backendStatus === 'connected' ? '引擎就绪' : backendStatus === 'connecting' ? '正在启动' : '引擎异常'}</span>
+            <i className={`backend-dot ${backendStatus}`}/><span>{isProcessing ? (currentTask ? taskProgressLabel(currentTask) : '正在处理') : backendStatus === 'connected' ? (activeTaskCount ? `${activeTaskCount} 项后台任务` : '引擎就绪') : backendStatus === 'connecting' ? '正在启动' : '引擎异常'}</span>
           </button>
           <button className="icon-action" aria-label={theme === 'dark' ? '切换浅色模式' : '切换深色模式'} onClick={() => setTheme(value => value === 'dark' ? 'light' : 'dark')}>{theme === 'dark' ? '☀︎' : '◐'}</button>
           <button ref={settingsButtonRef} className="icon-action" aria-label="打开设置" onClick={() => setShowAISettings(true)}><img className="topbar-control-icon" src={settingsIcon} alt=""/></button>
@@ -2299,10 +2230,11 @@ function App() {
           <p>{isPlaylistUrl(youtubeUrl) ? '将先读取播放列表，确认批量转写与 AI 流水线后创建归组。' : '播放定位参数会自动移除并下载完整视频。'}</p>
           <button className="button primary" disabled={!youtubeUrl || backendStatus !== 'connected'} onClick={() => {
             setShowLinkPopover(false);
-            if (isPlaylistUrl(youtubeUrl)) setPlaylistDialogUrl(youtubeUrl); else void handleFullPipeline();
+            if (isPlaylistUrl(youtubeUrl)) setPlaylistDialogUrl(youtubeUrl); else prepareImport({kind:'link',url:youtubeUrl});
           }}>{isPlaylistUrl(youtubeUrl) ? '解析播放列表' : '下载并生成字幕'}</button>
         </div>}
       </header>
+      {pendingImport && <ImportFlow source={pendingImport} setup={<>{renderTranscriptionSetup()}{renderFlowOptions()}</>} busy={importBusy} canStart={!!runtimeForModel(inspectorModelId)} onClose={() => setPendingImport(null)} onStart={(generate,remember) => executeImport(pendingImport,generate,remember)}/>}
       <GlobalTaskDrawer open={showTaskDrawer} onClose={() => setShowTaskDrawer(false)} onOpenProject={projectId => {
         const project = projects.find(item => item.id === projectId)
           || playlistBatches.flatMap(batch => batch.items).find(item => item.project_id === projectId)?.project;
@@ -2319,7 +2251,7 @@ function App() {
       {filesystemAutomationEnabled && showProductionCenter && (() => {
         const batchModel = compatibleModel() || config.model;
         return <Suspense fallback={<DeferredPanel kind="overlay" label="正在打开批量生产工具…"/>}>
-          <ProductionCenter workflow={{ model: batchModel, language: config.language, target_language: config.target_language, runtime: runtimeForModel(batchModel) }} onClose={() => setShowProductionCenter(false)} onProjectsCreated={() => void api.listProjects({ search: librarySearch, sort: librarySort }).then(result => setProjects(result.projects))} onShowTasks={() => setShowTaskDrawer(true)}/>
+          <ProductionCenter workflow={{ model: batchModel, language: config.language, target_language: config.target_language, runtime: runtimeForModel(batchModel) }} onClose={() => setShowProductionCenter(false)} onProjectsCreated={() => setLibraryRefresh(value => value + 1)} onShowTasks={() => setShowTaskDrawer(true)}/>
         </Suspense>;
       })()}
       {showFirstRunPreflight && backendStatus === 'connected' && modelStatus && (() => {
@@ -2338,7 +2270,7 @@ function App() {
       <div className={`studio-shell v05-shell ${showProjectWorkspace && activeProject ? `app-project project-view-${projectWorkspace}` : 'app-library'} ${inspectorMode ? 'inspector-open' : ''}`} style={{
         '--left-panel-width': `${leftPanelWidth}px`, '--right-panel-width': `${rightPanelWidth}px`,
       } as React.CSSProperties}>
-        <aside className="project-sidebar">
+        <aside className={`project-sidebar ${compactLibrary ? "library-list-view" : ""}`}>
           <header className="library-page-header"><div><small>字幕工厂</small><h1>你的项目</h1><p>{youtubeEnabled ? '选择一个项目继续工作，或从视频和链接开始新的字幕任务。' : '选择一个项目继续工作，或导入您有权处理的视频。'}</p></div><div>
             {filesystemAutomationEnabled && <button className="button secondary" disabled={backendStatus !== 'connected'} onClick={() => setShowProductionCenter(true)}>批量与监听</button>}
             <button className="button secondary" disabled={backendStatus !== 'connected'} onClick={importProjectPackage}>导入项目包</button>
@@ -2346,17 +2278,18 @@ function App() {
             <button className="button primary" disabled={backendStatus !== 'connected'} onClick={handleImportLocal}>导入视频</button>
           </div></header>
           <section className="library-overview" aria-label="项目库概览">
-            <div><span>项目</span><strong>{projects.length}</strong><small>{trashProjects.length ? `${trashProjects.length} 个在回收站` : '全部保存在本机'}</small></div>
-            <div><span>字幕</span><strong>{projects.reduce((total, project) => total + Number(project.segments_count || 0), 0)}</strong><small>可在项目库中全文搜索</small></div>
+            <div><span>匹配项目</span><strong>{libraryTotal}</strong><small>{trashProjects.length ? `${trashProjects.length} 个在回收站` : '全部保存在本机'}</small></div>
+            <div><span>本页字幕</span><strong>{projects.reduce((total, project) => total + Number(project.segments_count || 0), 0)}</strong><small>可在项目库中全文搜索</small></div>
             {youtubeEnabled
               ? <div><span>批量任务</span><strong>{playlistBatches.filter(item => ['running', 'pending', 'paused', 'partial', 'failed'].includes(item.batch.status)).length}</strong><small>{playlistBatches.length ? `${playlistBatches.length} 个播放列表` : '暂无进行中的队列'}</small></div>
               : <div><span>隐私模式</span><strong>本地优先</strong><small>第三方媒体读取已关闭</small></div>}
             <div className={`library-runtime-card ${backendStatus}`}><span>本地引擎</span><strong>{backendStatus === 'connected' ? '就绪' : backendStatus === 'connecting' ? '启动中' : '需检查'}</strong><small>{backendStatus === 'connected' ? '媒体与转写工具可用' : backendStatus === 'connecting' ? '正在载入本机运行时' : '本地功能受限，AI 设置不应影响此状态'}</small></div>
           </section>
           <div className="library-switcher" role="tablist" aria-label="项目库视图">
-            <button role="tab" aria-selected={libraryView === 'projects'} className={libraryView === 'projects' ? 'active' : ''} onClick={() => setLibraryView('projects')}>项目 <span>{projects.length}</span></button>
-            <button role="tab" aria-selected={libraryView === 'trash'} className={libraryView === 'trash' ? 'active' : ''} onClick={() => setLibraryView('trash')}>回收站 <span>{trashProjects.length}</span></button>
+            <button role="tab" aria-selected={libraryView === 'projects'} className={libraryView === 'projects' ? 'active' : ''} onClick={() => setLibraryView('projects')}>项目</button>
+            <button role="tab" aria-selected={libraryView === 'trash'} className={libraryView === 'trash' ? 'active' : ''} onClick={() => setLibraryView('trash')}>回收站</button>
           </div>
+          <LibraryControls page={libraryPage} pages={libraryPages} total={libraryTotal} loading={libraryLoading} error={libraryError} compact={compactLibrary} status={libraryStatus} onPage={setLibraryPage} onStatus={setLibraryStatus} onRetry={() => setLibraryRefresh(value => value+1)} onCompact={() => setCompactLibrary(value => { localStorage.setItem('subtitle_factory_library_compact',String(!value)); return !value; })}/>
           {libraryView === 'projects' && <div className="library-filters"><input type="search" value={librarySearch} onChange={event => setLibrarySearch(event.target.value)} placeholder="搜索项目或所有字幕" aria-label="搜索项目或所有字幕" onKeyDown={event => {
             if (event.key === 'Escape') {
               event.preventDefault();
@@ -2418,7 +2351,7 @@ function App() {
                   return <div className={`project-card-shell ${removingProjectIds.has(project.id) ? 'removing' : ''}`} key={project.id} onContextMenu={event => openProjectMenu(event, project)}>
                     <button className={`project-card ${activeProject?.id === project.id ? 'active' : ''}`} onClick={() => void selectProject(project)}>
                       <span className="project-thumb"><span className="project-thumb-fallback">{project.source_type === 'youtube' ? '▶' : '▣'}</span>{thumbnailUrl && <img src={thumbnailUrl} alt="" loading="lazy" onError={event => { event.currentTarget.style.display = 'none'; }}/>}</span>
-                      <span className="project-card-copy"><strong>{project.title}</strong><small>{languageLabel(project.language)} · {project.segments_count} 条 · {project.created_at.slice(0, 10)}</small>{project.source_type === 'youtube' && <span className={`media-mode-badge ${project.media_mode}`}>{project.media_mode === 'web' ? '网页播放' : '本地视频'}</span>}{project.latest_task_status && <em className={`project-task-hint ${project.latest_task_status}`}>{project.latest_task_status === 'failed' ? `失败 · ${project.latest_task_message || '可重试'}` : project.latest_task_status === 'running' ? project.latest_task_message || '正在处理' : project.latest_task_status === 'pending' ? '排队中' : project.latest_task_status === 'success' ? '最近任务已完成' : project.latest_task_status}</em>}</span>
+                      <span className="project-card-copy"><strong>{project.title}</strong><small>{languageLabel(project.language)} · {project.segments_count} 条 · {project.created_at.slice(0, 10)}</small><span className="media-mode-badge">{projectReadiness(project)}</span>{project.latest_task_status && <em className={`project-task-hint ${project.latest_task_status}`}>最近任务：{taskLabel(project.latest_task_status)}{project.latest_task_status === 'failed' ? ` · ${project.latest_task_message || ''}` : ''}</em>}</span>
                     </button>
                     <button type="button" className="project-more" aria-label={`更多项目操作：${project.title}`} aria-haspopup="menu" aria-expanded={contextMenu?.project.id === project.id} onClick={event => openProjectMenu(event, project)}>•••</button>
                     {editingGroup && <div className="project-group-editor"><AppSelect value={groupDraft} onChange={setGroupDraft} label="项目分组" placeholder="搜索或输入分组名称" searchable allowCustom options={knownProjectGroups.map(name=>({value:name,label:name}))}/><button onClick={() => void saveProjectGroup(project)}>保存</button><button aria-label="取消" onClick={() => setGroupEditorProjectId(null)}>×</button></div>}
@@ -2428,7 +2361,7 @@ function App() {
             })}
             {libraryView === 'projects' && backendStatus === 'connecting' && !projects.length && !playlistBatches.length && <div className="library-skeleton" aria-label="正在载入项目"><i/><i/><i/></div>}
             {libraryView === 'projects' && backendStatus !== 'connecting' && !projects.length && !playlistBatches.length && <div className="project-empty"><span>▱</span><strong>还没有项目</strong><small>{youtubeEnabled ? '导入视频、拖放文件或粘贴链接开始。' : '导入或拖放本地视频开始。'}</small></div>}
-            {libraryView === 'trash' && trashProjects.map(project => <button className={`project-card trash-card ${removingProjectIds.has(project.id) ? 'removing' : ''}`} key={project.id} onContextMenu={event => openProjectMenu(event, project, true)} onClick={event => openProjectMenu(event, project, true)}>
+            {libraryView === 'trash' && trashProjects.slice(0,40).map(project => <button className={`project-card trash-card ${removingProjectIds.has(project.id) ? 'removing' : ''}`} key={project.id} onContextMenu={event => openProjectMenu(event, project, true)} onClick={event => openProjectMenu(event, project, true)}>
               <span className="project-thumb"><span className="project-thumb-fallback">♲</span></span><span className="project-card-copy"><strong>{project.title}</strong><small>{project.deleted_at?.slice(0, 10) || '已删除'} · 媒体仍保留</small></span><span className="project-more">•••</span>
             </button>)}
             {libraryView === 'trash' && !trashProjects.length && <div className="project-empty"><span>♲</span><strong>回收站为空</strong><small>移入回收站的项目会保留媒体与字幕。</small></div>}
@@ -2440,61 +2373,35 @@ function App() {
 
         <div className="panel-resizer panel-resizer-left" role="separator" aria-label="调整项目库宽度" tabIndex={0} onPointerDown={event => beginResize('left', event)} onKeyDown={event => { if (event.key === 'ArrowLeft') setLeftPanelWidth(value => Math.max(210, value - 16)); if (event.key === 'ArrowRight') setLeftPanelWidth(value => Math.min(430, value + 16)); }}/>
 
-        <main className={`editor-workspace ${subtitleFocus ? 'subtitle-focus' : ''}`}>
+        <main className={`editor-workspace ${projectWorkspace === 'subtitles' ? 'workspace-editor' : ''} ${subtitleFocus ? 'subtitle-focus' : ''}`}>
           <nav className="project-workspace-nav" aria-label="项目工作区">
-            {([['preview', '预览', '播放与检查'], ['subtitles', '字幕', `${segments.length} 条`], ['quality', '质检', '时间与术语'], ['smart', '智能', '说话人与 OCR'], ['process', '处理', `${totalProgress}%`], ['content', '内容', '发布包与短视频'], ['style', '样式', '外观与位置'], ['export', '导出', '文件与视频']] as const).map(([id, label, detail]) => <button key={id} className={projectWorkspace === id ? 'active' : ''} aria-current={projectWorkspace === id ? 'page' : undefined} onClick={() => { setProjectWorkspace(id); if (id === 'subtitles') setSubtitleFocusRequest(request => request + 1); setInspectorMode(null); }}><span>{label}</span><small>{detail}</small></button>)}
+            {([['subtitles', '编辑', `${segments.length} 条字幕`], ['style', '样式', '外观与位置'], ['export', '导出', '文件与视频']] as const).map(([id, label, detail]) => <button key={id} className={projectWorkspace === id ? 'active' : ''} aria-current={projectWorkspace === id ? 'page' : undefined} onClick={() => { setProjectWorkspace(id); if (id === 'subtitles') setSubtitleFocusRequest(request => request + 1); setInspectorMode(null); }}><span>{label}</span><small>{detail}</small></button>)}
+            <button className="workspace-tools-button" onClick={() => { setToolsTab('process'); setToolsOpen(true); setInspectorMode(null); }}><span>任务与工具</span><small>{currentTask ? currentTask.message || '运行中' : '质检、OCR、说话人'}</small></button>
           </nav>
           <header className="workspace-page-heading">
-            <div><small>{activeProject?.title}</small><h1>{projectWorkspace === 'preview' ? '视频预览' : projectWorkspace === 'subtitles' ? '字幕编辑' : projectWorkspace === 'quality' ? '字幕质检' : projectWorkspace === 'smart' ? '智能工具' : projectWorkspace === 'process' ? '处理流程' : projectWorkspace === 'content' ? '内容再生产' : projectWorkspace === 'style' ? '字幕样式' : '导出交付'}</h1></div>
-            {isProcessing && <div className="page-task-status"><i/><span>{currentTask?.message || '正在处理'}</span><strong>{Math.round(currentTask?.progress || 0)}%</strong></div>}
+            <div><small>{activeProject?.title}</small><h1>{projectWorkspace === 'subtitles' ? '字幕编辑' : projectWorkspace === 'style' ? '字幕样式' : '导出交付'}</h1></div>
+            {isProcessing && <div className="page-task-status"><i/><span>{currentTask ? taskProgressLabel(currentTask) : '正在处理'}</span></div>}
           </header>
-          <div className="workbench-split" style={{ '--viewer-height': `${viewerHeight}px` } as React.CSSProperties}>
-          <section className="media-workspace">
-          <section className="fixed-viewer">
-            {activeProject && canPlayMedia && (useWebPlayback || activeProject.video_url) ? <Suspense fallback={<DeferredPanel kind="player" label="正在加载本地播放器…"/>}><SubtitlePlayer ref={videoPlayerRef} projectId={activeProject.id} videoUrl={useWebPlayback ? undefined : api.getBackendMediaUrl(activeProject.video_url) || ''} youtubeVideoId={useWebPlayback ? activeProject.youtube_video_id || undefined : undefined} onWebPlayerError={handleWebPlayerError} segments={segments} style={subtitleStyle} activeIdx={activeSegmentIdx} onTimeUpdate={handleTimeUpdate} onDurationChange={setVideoDuration} onStyleChange={handleStyleChange} presentationMode={presentationMode} onPresentationModeChange={setPresentationMode}/></Suspense>
+          <div className="workbench-split">
+          {projectWorkspace === 'subtitles' && <EditorWorkbench
+            toolbar={<><button className="button primary" onClick={() => openWorkflowStep('transcribe')}>{hasSegments ? '重新转写' : '生成字幕'}</button><button className="button secondary" onClick={importSubtitleFile}>导入字幕</button><button className="button secondary" onClick={() => openWorkflowStep('translate')}>翻译</button><span className="editor-save-status" role="status">{segmentsLoading ? '正在加载字幕…' : `${segments.length} 条字幕`}</span></>}
+            player={activeProject && canPlayMedia && activeProject.video_url ? <Suspense fallback={<DeferredPanel kind="player" label="正在加载本地播放器…"/>}><SubtitlePlayer initialTime={currentTime} ref={videoPlayerRef} projectId={activeProject.id} videoUrl={api.getBackendMediaUrl(activeProject.video_url) || ''} segments={segments} style={subtitleStyle} activeIdx={activeSegmentIdx} onTimeUpdate={handleTimeUpdate} onDurationChange={setVideoDuration} onStyleChange={handleStyleChange} presentationMode={presentationMode} onPresentationModeChange={setPresentationMode}/></Suspense>
               : <div className="viewer-welcome"><span>▶</span><h2>开始创作字幕</h2><p>{youtubeEnabled ? '导入视频或粘贴 YouTube 链接' : '导入您有权处理的本地视频'}</p><div><button className="button primary" onClick={handleImportLocal}>导入视频</button>{youtubeEnabled && <button className="button secondary" onClick={() => setShowLinkPopover(true)}>添加链接</button>}</div></div>}
-          </section>
-          {activeProject && <SubtitleTimeline projectId={activeProject.id} segments={segments} currentTime={currentTime} duration={videoDuration} onSeek={handleSeek} onUpdateTime={(index, update) => void handleUpdateSegment(index, update)}/>}
-          <div className="viewer-resizer" role="separator" aria-label="调整播放器高度" tabIndex={0} onPointerDown={event => beginResize('viewer', event)} onKeyDown={event => { if (event.key === 'ArrowUp') setViewerHeight(value => Math.max(260, value - 20)); if (event.key === 'ArrowDown') setViewerHeight(value => Math.min(window.innerHeight - 250, value + 20)); }}><span/></div>
-
-          <section className="workflow-bar" aria-label="字幕流程">
-            <button className="workflow-primary" disabled={isProcessing && currentTask?.status !== 'paused'} onClick={runPrimaryAction}><span>{currentTask?.status === 'failed' ? '↻' : currentTask?.status === 'paused' ? '▶' : '✦'}</span>{primaryActionLabel}</button>
-            <div className="compact-flow">
-              {compactSteps.map(step => <button key={step.id} className={`compact-step ${step.state.status} ${selectedStep === step.id && inspectorMode === 'step' ? 'selected' : ''}`} onClick={() => openWorkflowStep(step.id)}>
-                <i>{step.state.status === 'success' ? '✓' : step.state.status === 'failed' ? '!' : step.icon}</i><span>{step.label}</span><em>{step.state.status === 'running' ? `${Math.round(step.state.progress)}%` : step.state.status === 'paused' ? '已暂停' : ''}</em>
-                {(step.state.status === 'running' || step.state.status === 'paused') && <b style={{ width: `${step.state.progress}%` }}/>}
-              </button>)}
-            </div>
-            {currentTask && isProcessing && <div className="workflow-task-controls"><button onClick={toggleTaskPause}>{currentTask.status === 'paused' ? '继续' : '暂停'}</button><button className="danger" onClick={cancelCurrentTask}>停止</button></div>}
-            <span className="workflow-total">{totalProgress}%</span>
-          </section>
-
-          </section>
-          <section className="lower-workspace">
-            <nav className="workspace-tabs" role="tablist" aria-label="项目工作区">
-              {([['subtitles', '字幕'], ['style', '样式'], ['export', '导出'], ['logs', '日志']] as const).map(([id, label]) => <button key={id} role="tab" aria-selected={bottomTab === id} className={bottomTab === id ? 'active' : ''} onClick={() => { setBottomTab(id); if (id === 'style') setInspectorMode('style'); }}>{label}{id === 'subtitles' && <span>{segments.length}</span>}{id === 'logs' && processLogs.length > 0 && <span>{processLogs.length}</span>}</button>)}
-              <button className="focus-subtitles" onClick={() => setSubtitleFocus(value => !value)}>{subtitleFocus ? '显示播放器' : '专注字幕'}</button>
-            </nav>
-            {bottomTab === 'subtitles' && <div className="subtitle-language-bar"><span>目标语言</span><LanguagePicker mode="target" allowCustom allowNone value={config.target_language} onChange={targetLanguage => void updateTargetLanguage(targetLanguage)}/><button className="button primary" disabled={!hasSegments || isProcessing || config.target_language === 'none'} onClick={doTranslate}>开始翻译</button></div>}
-            <div className="workspace-tab-content" key={bottomTab}>
-              {bottomTab === 'subtitles' && (activeProject ? <SubtitleTable segments={segments} currentTime={currentTime} activeIdx={activeSegmentIndex} onSeek={handleSeek} onUpdate={handleUpdateSegment} onReplaceAll={replaceSegments} onSplit={splitSegment} onMerge={mergeSegments} onUndo={undoEditor} onRedo={redoEditor} saveState={editorSaveState} draftCount={Object.keys(draftItems).length} draftIsStale={draftIsStale} onPreviewDraft={previewDraft} onCommitDraft={commitDraft} onDiscardDraft={discardDraft} onAutoScrollChange={setAutoScrollTable} autoScroll={autoScrollTable} disabled={isProcessing}/> : <div className="transcript-empty">选择项目后，字幕会在这里按时间排列并可直接编辑。</div>)}
-              {bottomTab === 'style' && <div className="style-overview"><div className="style-preview-card" style={{ fontFamily: subtitleStyle.fontFamily }}><span style={{ color: subtitleStyle.originalTextColor, fontSize: Math.min(24, subtitleStyle.originalFontSize) }}>为每一句话找到恰好的位置。</span><small style={{ color: subtitleStyle.translatedTextColor }}>Give every line its perfect place.</small></div><div><h3>字幕样式</h3><p>调整字体、字号、双语顺序、颜色、背景与垂直位置。更改会立即显示在播放器中。</p><button className="button primary" onClick={() => setInspectorMode('style')}>打开样式检查器</button></div></div>}
-              {bottomTab === 'export' && <div className="export-workspace"><header><div><h3>导出项目</h3><p>字幕文件会立即下载；视频导出将在后台压制。</p></div><label><input type="checkbox" checked={config.bilingual} onChange={event => setConfig({ ...config, bilingual: event.target.checked })}/> 包含双语</label></header><div className="export-cards">{(['srt', 'vtt', 'ass', 'srt-bilingual', 'mp4', 'mkv'] as ExportFormat[]).map(format => <button key={format} disabled={!hasSegments || isProcessing} onClick={() => void doExport(format)}><strong>{format === 'srt-bilingual' ? '双语 SRT' : format.toUpperCase()}</strong><small>{format === 'mp4' || format === 'mkv' ? '带字幕视频' : '字幕文件'}</small><span>↗</span></button>)}</div></div>}
-              {bottomTab === 'logs' && <div className="logs-workspace"><ProcessLogViewer logs={processLogs} collapsed={false} onToggle={() => undefined} onClear={() => setProcessLogs([])}/></div>}
-            </div>
-          </section>
-          {projectWorkspace === 'subtitles' && <section className="task-page subtitle-task-page">
-            <header className="task-page-toolbar"><div><h2>逐句校对</h2><p>播放器不再挤占编辑空间；点击时间码可跳回预览页核对画面。</p></div><div className="toolbar-cluster"><label>目标语言<LanguagePicker mode="target" allowCustom allowNone value={config.target_language} onChange={targetLanguage => void updateTargetLanguage(targetLanguage)}/></label><button className="button secondary" onClick={importSubtitleFile}>导入字幕</button><button className="button secondary" onClick={() => setProjectWorkspace('preview')}>打开预览</button><button className="button primary" disabled={!hasSegments || isProcessing || config.target_language === 'none'} onClick={doTranslate}>开始翻译</button></div></header>
-            <div className="subtitle-page-table"><SubtitleTable segments={segments} currentTime={currentTime} activeIdx={activeSegmentIndex} entryFocusIdx={subtitleEntryFocusIndex} entryFocusRequest={subtitleFocusRequest} onSeek={time => { handleSeek(time); setProjectWorkspace('preview'); }} onUpdate={handleUpdateSegment} onReplaceAll={replaceSegments} onSplit={splitSegment} onMerge={mergeSegments} onUndo={undoEditor} onRedo={redoEditor} saveState={editorSaveState} draftCount={Object.keys(draftItems).length} draftIsStale={draftIsStale} onPreviewDraft={previewDraft} onCommitDraft={commitDraft} onDiscardDraft={discardDraft} onAutoScrollChange={setAutoScrollTable} autoScroll={autoScrollTable} disabled={isProcessing}/></div>
+            editor={segmentsLoading ? <div className="editor-load-state" role="status">正在载入字幕…</div> : segmentsError ? <div className="editor-load-state" role="alert">{segmentsError}<button onClick={() => activeProject && void refreshSegments(activeProject.id)}>重新加载</button></div> : <SubtitleTable segments={segments} currentTime={currentTime} activeIdx={activeSegmentIndex} entryFocusIdx={subtitleEntryFocusIndex} entryFocusRequest={subtitleFocusRequest} onSeek={handleSeek} onInspect={setSegmentInspector} onUpdate={handleUpdateSegment} onReplaceAll={replaceSegments} onSplit={splitSegment} onMerge={mergeSegments} onUndo={undoEditor} onRedo={redoEditor} saveState={editorSaveState} draftCount={Object.keys(draftItems).length} draftIsStale={draftIsStale} onPreviewDraft={previewDraft} onCommitDraft={commitDraft} onDiscardDraft={discardDraft} onAutoScrollChange={setAutoScrollTable} autoScroll={autoScrollTable} disabled={editorBusy || segmentsLoading}/>}
+            timeline={activeProject && <SubtitleTimeline projectId={activeProject.id} segments={segments} currentTime={currentTime} duration={videoDuration} onSeek={handleSeek} onUpdateTime={(index, update) => { if (!editorBusy) void handleUpdateSegment(index, update); }}/ >}
+            inspector={segmentInspector !== null && segments.find(segment => segment.index === segmentInspector) && (() => { const segment = segments.find(item => item.index === segmentInspector)!; return <><button className="button secondary" onClick={() => setSegmentInspector(null)}>关闭属性</button><h3>字幕 {segment.index}</h3><label>开始时间（秒）<input key={`start-${segment.id}-${segment.start}`} type="number" min={0} step={0.01} defaultValue={segment.start} disabled={editorBusy} onBlur={event => { const start = Number(event.target.value); if (Number.isFinite(start) && start >= 0 && start < segment.end && start !== segment.start) void handleUpdateSegment(segment.index, {start}); }}/></label><label>结束时间（秒）<input key={`end-${segment.id}-${segment.end}`} type="number" min={segment.start} step={0.01} defaultValue={segment.end} disabled={editorBusy} onBlur={event => { const end = Number(event.target.value); if (Number.isFinite(end) && end > segment.start && end !== segment.end) void handleUpdateSegment(segment.index, {end}); }}/></label><p>说话人：{segment.speaker || "未分配"}</p><button className="button secondary" onClick={() => { setToolsTab("smart"); setToolsOpen(true); }}>管理说话人</button><button className="button secondary" onClick={() => setProjectWorkspace('style')}>调整字幕样式</button></>; })()}
+          />}
+          {projectWorkspace === 'style' && <section className="task-page style-task-page">
+            <div className="style-canvas"><StyleTemplateBar style={subtitleStyle} onApply={handleStyleChange}/><header><h2>实时外观预览</h2><p>在接近成片的画面比例中调整字幕，不受其他工具干扰。</p></header><div className="style-canvas-stage">{activeProject && canPlayMedia && activeProject.video_url ? <Suspense fallback={<DeferredPanel kind="player" label="正在加载样式预览…"/>}><SubtitlePlayer initialTime={currentTime} ref={videoPlayerRef} projectId={activeProject.id} videoUrl={api.getBackendMediaUrl(activeProject.video_url) || ''} segments={segments} style={subtitleStyle} activeIdx={activeSegmentIdx} onTimeUpdate={handleTimeUpdate} onDurationChange={setVideoDuration} onStyleChange={handleStyleChange} presentationMode={presentationMode} onPresentationModeChange={setPresentationMode}/></Suspense> : <div className="style-preview-card"><span>为每一句话找到恰好的位置。</span><small>Give every line its perfect place.</small></div>}</div></div>
+            <aside className="style-controls-page"><header><small>字幕检查器</small><h2>字体与排版</h2></header><SubtitleStylePanel style={subtitleStyle} onChange={handleStyleChange}/></aside>
           </section>}
-          {projectWorkspace === 'quality' && activeProject && <section className="task-page quality-task-page"><div className="quality-page-grid"><QualityPanel projectId={activeProject.id} segments={segments} revision={editorRevision.current} onEditorResult={result => acceptEditorResult(activeProject.id, result)} onSeek={time => { handleSeek(time); setProjectWorkspace('preview'); }}/><GlossaryPanel projectId={activeProject.id}/></div></section>}
-          {projectWorkspace === 'smart' && activeProject && <section className="task-page smart-task-page"><SmartToolsPanel projectId={activeProject.id} revision={editorRevision.current} duration={videoDuration} onEditorResult={result => acceptEditorResult(activeProject.id, result)} onProjectChanged={() => void refreshActiveProject(activeProject.id)}/></section>}
-          {projectWorkspace === 'process' && <section className="task-page process-task-page">
-            <div className="process-overview"><header><div><h2>从素材到成片</h2><p>一次只配置一个步骤，已完成的内容可以随时回看或重做。</p></div><div className="process-total"><span style={{'--progress': `${totalProgress}%`} as React.CSSProperties}>{totalProgress}%</span><small>整体进度</small></div></header><div className="process-step-list">{compactSteps.map((step, index) => <button key={step.id} className={`${step.state.status} ${activeProcessStep === step.id ? 'selected' : ''}`} onClick={() => setSelectedStep(step.id)}><i>{step.state.status === 'success' ? '✓' : index + 1}</i><span><strong>{step.label}</strong><small>{step.id === 'download' ? '获取素材并提取音频' : step.id === 'transcribe' ? '本地语音识别' : step.id === 'clean' ? '修正错词与断句' : step.id === 'translate' ? '生成目标语言字幕' : '输出字幕或成片'}</small></span><em>{step.state.status === 'success' ? '已完成' : step.state.status === 'running' ? `${Math.round(step.state.progress)}%` : step.state.status === 'failed' ? '需处理' : '待开始'}</em></button>)}</div>{currentTask && isProcessing && <div className="process-live-controls"><span>{currentTask.message}</span><button onClick={toggleTaskPause}>{currentTask.status === 'paused' ? '继续' : '暂停'}</button><button className="danger" onClick={cancelCurrentTask}>停止</button></div>}</div>
-            <aside className="process-settings"><header><small>步骤设置</small><h2>{compactSteps.find(step => step.id === activeProcessStep)?.label}</h2></header>{renderProcessSettings()}</aside>
-            <details className="process-diagnostics"><summary>任务日志与诊断 <span>{processLogs.length}</span></summary><div><ProcessTimeline steps={processSteps} currentStepId={activeProcessStep} totalProgress={totalProgress} onStepClick={setSelectedStep}/><ProcessLogViewer logs={processLogs} collapsed={false} onToggle={() => undefined} onClear={() => setProcessLogs([])}/></div></details>
-          </section>}
-          {projectWorkspace === 'content' && activeProject && <Suspense fallback={<DeferredPanel label="正在打开内容工作区…"/>}>
+          {projectWorkspace === 'export' && <ExportWorkspace bilingual={config.bilingual} onBilingual={bilingual => {setConfig(current => ({...current,bilingual}));localStorage.setItem('subtitle_factory_export_bilingual',String(bilingual));}} hasSegments={hasSegments} hasVideo={hasLocalVideo} busy={taskStarting || (isProcessing && currentTask?.type === 'render') || Object.keys(draftItems).length > 0} onExport={format => void doExport(format)} onPackage={media => void exportProjectPackage(media)} task={<>
+{currentTask && ['render','export'].includes(currentTask.type) && <div className={`export-task-card ${currentTask.status}`}><div><strong>{currentTask.message || '导出任务'}</strong><small>{currentTask.status === 'success' ? '文件已准备完成' : '可离开此页面，任务会继续运行'}</small></div><progress max={100} value={currentTask.progress || 0}/><span>{Math.round(currentTask.progress || 0)}%</span></div>}</>}/>}
+          </div>
+          {toolsOpen && <WorkspacePanel title="任务与工具" onClose={() => setToolsOpen(false)}><nav className="tool-panel-tabs" aria-label="工具分类">{([['process','任务'],['quality','质检与术语'],['smart','OCR 与说话人'],['content','内容']] as const).map(([id,label]) => <button key={id} aria-pressed={toolsTab === id} onClick={() => setToolsTab(id)}>{label}</button>)}<button onClick={() => setShowTaskDrawer(true)}>全部后台任务</button></nav>          {toolsTab === 'quality' && activeProject && <section className="task-page quality-task-page"><div className="quality-page-grid"><QualityPanel projectId={activeProject.id} segments={segments} revision={editorRevision.current} onEditorResult={result => acceptEditorResult(activeProject.id, result)} onSeek={time => { handleSeek(time); setProjectWorkspace('subtitles'); }}/><GlossaryPanel projectId={activeProject.id}/></div></section>}
+          {toolsTab === 'smart' && activeProject && <section className="task-page smart-task-page"><SmartToolsPanel projectId={activeProject.id} revision={editorRevision.current} duration={videoDuration} onEditorResult={result => acceptEditorResult(activeProject.id, result)} onProjectChanged={() => void refreshActiveProject(activeProject.id)}/></section>}
+          {toolsTab === 'process' && <TaskWorkspace steps={compactSteps} selected={activeProcessStep} onSelect={setSelectedStep} task={currentTask} settings={renderProcessSettings()} onPause={toggleTaskPause} onCancel={cancelCurrentTask} diagnostics={<details className="process-diagnostics"><summary>任务日志与诊断 <span>{processLogs.length}</span></summary><div><ProcessTimeline steps={processSteps} currentStepId={activeProcessStep} totalProgress={totalProgress} onStepClick={setSelectedStep}/><ProcessLogViewer logs={processLogs} collapsed={false} onToggle={() => undefined} onClear={() => setProcessLogs([])}/></div></details>}/>}
+          {toolsTab === 'content' && activeProject && <Suspense fallback={<DeferredPanel label="正在打开内容工作区…"/>}>
             <ContentCenter
               project={activeProject}
               projectRevision={editorRevision.current}
@@ -2503,33 +2410,10 @@ function App() {
               onMessage={message => showToast(message, 4200)}
             />
           </Suspense>}
-          {projectWorkspace === 'style' && <section className="task-page style-task-page">
-            <div className="style-canvas"><StyleTemplateBar style={subtitleStyle} onApply={handleStyleChange}/><header><h2>实时外观预览</h2><p>在接近成片的画面比例中调整字幕，不受其他工具干扰。</p></header><div className="style-canvas-stage">{activeProject && canPlayMedia && (useWebPlayback || activeProject.video_url) ? <Suspense fallback={<DeferredPanel kind="player" label="正在加载样式预览…"/>}><SubtitlePlayer ref={videoPlayerRef} projectId={activeProject.id} videoUrl={useWebPlayback ? undefined : api.getBackendMediaUrl(activeProject.video_url) || ''} youtubeVideoId={useWebPlayback ? activeProject.youtube_video_id || undefined : undefined} onWebPlayerError={handleWebPlayerError} segments={segments} style={subtitleStyle} activeIdx={activeSegmentIdx} onTimeUpdate={handleTimeUpdate} onDurationChange={setVideoDuration} onStyleChange={handleStyleChange} presentationMode={presentationMode} onPresentationModeChange={setPresentationMode}/></Suspense> : <div className="style-preview-card"><span>为每一句话找到恰好的位置。</span><small>Give every line its perfect place.</small></div>}</div></div>
-            <aside className="style-controls-page"><header><small>字幕检查器</small><h2>字体与排版</h2></header><SubtitleStylePanel style={subtitleStyle} onChange={handleStyleChange}/></aside>
-          </section>}
-          {projectWorkspace === 'export' && <section className="task-page export-task-page">
-            <header className="export-page-hero"><div><small>最后一步</small><h2>选择交付格式</h2><p>{activeProjectIsYoutube ? '字幕文件立即下载；MP4 与 MKV 会在本机后台压制，不上传媒体。网页模式首次导出成片时会先下载并保留本地视频。' : '字幕文件立即下载；MP4 与 MKV 只在本机后台压制，不上传媒体。'}</p></div><label className="bilingual-switch"><input type="checkbox" checked={config.bilingual} onChange={event => setConfig({ ...config, bilingual: event.target.checked })}/><span>包含双语字幕</span></label></header>
-            <div className="export-format-groups"><section><header><h3>字幕文件</h3><p>适合剪辑软件、平台上传与继续协作</p></header><div className="export-large-cards">{(['srt', 'vtt', 'ass', 'srt-bilingual'] as ExportFormat[]).map(format => <button key={format} disabled={!hasSegments || isProcessing} onClick={() => void doExport(format)}><i>TXT</i><span><strong>{format === 'srt-bilingual' ? '双语 SRT' : format.toUpperCase()}</strong><small>{format === 'ass' ? '保留完整字幕样式' : format === 'vtt' ? '网页与流媒体字幕' : '通用时间轴字幕'}</small></span><em>导出 ↗</em></button>)}</div></section><section><header><h3>带字幕视频</h3><p>直接获得可以发布的最终成片</p></header><div className="export-large-cards">{(['mp4', 'mkv'] as ExportFormat[]).map(format => <button key={format} disabled={!hasSegments || isProcessing} onClick={() => void doExport(format)}><i>▶</i><span><strong>{format.toUpperCase()}</strong><small>{format === 'mp4' ? '兼容社交平台与移动设备' : '高质量封装与多音轨'}</small></span><em>开始压制 →</em></button>)}</div></section><section><header><h3>项目包</h3><p>迁移字幕、历史、说话人、术语与项目设置</p></header><div className="export-large-cards"><button onClick={() => void exportProjectPackage(false)}><i>ZIP</i><span><strong>精简项目包</strong><small>不包含原始媒体，适合快速迁移</small></span><em>导出 ↗</em></button><button onClick={() => void exportProjectPackage(true)}><i>ZIP</i><span><strong>完整项目包</strong><small>包含视频与音频，文件可能很大</small></span><em>导出 ↗</em></button></div></section></div>
-            {currentTask && <div className={`export-task-card ${currentTask.status}`}><div><strong>{currentTask.message || '导出任务'}</strong><small>{currentTask.status === 'success' ? '文件已准备完成' : '可离开此页面，任务会继续运行'}</small></div><progress max={100} value={currentTask.progress || 0}/><span>{Math.round(currentTask.progress || 0)}%</span></div>}
-          </section>}
-          </div>
+</WorkspacePanel>}
         </main>
 
-        {inspectorMode && <><div className="panel-resizer panel-resizer-right" role="separator" aria-label="调整检查器宽度" tabIndex={0} onPointerDown={event => beginResize('right', event)} onKeyDown={event => { if (event.key === 'ArrowLeft') setRightPanelWidth(value => Math.min(480, value + 16)); if (event.key === 'ArrowRight') setRightPanelWidth(value => Math.max(280, value - 16)); }}/>
-          <aside className="inspector-sidebar">
-            <header className="inspector-title"><div><strong>{inspectorMode === 'style' ? '样式检查器' : compactSteps.find(step => step.id === selectedStep)?.label || '步骤详情'}</strong><small>{inspectorMode === 'style' ? '更改将实时预览' : '确认设置后再开始高成本操作'}</small></div><button aria-label="关闭检查器" onClick={() => setInspectorMode(null)}>×</button></header>
-            {inspectorMode === 'style' && <SubtitleStylePanel style={subtitleStyle} onChange={handleStyleChange}/>}
-            {inspectorMode === 'step' && <div className="step-inspector">
-              {selectedStep === 'download' && renderMediaInspector()}
-              {selectedStep === 'transcribe' && <section className="inspector-section transcription-inspector"><h3>语音转写</h3><label>转写模型<AppSelect value={config.model} onChange={model=>setConfig({...config,model:model as ModelSize})} options={modelOptions} label="转写模型" searchable/></label><div className="runtime-picker"><header><strong>运行设备</strong><small>{runtimeForModel(inspectorModelId)?'已为此模型记住':'首次使用必须选择'}</small></header><div className="runtime-choice-grid">{inspectorModel?.runtimes?.map(runtime=><button type="button" key={runtime.id} disabled={!runtime.available} className={runtimeForModel(inspectorModelId)===runtime.id?'selected':''} onClick={()=>chooseRuntime(inspectorModelId,runtime.id)}><i>{runtime.id==='cpu'?'CPU':runtime.id==='mlx'?'GPU':runtime.id==='coreml'?'ANE':'ML'}</i><span><strong>{runtime.name}</strong><small>{runtime.engine} · {runtime.model_ready?'模型已就绪':runtime.download_required?`需下载 ${runtime.download_bytes?`${(runtime.download_bytes/1024/1024).toFixed(0)} MB`:''}`:'本地模型'}</small>{!runtime.available&&<em>{runtime.reason}</em>}</span>{runtimeForModel(inspectorModelId)===runtime.id&&<b>✓</b>}</button>)}</div>{!inspectorModel?.runtimes?.length&&<p className="runtime-empty">正在读取此模型支持的运行设备…</p>}</div><label>源语言<LanguagePicker value={config.language} onChange={language => setConfig({ ...config, language })}/></label>{modelStatus && <div className="model-readiness"><strong>{inspectorModel?.name||inspectorModelId}</strong><small>{!runtimeForModel(inspectorModelId)?'先选择运行设备':inspectorRuntime?.model_ready?'所选运行设备的模型已就绪':inspectorRuntime?.download_required?'首次运行将复用模型中心下载器':'所选本地模型需要重新校验'}</small>{config.model==='auto'&&modelStatus.recommendation_reason&&<small>{modelStatus.recommendation_reason}</small>}</div>}<button className="button primary" disabled={!hasAudio || isProcessing || !runtimeForModel(inspectorModelId)} onClick={doTranscribe}>开始转写</button>{!runtimeForModel(inspectorModelId)&&<p className="runtime-required">请选择上方运行设备后再开始转写。</p>}</section>}
-              {selectedStep === 'clean' && <section className="inspector-section"><h3>AI 忠实整理</h3><div className="ai-summary-row"><span className="ai-logo">✦</span><div><strong>{cleanAIProvider?.name || (aiProviderState ? '未配置 AI' : '正在读取 AI 服务')}</strong><small>{cleanAIProvider?.model || '请先打开设置中心'}</small></div></div><label>参考单句长度 <span>{config.clean_target_length} 字</span><input type="range" min={16} max={100} step={2} value={config.clean_target_length} onChange={event => setConfig({ ...config, clean_target_length: Number(event.target.value) })}/></label><p>只修正明显错词、标点和断句，不改变原意。完整长句不会被强行截断。</p><button className="button primary" disabled={!hasSegments || isProcessing || !cleanAIReady} onClick={doClean}>确认并开始整理</button><button className="button secondary" disabled={!hasSegments || isProcessing} onClick={undoClean}>撤销上次整理</button></section>}
-              {selectedStep === 'clean' && renderFailedBatchRecovery()}
-              {selectedStep === 'translate' && <section className="inspector-section"><h3>AI 翻译</h3><label>目标语言<LanguagePicker mode="target" allowCustom allowNone value={config.target_language} onChange={target_language => setConfig({ ...config, target_language })}/></label><label className="check-row"><input type="checkbox" checked={config.bilingual} onChange={event => setConfig({ ...config, bilingual: event.target.checked })}/> 导出时包含原文与译文</label><p>翻译由已配置的 {translateAIProvider?.name || 'AI 服务'} 完成，结果可继续编辑。</p><button className="button primary" disabled={!hasSegments || isProcessing || !translateAIReady || config.target_language === 'none'} onClick={doTranslate}>确认并开始翻译</button></section>}
-              {selectedStep === 'export' && <section className="inspector-section"><h3>导出</h3><div className="export-grid">{(['srt', 'vtt', 'ass', 'srt-bilingual', 'mp4', 'mkv'] as ExportFormat[]).map(format => <button key={format} disabled={!hasSegments || isProcessing} onClick={() => void doExport(format)}>{format === 'srt-bilingual' ? '双语 SRT' : format.toUpperCase()}</button>)}</div></section>}
-              {currentTask?.status === 'failed' && <section className="recovery-card"><strong>{currentTask.error_code || '任务失败'}</strong><span>{currentTask.error || currentTask.message}</span>{currentTask.suggestion && <small>{currentTask.suggestion}</small>}<small>尝试次数：{currentTask.attempt || 1}</small>{currentTask.recoverable && <button onClick={retryCurrentFailure}>{recoveryActionLabel}</button>}{currentTask.available_actions?.includes('open_settings') && <button onClick={() => setShowAISettings(true)}>打开下载与存储设置</button>}</section>}
-              <details className="inspector-details"><summary>流程诊断</summary><ProcessTimeline steps={processSteps} currentStepId={selectedStep} totalProgress={totalProgress} onStepClick={setSelectedStep}/><SubtitleStatsPanel stats={subtitleStats}/></details>
-            </div>}
-          </aside></>}
+
       </div>
 
       {contextMenu && <div ref={contextMenuRef} className="context-menu" role="menu" style={{ left: contextMenu.x, top: contextMenu.y }} onPointerDown={event => event.stopPropagation()} onKeyDown={event => {
@@ -2551,7 +2435,7 @@ function App() {
       {dragActive && <div className="drop-overlay"><div><span>⇩</span><strong>松开以导入视频</strong><small>支持 MP4、MKV、MOV、WebM 和 AVI</small></div></div>}
       {toast && <div className="studio-toast" role="status" aria-live="polite"><span>✓</span>{toast}</div>}
       {showAISettings && <Suspense fallback={<DeferredPanel kind="settings" theme={theme} label="正在打开设置中心…"/>}>
-        <SettingsCenter open onClose={() => setShowAISettings(false)} returnFocusRef={settingsButtonRef} config={config} onConfigChange={setConfig} appSettings={appSettings} onAppSettingsChange={applyAppSettings} onAIProvidersChange={setAIProviderState} theme={theme} onThemeChange={setTheme} motionEnabled={motionEnabled} onMotionEnabledChange={setMotionEnabled} density={density} onDensityChange={setDensity} health={health} onRefreshHealth={refreshHealth} modelStatus={modelStatus} onRefreshModels={refreshModels} onOpenLogs={() => { setBottomTab('logs'); setProjectWorkspace('process'); setShowProjectWorkspace(!!activeProject); setInspectorMode(null); }}/>
+        <SettingsCenter open onClose={() => setShowAISettings(false)} returnFocusRef={settingsButtonRef} config={config} onConfigChange={setConfig} appSettings={appSettings} onAppSettingsChange={applyAppSettings} onAIProvidersChange={setAIProviderState} theme={theme} onThemeChange={setTheme} motionEnabled={motionEnabled} onMotionEnabledChange={setMotionEnabled} density={density} onDensityChange={setDensity} health={health} onRefreshHealth={refreshHealth} modelStatus={modelStatus} onRefreshModels={refreshModels} onOpenLogs={() => { setToolsTab('process'); setToolsOpen(true); setShowProjectWorkspace(!!activeProject); setInspectorMode(null); }}/>
       </Suspense>}
     </div>
   );

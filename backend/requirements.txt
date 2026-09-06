@@ -17,3 +17,4 @@ Pillow>=11.3.0
 python-multipart>=0.0.22
 keyring>=25.7.0
 av>=11.0.0
+numpy>=1.26.0

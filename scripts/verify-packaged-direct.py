@@ -130,6 +130,13 @@ def verify_direct_api(
         common.require(detail.get("video_path") == str(video_path), "项目媒体路径与导入结果不一致")
         common.require(detail.get("source_type") == "local", "导入后项目类型不是 local")
         common.require(detail.get("media_mode") == "local", "导入后媒体模式不是 local")
+        for field in ("video_url", "thumbnail_access_url"):
+            media_url = detail.get(field)
+            common.require(bool(media_url) and "signature=" in media_url, f"{field} 缺少受限媒体签名")
+            status, media = common.request(session, media_url, authorized=False)
+            common.require(status == 200 and bool(media), f"{field} 无法供播放器读取")
+        status, _ = common.request(session, f"/api/projects/{local_project}/video", authorized=False)
+        common.require(status == 401, "未签名的媒体请求未被拒绝")
 
         common.json_response(
             session,

@@ -11,6 +11,7 @@ import threading
 import time
 import uuid
 from concurrent.futures import Future, ThreadPoolExecutor
+from contextlib import contextmanager
 from typing import Callable, Optional
 
 logger = logging.getLogger(__name__)
@@ -38,7 +39,9 @@ class TaskManager:
         self._futures: dict[str, Future] = {}
         self._maintenance_reason: str | None = None
         self._active_api_mutations = 0
+        self._held_resources = threading.local()
         self._resource_limits = {
+            "workflow": threading.Semaphore(2),
             "ml": threading.Semaphore(1), "ffmpeg": threading.Semaphore(1),
             "io": threading.Semaphore(2), "network_ai": threading.Semaphore(2),
         }
@@ -51,8 +54,8 @@ class TaskManager:
         task_id = str(uuid.uuid4())
         now = time.strftime("%Y-%m-%d %H:%M:%S")
         inferred_resource = resource_class or {
-            "transcribe": "ml", "workflow": "ml", "render": "ffmpeg",
-            "download": "io", "extract_audio": "io", "clean": "network_ai", "translate": "network_ai",
+            "transcribe": "ml", "workflow": "workflow", "render": "ffmpeg",
+            "download": "io", "extract_audio": "ffmpeg", "clean": "network_ai", "translate": "network_ai",
         }.get(task_type, "io")
         task: dict = {
             "id": task_id,
@@ -380,6 +383,7 @@ class TaskManager:
             task["status"] = "cancelled"
             task_type = str(task.get("type") or "")
             task["message"] = "任务已终止"
+            task["details"]["stages"] = {key: "cancelled" if value == "running" else value for key, value in (task["details"].get("stages") or {}).items()}
             task["error"] = None
             task["updated_at"] = now
             task["logs"].append({
@@ -391,9 +395,14 @@ class TaskManager:
                 "suggestion": "",
             })
 
+            task["details"]["cancel_requested_at"] = time.time()
             future = self._futures.get(task_id)
             if future:
                 future.cancel()
+                if not future.done():
+                    task["message"] = "已请求停止，正在等待当前处理片段结束"
+                else:
+                    task["details"]["worker_stopped"] = True
             condition = self._pause_conditions.get(task_id)
             if condition:
                 condition.notify_all()
@@ -432,13 +441,43 @@ class TaskManager:
         """Backward-compatible name for the shared cooperative checkpoint."""
         self.checkpoint(task_id)
 
+    def _acquire_resource(self, task_id: str, resource: str):
+        held = getattr(self._held_resources, "counts", None)
+        if held is None:
+            held = self._held_resources.counts = {}
+        if not held.get(resource):
+            limiter = self._resource_limits.get(resource, self._resource_limits["io"])
+            while True:
+                self.checkpoint(task_id)
+                if limiter.acquire(timeout=0.1):
+                    break
+        held[resource] = held.get(resource, 0) + 1
+
+    def _release_resource(self, resource: str):
+        held = self._held_resources.counts
+        held[resource] -= 1
+        if held[resource] == 0:
+            self._resource_limits.get(resource, self._resource_limits["io"]).release()
+            del held[resource]
+
+    @contextmanager
+    def resource_slot(self, task_id: str, resource: str):
+        """Acquire only the resource used by this stage; nested use is reentrant."""
+        self._acquire_resource(task_id, resource)
+        try:
+            self.checkpoint(task_id)
+            yield
+        finally:
+            self._release_resource(resource)
+
     def run_background(self, task_id: str, func: Callable, *args, **kwargs):
         """在线程池中执行后台任务"""
         def _wrapper():
             resource = self._tasks.get(task_id, {}).get("resource_class", "io")
-            limiter = self._resource_limits.get(resource, self._resource_limits["io"])
+            acquired = False
             try:
-                limiter.acquire()
+                self._acquire_resource(task_id, resource)
+                acquired = True
                 while True:
                     try:
                         self.checkpoint(task_id)
@@ -455,7 +494,7 @@ class TaskManager:
                             # success must not keep showing that stale failure in
                             # the task center or diagnostics.
                             self.update_task(
-                                task_id, status="success", progress=100.0, message="完成",
+                                task_id, status="success", progress=100.0, message=current.get("message") or "完成",
                                 error=None, error_code=None, recoverable=False,
                                 available_actions=[], next_retry_at=None,
                             )
@@ -468,7 +507,7 @@ class TaskManager:
                         break
                     except Exception as e:
                         error_code = str(getattr(e, "error_code", "UNEXPECTED_ERROR"))
-                        recoverable = bool(getattr(e, "recoverable", False))
+                        recoverable = bool(getattr(e, "recoverable", False)) or (self.get_task(task_id) or {}).get("type") == "workflow"
                         automatic_retry = bool(getattr(e, "automatic_retry", False))
                         current = self.get_task(task_id) or {}
                         attempt = int(current.get("attempt", 1)); maximum = int(current.get("max_attempts", 1))
@@ -486,6 +525,8 @@ class TaskManager:
                         actions = list(getattr(e, "available_actions", ["retry"] if recoverable else []))
                         suggestion = getattr(e, "suggestion", "请复制诊断信息并检查运行日志")
                         failure_details = {"failure_suggestion": suggestion}
+                        if current.get("type") == "workflow":
+                            failure_details["stages"] = {key: "failed" if value == "running" else value for key,value in (current.get("details",{}).get("stages") or {}).items()}
                         exception_details = getattr(e, "details", None)
                         if isinstance(exception_details, dict) and exception_details:
                             download_details = dict(
@@ -509,7 +550,22 @@ class TaskManager:
                             logger.debug("Unable to finalize failed transcription run", exc_info=True)
                         break
             finally:
-                limiter.release()
+                if acquired:
+                    self._release_resource(resource)
+                if self.is_cancelled(task_id):
+                    try:
+                        from ..models.database import get_db
+                        db = get_db()
+                        db.execute("UPDATE transcription_runs SET status='cancelled',finished_at=datetime('now','localtime') WHERE task_id=? AND status='running'", (task_id,))
+                        db.commit(); db.close()
+                    except Exception:
+                        logger.debug("Unable to finalize cancelled transcription run", exc_info=True)
+                    with self._lock:
+                        task = self._tasks[task_id]
+                        task["message"] = "任务已终止"
+                        task["details"].update(worker_stopped=True, is_generating_segments=False, is_postprocessing=False,
+                                               worker_stop_seconds=round(time.time() - task["details"].get("cancel_requested_at", time.time()), 3))
+                        self._persist(task)
 
         future = self._executor.submit(_wrapper)
         with self._lock:

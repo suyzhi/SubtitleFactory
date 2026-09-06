@@ -501,36 +501,33 @@ def _subtitle_rows(
 
 @lru_cache(maxsize=32)
 def _font_path(font_family: str, needs_cjk: bool) -> str:
-    requested = font_family.split(",", 1)[0].strip().strip("\"'").lower()
-    roots = [
-        Path.home() / "Library/Fonts",
-        Path("/Library/Fonts"),
-        Path("/System/Library/Fonts"),
-        Path("/System/Library/Fonts/Supplemental"),
-    ]
-    if needs_cjk:
-        cjk_fallbacks = [
-            Path("/System/Library/Fonts/PingFang.ttc"),
-            Path("/System/Library/Fonts/Hiragino Sans GB.ttc"),
-            Path("/System/Library/Fonts/Supplemental/Arial Unicode.ttf"),
-        ]
-        available = next((path for path in cjk_fallbacks if path.is_file()), None)
-        if available:
-            return str(available)
-    if requested:
-        token = "".join(character for character in requested if character.isalnum())
-        for root in roots:
-            if not root.is_dir():
+    # Match actual font families, never a substring (Inter used to match SignPainter).
+    from PIL import ImageFont
+    roots = [Path.home() / "Library/Fonts", Path("/Library/Fonts"),
+             Path("/System/Library/Fonts"), Path("/System/Library/Fonts/Supplemental")]
+    def normalize(value):
+        return "".join(c for c in value.lower() if c.isalnum())
+    requested = [normalize(value.strip().strip("\"'")) for value in font_family.split(",")]
+    fonts = {}
+    for root in roots:
+        if not root.is_dir():
+            continue
+        for path in sorted(root.iterdir()):
+            if path.suffix.lower() not in {".ttf", ".ttc", ".otf"}:
                 continue
-            for path in root.glob("*"):
-                name = "".join(character for character in path.stem.lower() if character.isalnum())
-                if token and token in name and path.suffix.lower() in {".ttf", ".ttc", ".otf"}:
-                    return str(path)
-    fallbacks = [
-        Path("/System/Library/Fonts/SFNS.ttf"),
-        Path("/System/Library/Fonts/Supplemental/Arial.ttf"),
-    ]
-    return str(next((path for path in fallbacks if path.is_file()), fallbacks[-1]))
+            try:
+                family, variant = ImageFont.truetype(str(path), 20).getname()
+                token = normalize(family)
+                if token not in fonts or variant.lower() in {"regular", "normal", "book"}:
+                    fonts[token] = str(path)
+            except (OSError, ValueError):
+                continue
+    candidates = requested + (["pingfangsc", "hiraginosansgb", "arialunicode"] if needs_cjk else [])
+    candidates += ["helveticaneue", "arial", "helvetica"]
+    for token in candidates:
+        if token in fonts:
+            return fonts[token]
+    raise RuntimeError("找不到可用的字幕字体，请安装 Arial 或系统黑体")
 
 
 def _hex_rgba(value: Any, fallback: str, alpha: int = 255) -> tuple[int, int, int, int]:
@@ -587,13 +584,13 @@ def _subtitle_overlay_paths(
         if isinstance(render_size, (list, tuple)) and len(render_size) == 2
         else ASPECT_DIMENSIONS[layout["aspect_ratio"]]
     )
-    scale = min(width, height) / 1080
+    scale = height / 360 if render_size else min(width, height) / 1080
     original_size = max(18, round(float(style.get("originalFontSize") or style.get("fontSize") or 46) * scale))
     translated_size = max(16, round(float(style.get("translatedFontSize") or original_size * .82) * scale))
     font_family = str(style.get("fontFamily") or "Arial")
     vertical_position = max(10, min(94, float(style.get("verticalPosition", 88))))
     margin = max(round(height * .055), 28)
-    maximum_width = width - margin * 2
+    maximum_width = min(width - margin * 2, width * max(.2, min(1, float(style.get("maxWidth", 85)) / 100)))
     background_mode = str(style.get("backgroundMode") or "none")
     shadow = bool(style.get("shadow", True))
     assets: list[dict[str, Any]] = []
@@ -651,7 +648,7 @@ def _subtitle_overlay_paths(
         if not rendered:
             continue
         total_height = sum(box[3] - box[1] for box in dimensions) + spacing * (len(rendered) - 1)
-        top = min(height - margin - total_height, vertical_position / 100 * height - total_height)
+        top = min(height - margin - total_height, vertical_position / 100 * (height - total_height))
         top = max(margin, top)
         if background_mode in {"black", "white"}:
             widest = max(box[2] - box[0] for box in dimensions)

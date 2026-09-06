@@ -1,10 +1,11 @@
+import {publishTask,nextTaskRequest} from '../taskStore';
 // 字幕工厂 - Backend API Client
 
 import { invoke } from '@tauri-apps/api/core';
 import { openUrl } from '@tauri-apps/plugin-opener';
 
-let BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000';
-let API_TOKEN = import.meta.env.VITE_API_TOKEN || '';
+let BASE_URL = import.meta.env.VITE_API_BASE_URL === 'same-origin' ? '' : import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:8000';
+let API_TOKEN = '';
 let sessionInitialization: Promise<void> | null = null;
 export type DistributionChannel = 'direct' | 'app_store';
 let DISTRIBUTION_CHANNEL: DistributionChannel =
@@ -134,8 +135,7 @@ export function initializeBackendSession(): Promise<void> {
   if (sessionInitialization) return sessionInitialization;
   sessionInitialization = (async () => {
     if (!(window as any).__TAURI_INTERNALS__) {
-      // 纯浏览器开发模式：使用后端开发令牌，便于 vite 调试 UI
-      if (import.meta.env.DEV) API_TOKEN = 'subtitle-factory-local-development';
+      // 浏览器直接访问本地后端，无需会话令牌
       return;
     }
     const session = await invoke<{
@@ -156,10 +156,10 @@ export function initializeBackendSession(): Promise<void> {
   return sessionInitialization;
 }
 
-function authorizedHeaders(options?: RequestInit, json = true): Headers {
+function requestHeaders(options?: RequestInit, json = true): Headers {
   const headers = new Headers(options?.headers);
-  headers.set('Authorization', `Bearer ${API_TOKEN}`);
-  if (json && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
+  if (API_TOKEN) headers.set('Authorization', `Bearer ${API_TOKEN}`);
+  if (json && options?.body != null && !headers.has('Content-Type')) headers.set('Content-Type', 'application/json');
   return headers;
 }
 
@@ -201,7 +201,7 @@ async function downloadBackendFile(
     }
     return saveManagedFile(sourcePath, suggestedName);
   }
-  const response = await authorizedFetch(endpoint, options);
+  const response = await backendFetch(endpoint, options);
   if (!response.ok) throw await parseError(response);
   const blob = await response.blob();
   const objectUrl = URL.createObjectURL(blob);
@@ -211,7 +211,7 @@ async function downloadBackendFile(
   const anchor = document.createElement('a');
   anchor.href = objectUrl;
   try {
-    anchor.download = encoded ? decodeURIComponent(encoded) : plain || suggestedName;
+    anchor.download = suggestedName || (encoded ? decodeURIComponent(encoded) : plain || 'export');
   } catch {
     anchor.download = suggestedName;
   }
@@ -220,7 +220,7 @@ async function downloadBackendFile(
   return true;
 }
 
-async function authorizedFetch(url: string, options?: RequestInit, json = true): Promise<Response> {
+async function backendFetch(url: string, options?: RequestInit, json = true): Promise<Response> {
   await initializeBackendSession();
   const method = String(options?.method || 'GET').toUpperCase();
   return fetch(`${BASE_URL}${url}`, {
@@ -229,12 +229,12 @@ async function authorizedFetch(url: string, options?: RequestInit, json = true):
     // may otherwise reuse the first successful GET while a background task is
     // advancing, leaving the UI permanently stuck at its initial progress.
     ...(method === 'GET' ? { cache: 'no-store' as const } : {}),
-    headers: authorizedHeaders(options, json),
+    headers: requestHeaders(options, json),
   });
 }
 
 async function request<T>(url: string, options?: RequestInit): Promise<T> {
-  const res = await authorizedFetch(url, options);
+  const res = await backendFetch(url, options);
   if (!res.ok) {
     throw await parseError(res);
   }
@@ -243,8 +243,9 @@ async function request<T>(url: string, options?: RequestInit): Promise<T> {
 
 // ── Projects ──
 
-export async function listProjects(options?: { deleted?: boolean; search?: string; sort?: string; page?: number; page_size?: number }): Promise<{ projects: Project[]; total?: number; pages?: number }> {
+export async function listProjects(options?: { deleted?: boolean; search?: string; sort?: string; page?: number; page_size?: number; readiness?: string }): Promise<{ projects: Project[]; total?: number; pages?: number }> {
   const params = new URLSearchParams();
+  if (options?.readiness) params.set('readiness',options.readiness);
   if (options?.deleted) params.set('deleted', 'true');
   if (options?.search) params.set('search', options.search);
   if (options?.sort) params.set('sort', options.sort);
@@ -299,7 +300,7 @@ export async function emptyTrash(): Promise<{ message?: string; deleted_count?: 
 export async function startDownload(projectId: string, url: string): Promise<{ task_id: string; message: string }> {
   const form = new FormData();
   form.append('url', url);
-  const res = await authorizedFetch(`/api/projects/${projectId}/download`, { method: 'POST', body: form }, false);
+  const res = await backendFetch(`/api/projects/${projectId}/download`, { method: 'POST', body: form }, false);
   if (!res.ok) throw await parseError(res);
   return res.json();
 }
@@ -356,15 +357,6 @@ export async function materializeProjectVideo(
   }
 }
 
-export async function createYoutubePlayerSession(
-  videoId: string, channel: string,
-): Promise<string> {
-  const result = await request<{ url: string }>(
-    `/api/player/youtube/${encodeURIComponent(videoId)}/session?channel=${encodeURIComponent(channel)}`,
-  );
-  return getBackendMediaUrl(result.url) || result.url;
-}
-
 export async function importLocalVideo(
   projectId: string, file: File, options?: {
     autostart?: boolean; model?: string; language?: string; runtime?:string; onProgress?: (percent: number) => void;
@@ -379,7 +371,6 @@ export async function importLocalVideo(
     if(options?.runtime) form.append('runtime',options.runtime);
     const xhr = new XMLHttpRequest();
     xhr.open('POST', `${BASE_URL}/api/projects/${projectId}/import-local`);
-    xhr.setRequestHeader('Authorization', `Bearer ${API_TOKEN}`);
     xhr.upload.onprogress = event => {
       if (event.lengthComputable) options?.onProgress?.(Math.round(event.loaded / event.total * 100));
     };
@@ -398,7 +389,7 @@ export async function importSubtitleFile(
   const form = new FormData();
   form.append('file', file);
   form.append('expected_revision', String(expectedRevision));
-  const response = await authorizedFetch(`/api/projects/${projectId}/subtitles/import`, {
+  const response = await backendFetch(`/api/projects/${projectId}/subtitles/import`, {
     method: 'POST', body: form,
   }, false);
   if (!response.ok) throw await parseError(response);
@@ -417,11 +408,11 @@ export interface MediaInfo {
   selection: {audio_track_index: number; range_start: number | null; range_end: number | null};
 }
 export async function getMediaInfo(projectId: string): Promise<MediaInfo> { return request(`/api/projects/${projectId}/media-info`); }
-export async function updateMediaSelection(projectId: string, selection: MediaInfo['selection']): Promise<void> {
-  await request(`/api/projects/${projectId}/media-selection`, { method: 'PUT', body: JSON.stringify(selection) });
+export async function updateMediaSelection(projectId: string, selection: MediaInfo['selection']): Promise<{audio_reextract_required:boolean}> {
+  return request(`/api/projects/${projectId}/media-selection`, { method: 'PUT', body: JSON.stringify(selection) });
 }
 export async function getMediaTrackPreview(projectId: string, track: number, start = 0): Promise<string> {
-  const response = await authorizedFetch(`/api/projects/${projectId}/media-track-preview?track=${track}&start=${start}`);
+  const response = await backendFetch(`/api/projects/${projectId}/media-track-preview?track=${track}&start=${start}`);
   if (!response.ok) throw await parseError(response);
   return URL.createObjectURL(await response.blob());
 }
@@ -433,13 +424,13 @@ export async function startTranscribe(projectId: string, language: string = 'aut
   form.append('language', language);
   form.append('model', model);
   if (runtime) form.append('runtime', runtime);
-  const res = await authorizedFetch(`/api/projects/${projectId}/transcribe`, { method: 'POST', body: form }, false);
+  const res = await backendFetch(`/api/projects/${projectId}/transcribe`, { method: 'POST', body: form }, false);
   if (!res.ok) throw await parseError(res);
   return res.json();
 }
 
 export async function startWorkflow(
-  projectId: string, data: { model: string; language: string; runtime?:string; source_url?: string }
+  projectId: string, data: { model: string; language: string; runtime?:string; source_url?: string; enable_clean?:boolean; enable_translate?:boolean; target_language?:string; clean_target_length?:number; text_processing_consent?:boolean; resume_task_id?:string }
 ): Promise<{ task_id: string; message: string; model: string }> {
   return request(`/api/projects/${projectId}/workflow`, { method: 'POST', body: JSON.stringify(data) });
 }
@@ -513,7 +504,7 @@ export async function removeTranscriptionModel(modelId: string): Promise<{
 export async function startClean(projectId: string, targetLength: number = 42): Promise<{ task_id: string; message: string }> {
   const form = new FormData();
   form.append('target_length', String(targetLength));
-  const res = await authorizedFetch(`/api/projects/${projectId}/clean`, { method: 'POST', body: form }, false);
+  const res = await backendFetch(`/api/projects/${projectId}/clean`, { method: 'POST', body: form }, false);
   if (!res.ok) throw await parseError(res);
   return res.json();
 }
@@ -527,7 +518,7 @@ export async function undoClean(projectId: string): Promise<{ message: string; s
 export async function startTranslate(projectId: string, targetLanguage: string = 'zh'): Promise<{ task_id: string; message: string }> {
   const form = new FormData();
   form.append('target_language', targetLanguage);
-  const res = await authorizedFetch(`/api/projects/${projectId}/translate`, { method: 'POST', body: form }, false);
+  const res = await backendFetch(`/api/projects/${projectId}/translate`, { method: 'POST', body: form }, false);
   if (!res.ok) throw await parseError(res);
   return res.json();
 }
@@ -881,7 +872,7 @@ export async function downloadProjectPackage(
 }
 export async function importProjectPackage(file: File): Promise<{project_id: string; media_status: string}> {
   const form = new FormData(); form.append('file', file);
-  const response = await authorizedFetch('/api/project-packages/import', { method: 'POST', body: form }, false);
+  const response = await backendFetch('/api/project-packages/import', { method: 'POST', body: form }, false);
   if (!response.ok) throw await parseError(response); return response.json();
 }
 
@@ -1066,36 +1057,37 @@ export async function deleteClipRender(renderId: string): Promise<void> {
 
 // ── Tasks / Health ──
 
+const pendingTaskReads = new Map<string,Promise<TaskStatus>>();
 export async function getTaskStatus(taskId: string): Promise<TaskStatus> {
-  const data: any = await request(`/api/tasks/${taskId}`);
-  return {
-    ...data,
-    details: data.details || {},
-    logs: data.logs || [],
-    suggestion: data.suggestion || null,
-    step_name: data.step_name || data.step || data.type || '',
-  };
+  const pending=pendingTaskReads.get(taskId);if(pending)return pending;
+  const order=nextTaskRequest();
+  const read=request<TaskStatus>(`/api/tasks/${taskId}`).then(task => publishTask(task,order)).finally(() => pendingTaskReads.delete(taskId));
+  pendingTaskReads.set(taskId,read);return read;
 }
 
 export async function getGlobalTasks(limit = 100): Promise<{tasks: TaskStatus[]}> {
-  return request(`/api/tasks?limit=${limit}`);
+  const order=nextTaskRequest();
+  const result=await request<{tasks:TaskStatus[]}>(`/api/tasks?limit=${limit}`);
+  return {tasks:result.tasks.map(task => publishTask(task,order))};
 }
 
 export async function getLatestProjectTask(projectId: string): Promise<TaskStatus | null> {
+  const order=nextTaskRequest();
   const data = await request<{ task: TaskStatus | null }>(`/api/projects/${projectId}/tasks/latest`);
-  return data.task;
+  return data.task ? publishTask(data.task,order) : null;
 }
 
 export async function pauseTask(taskId: string): Promise<TaskStatus> {
-  return request(`/api/tasks/${taskId}/pause`, { method: 'POST' });
+  const task=await request<TaskStatus>(`/api/tasks/${taskId}/pause`, {method:'POST'});
+  return publishTask(task);
 }
-
 export async function resumeTask(taskId: string): Promise<TaskStatus> {
-  return request(`/api/tasks/${taskId}/resume`, { method: 'POST' });
+  const task=await request<TaskStatus>(`/api/tasks/${taskId}/resume`, {method:'POST'});
+  return publishTask(task);
 }
-
 export async function cancelTask(taskId: string): Promise<TaskStatus> {
-  return request(`/api/tasks/${taskId}/cancel`, { method: 'POST' });
+  const task=await request<TaskStatus>(`/api/tasks/${taskId}/cancel`, {method:'POST'});
+  return publishTask(task);
 }
 
 export async function getFailedCleanBatches(taskId: string): Promise<{task_id: string; batches: import('../types').FailedCleanBatch[]}> {
@@ -1145,7 +1137,7 @@ export async function validateAppPath(data: {
 }
 
 export async function checkHealth(): Promise<HealthStatus> {
-  const res = await authorizedFetch('/api/health', { method: 'GET' });
+  const res = await backendFetch('/api/health', { method: 'GET' });
   if (!res.ok) throw await parseError(res);
   return res.json();
 }
@@ -1158,7 +1150,12 @@ export async function getSegmentsAfter(projectId: string, afterIdx: number): Pro
   latest_idx: number;
   has_more: boolean;
 }> {
-  const res = await authorizedFetch(`/api/projects/${projectId}/segments?after_idx=${afterIdx}`);
+  const res = await backendFetch(`/api/projects/${projectId}/segments?after_idx=${afterIdx}`);
   if (!res.ok) throw await parseError(res);
   return res.json();
 }
+
+export interface TranscriptionCandidate { id:string; model:string; language:string; segments_count:number; finished_at:string; status?:string; }
+export function listTranscriptionCandidates(projectId:string):Promise<{candidates:TranscriptionCandidate[]}> { return request(`/api/projects/${projectId}/transcription-candidates`); }
+export function getTranscriptionCandidate(projectId:string,runId:string):Promise<{segments:Array<{start:number;end:number;text:string}>}> { return request(`/api/projects/${projectId}/transcription-candidates/${runId}`); }
+export function acceptTranscriptionCandidate(projectId:string,runId:string,revision:number):Promise<EditorOperationResponse> { return request(`/api/projects/${projectId}/transcription-candidates/${runId}/accept?expected_revision=${revision}`,{method:'POST'}); }

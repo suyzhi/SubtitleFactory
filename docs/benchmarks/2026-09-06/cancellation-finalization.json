@@ -1,0 +1,143 @@
+{
+  "task": {
+    "id": "d9732825-3e8c-4074-836b-8349233ace3e",
+    "project_id": "f63a1bb2-6e13-49d1-8d85-efb17152979b",
+    "type": "workflow",
+    "status": "cancelled",
+    "step": "transcribing",
+    "progress": 5.97501240079365,
+    "message": "任务已终止",
+    "error": null,
+    "created_at": "2026-09-06 11:32:39",
+    "updated_at": "2026-09-06 11:32:59",
+    "details": {
+      "resume_policy": "automatic_local_only",
+      "resume_payload": {
+        "project_id": "f63a1bb2-6e13-49d1-8d85-efb17152979b",
+        "model": "small",
+        "language": "en",
+        "source_url": null,
+        "runtime": "cpu",
+        "options": {
+          "enable_clean": false,
+          "enable_translate": false,
+          "target_language": "zh",
+          "clean_target_length": 42,
+          "text_processing_consent": false
+        }
+      },
+      "stages": {
+        "download": "success",
+        "extract_audio": "success",
+        "transcribe": "cancelled"
+      },
+      "audio_cache_hit": true,
+      "audio_path": "/private/tmp/subtitle-workflow-qa-20260906/audio/f63a1bb2-6e13-49d1-8d85-efb17152979b/audio.wav",
+      "preparation_identity": [
+        "/private/tmp/subtitle-workflow-qa-20260906/audio/f63a1bb2-6e13-49d1-8d85-efb17152979b/audio.wav",
+        4128812,
+        1788664757628205715,
+        0,
+        null,
+        null,
+        "small",
+        "en",
+        "cpu"
+      ],
+      "resolved_model": "small",
+      "model_resolution": {
+        "requested_model": "small",
+        "model_id": "small",
+        "source": "app_download",
+        "fallback_reason": "",
+        "fell_back": false
+      },
+      "model_cache_hit": false,
+      "model_load_seconds": 0.261,
+      "preparation_seconds": 0.88,
+      "mode": "incremental",
+      "model": "faster-whisper small",
+      "model_id": "small",
+      "model_source": "app_download",
+      "device": "cpu",
+      "is_generating_segments": false,
+      "is_postprocessing": false,
+      "generated_segments": 1,
+      "current_time": 1.5,
+      "audio_duration": 129.0,
+      "latest_segment": {
+        "index": 1,
+        "start": 0.0,
+        "end": 1.48,
+        "text": "Welcome to the subtitle workshop."
+      },
+      "cancel_requested_at": 1788665579.045812,
+      "worker_stopped": true,
+      "worker_stop_seconds": 16.224
+    },
+    "logs": [
+      {
+        "time": "2026-09-06 11:32:39",
+        "level": "info",
+        "step": "语音转写",
+        "message": "正在准备转写模型...",
+        "detail": "",
+        "suggestion": ""
+      },
+      {
+        "time": "2026-09-06 11:32:39",
+        "level": "info",
+        "step": "语音转写",
+        "message": "加载模型: small",
+        "detail": "",
+        "suggestion": ""
+      },
+      {
+        "time": "2026-09-06 11:32:40",
+        "level": "info",
+        "step": "语音转写",
+        "message": "模型 faster-whisper small 已加载，设备: cpu",
+        "detail": "精度: int8",
+        "suggestion": ""
+      },
+      {
+        "time": "2026-09-06 11:32:40",
+        "level": "info",
+        "step": "语音转写",
+        "message": "检测到语言: en, 音频时长: 129.0秒",
+        "detail": "",
+        "suggestion": ""
+      },
+      {
+        "time": "2026-09-06 11:32:58",
+        "level": "info",
+        "step": "语音转写",
+        "message": "已转写到 00:00:01 / 00:02:09，生成 1 条字幕",
+        "detail": "",
+        "suggestion": ""
+      },
+      {
+        "time": "2026-09-06 11:32:59",
+        "level": "info",
+        "step": "transcribing",
+        "message": "任务已终止",
+        "detail": "已请求在安全检查点停止后台处理",
+        "suggestion": ""
+      }
+    ],
+    "error_code": null,
+    "recoverable": false,
+    "available_actions": [],
+    "parent_task_id": null,
+    "attempt": 1,
+    "priority": 0,
+    "resource_class": "workflow",
+    "max_attempts": 1,
+    "next_retry_at": null,
+    "suggestion": ""
+  },
+  "request_seconds": 0.004681624996010214,
+  "worker_stop_seconds": 16.41548258299008,
+  "run_status": "cancelled",
+  "saved_draft_segments": 6
+}

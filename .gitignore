@@ -69,3 +69,8 @@ models/
 .idea/
 .vscode/
 *.swp
+
+# Local UI snapshots retained outside the active source tree
+frontend/src/App.css.backup
+frontend/src/App.css.new
+ui-backups/

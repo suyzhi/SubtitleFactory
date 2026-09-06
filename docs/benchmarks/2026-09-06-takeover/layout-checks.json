@@ -1,0 +1,470 @@
+[
+  {
+    "before": {
+      "size": [
+        1400,
+        900
+      ],
+      "layout": "editor-workbench wide ",
+      "ratio": "50",
+      "boxes": [
+        {
+          "class": "editor-actions",
+          "rect": {
+            "x": 0,
+            "y": 124,
+            "width": 1400,
+            "height": 53,
+            "top": 124,
+            "right": 1400,
+            "bottom": 177,
+            "left": 0
+          }
+        },
+        {
+          "class": "editor-body",
+          "rect": {
+            "x": 0,
+            "y": 177,
+            "width": 1400,
+            "height": 639,
+            "top": 177,
+            "right": 1400,
+            "bottom": 816,
+            "left": 0
+          }
+        },
+        {
+          "class": "editor-player",
+          "rect": {
+            "x": 0,
+            "y": 177,
+            "width": 700,
+            "height": 639,
+            "top": 177,
+            "right": 700,
+            "bottom": 816,
+            "left": 0
+          }
+        },
+        {
+          "class": "editor-transcript",
+          "rect": {
+            "x": 708,
+            "y": 177,
+            "width": 692,
+            "height": 639,
+            "top": 177,
+            "right": 1400,
+            "bottom": 816,
+            "left": 708
+          }
+        },
+        {
+          "class": "editor-timeline",
+          "rect": {
+            "x": 0,
+            "y": 816,
+            "width": 1400,
+            "height": 84,
+            "top": 816,
+            "right": 1400,
+            "bottom": 900,
+            "left": 0
+          }
+        }
+      ],
+      "samePlayer": true,
+      "time": 0
+    },
+    "after_drag": {
+      "size": [
+        1400,
+        900
+      ],
+      "layout": "editor-workbench wide ",
+      "ratio": "55",
+      "boxes": [
+        {
+          "class": "editor-actions",
+          "rect": {
+            "x": 0,
+            "y": 124,
+            "width": 1400,
+            "height": 53,
+            "top": 124,
+            "right": 1400,
+            "bottom": 177,
+            "left": 0
+          }
+        },
+        {
+          "class": "editor-body",
+          "rect": {
+            "x": 0,
+            "y": 177,
+            "width": 1400,
+            "height": 639,
+            "top": 177,
+            "right": 1400,
+            "bottom": 816,
+            "left": 0
+          }
+        },
+        {
+          "class": "editor-player",
+          "rect": {
+            "x": 0,
+            "y": 177,
+            "width": 770,
+            "height": 639,
+            "top": 177,
+            "right": 770,
+            "bottom": 816,
+            "left": 0
+          }
+        },
+        {
+          "class": "editor-transcript",
+          "rect": {
+            "x": 778,
+            "y": 177,
+            "width": 622,
+            "height": 639,
+            "top": 177,
+            "right": 1400,
+            "bottom": 816,
+            "left": 778
+          }
+        },
+        {
+          "class": "editor-timeline",
+          "rect": {
+            "x": 0,
+            "y": 816,
+            "width": 1400,
+            "height": 84,
+            "top": 816,
+            "right": 1400,
+            "bottom": 900,
+            "left": 0
+          }
+        }
+      ],
+      "samePlayer": true,
+      "time": 0
+    }
+  },
+  {
+    "before": {
+      "size": [
+        1024,
+        768
+      ],
+      "layout": "editor-workbench stacked ",
+      "ratio": "50",
+      "boxes": [
+        {
+          "class": "editor-actions",
+          "rect": {
+            "x": 0,
+            "y": 124,
+            "width": 1024,
+            "height": 53,
+            "top": 124,
+            "right": 1024,
+            "bottom": 177,
+            "left": 0
+          }
+        },
+        {
+          "class": "editor-body",
+          "rect": {
+            "x": 0,
+            "y": 177,
+            "width": 1024,
+            "height": 507,
+            "top": 177,
+            "right": 1024,
+            "bottom": 684,
+            "left": 0
+          }
+        },
+        {
+          "class": "editor-player",
+          "rect": {
+            "x": 0,
+            "y": 177,
+            "width": 1024,
+            "height": 253.5,
+            "top": 177,
+            "right": 1024,
+            "bottom": 430.5,
+            "left": 0
+          }
+        },
+        {
+          "class": "editor-transcript",
+          "rect": {
+            "x": 0,
+            "y": 438.5,
+            "width": 1024,
+            "height": 245.5,
+            "top": 438.5,
+            "right": 1024,
+            "bottom": 684,
+            "left": 0
+          }
+        },
+        {
+          "class": "editor-timeline",
+          "rect": {
+            "x": 0,
+            "y": 684,
+            "width": 1024,
+            "height": 84,
+            "top": 684,
+            "right": 1024,
+            "bottom": 768,
+            "left": 0
+          }
+        }
+      ],
+      "samePlayer": true,
+      "time": 0
+    },
+    "after_drag": {
+      "size": [
+        1024,
+        768
+      ],
+      "layout": "editor-workbench stacked ",
+      "ratio": "55",
+      "boxes": [
+        {
+          "class": "editor-actions",
+          "rect": {
+            "x": 0,
+            "y": 124,
+            "width": 1024,
+            "height": 53,
+            "top": 124,
+            "right": 1024,
+            "bottom": 177,
+            "left": 0
+          }
+        },
+        {
+          "class": "editor-body",
+          "rect": {
+            "x": 0,
+            "y": 177,
+            "width": 1024,
+            "height": 507,
+            "top": 177,
+            "right": 1024,
+            "bottom": 684,
+            "left": 0
+          }
+        },
+        {
+          "class": "editor-player",
+          "rect": {
+            "x": 0,
+            "y": 177,
+            "width": 1024,
+            "height": 278.84375,
+            "top": 177,
+            "right": 1024,
+            "bottom": 455.84375,
+            "left": 0
+          }
+        },
+        {
+          "class": "editor-transcript",
+          "rect": {
+            "x": 0,
+            "y": 463.84375,
+            "width": 1024,
+            "height": 220.15625,
+            "top": 463.84375,
+            "right": 1024,
+            "bottom": 684,
+            "left": 0
+          }
+        },
+        {
+          "class": "editor-timeline",
+          "rect": {
+            "x": 0,
+            "y": 684,
+            "width": 1024,
+            "height": 84,
+            "top": 684,
+            "right": 1024,
+            "bottom": 768,
+            "left": 0
+          }
+        }
+      ],
+      "samePlayer": true,
+      "time": 0
+    }
+  },
+  {
+    "before": {
+      "size": [
+        740,
+        720
+      ],
+      "layout": "editor-workbench stacked ",
+      "ratio": "50",
+      "boxes": [
+        {
+          "class": "editor-actions",
+          "rect": {
+            "x": 0,
+            "y": 124,
+            "width": 740,
+            "height": 49,
+            "top": 124,
+            "right": 740,
+            "bottom": 173,
+            "left": 0
+          }
+        },
+        {
+          "class": "editor-body",
+          "rect": {
+            "x": 0,
+            "y": 173,
+            "width": 740,
+            "height": 477,
+            "top": 173,
+            "right": 740,
+            "bottom": 650,
+            "left": 0
+          }
+        },
+        {
+          "class": "editor-player",
+          "rect": {
+            "x": 0,
+            "y": 173,
+            "width": 740,
+            "height": 238.5,
+            "top": 173,
+            "right": 740,
+            "bottom": 411.5,
+            "left": 0
+          }
+        },
+        {
+          "class": "editor-transcript",
+          "rect": {
+            "x": 0,
+            "y": 419.5,
+            "width": 740,
+            "height": 230.5,
+            "top": 419.5,
+            "right": 740,
+            "bottom": 650,
+            "left": 0
+          }
+        },
+        {
+          "class": "editor-timeline",
+          "rect": {
+            "x": 0,
+            "y": 650,
+            "width": 740,
+            "height": 70,
+            "top": 650,
+            "right": 740,
+            "bottom": 720,
+            "left": 0
+          }
+        }
+      ],
+      "samePlayer": true,
+      "time": 0
+    },
+    "after_drag": {
+      "size": [
+        740,
+        720
+      ],
+      "layout": "editor-workbench stacked ",
+      "ratio": "55",
+      "boxes": [
+        {
+          "class": "editor-actions",
+          "rect": {
+            "x": 0,
+            "y": 124,
+            "width": 740,
+            "height": 49,
+            "top": 124,
+            "right": 740,
+            "bottom": 173,
+            "left": 0
+          }
+        },
+        {
+          "class": "editor-body",
+          "rect": {
+            "x": 0,
+            "y": 173,
+            "width": 740,
+            "height": 477,
+            "top": 173,
+            "right": 740,
+            "bottom": 650,
+            "left": 0
+          }
+        },
+        {
+          "class": "editor-player",
+          "rect": {
+            "x": 0,
+            "y": 173,
+            "width": 740,
+            "height": 262.34375,
+            "top": 173,
+            "right": 740,
+            "bottom": 435.34375,
+            "left": 0
+          }
+        },
+        {
+          "class": "editor-transcript",
+          "rect": {
+            "x": 0,
+            "y": 443.34375,
+            "width": 740,
+            "height": 206.65625,
+            "top": 443.34375,
+            "right": 740,
+            "bottom": 650,
+            "left": 0
+          }
+        },
+        {
+          "class": "editor-timeline",
+          "rect": {
+            "x": 0,
+            "y": 650,
+            "width": 740,
+            "height": 70,
+            "top": 650,
+            "right": 740,
+            "bottom": 720,
+            "left": 0
+          }
+        }
+      ],
+      "samePlayer": true,
+      "time": 0
+    }
+  }
+]

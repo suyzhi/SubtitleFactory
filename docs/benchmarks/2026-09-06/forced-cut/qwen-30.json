@@ -1,0 +1,52 @@
+[
+  {
+    "sample": "continuous",
+    "iteration": 0,
+    "max_speech_seconds": 30,
+    "total_seconds": 7.812979375012219,
+    "first_result_seconds": 6.133189041982405,
+    "process_peak_rss_bytes": 2108915712,
+    "segments": [
+      {
+        "start": 0.07,
+        "end": 33.596000000000004,
+        "text": "Welcome to the subtitle workshop. Import a video, check every sentence, and export the final subtitles. Welcome to the subtitle workshop. Import a video, check every sentence, and export the final subtitles. Welcome to the subtitle workshop. Import a video. Check every sentence and export the final subtitles. Welcome to the subtitle workshop. Import a video. Check every sentence and export the final subtitles. Welcome to the subtitle workshop. Import a video. Check every sentence and export the final subtitles. Welcome to the subtitle workshop. Import a video."
+      },
+      {
+        "start": 33.67,
+        "end": 42.9909375,
+        "text": "Check every sentence and export the final subtitles. Welcome to the subtitle workshop. Import a video, check every sentence, and export the final subtitles."
+      }
+    ],
+    "character_errors": 0,
+    "reference_characters": 588,
+    "cer": 0.0,
+    "out_of_bounds": 0,
+    "adjacent_duplicates": 0
+  },
+  {
+    "sample": "continuous",
+    "iteration": 1,
+    "max_speech_seconds": 30,
+    "total_seconds": 7.462767166027334,
+    "first_result_seconds": 5.776904625003226,
+    "process_peak_rss_bytes": 2108915712,
+    "segments": [
+      {
+        "start": 0.07,
+        "end": 33.596000000000004,
+        "text": "Welcome to the subtitle workshop. Import a video, check every sentence, and export the final subtitles. Welcome to the subtitle workshop. Import a video, check every sentence, and export the final subtitles. Welcome to the subtitle workshop. Import a video. Check every sentence and export the final subtitles. Welcome to the subtitle workshop. Import a video. Check every sentence and export the final subtitles. Welcome to the subtitle workshop. Import a video. Check every sentence and export the final subtitles. Welcome to the subtitle workshop. Import a video."
+      },
+      {
+        "start": 33.67,
+        "end": 42.9909375,
+        "text": "Check every sentence and export the final subtitles. Welcome to the subtitle workshop. Import a video, check every sentence, and export the final subtitles."
+      }
+    ],
+    "character_errors": 0,
+    "reference_characters": 588,
+    "cer": 0.0,
+    "out_of_bounds": 0,
+    "adjacent_duplicates": 0
+  }
+]

@@ -54,7 +54,7 @@ class _SynchronousTaskManager:
     def __init__(self) -> None:
         self._counter = 0
 
-    def create_task(self, _project_id, kind):
+    def create_task(self, _project_id, kind, **_options):
         self._counter += 1
         return f"e2e-task-{kind}-{self._counter}"
 

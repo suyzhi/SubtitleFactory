@@ -70,7 +70,7 @@ export function recoveryActionLabel(task: TaskStatus | null): string {
     if (task?.type === 'switch_media_mode') return '重新下载并切换';
     return '重新下载';
   }
-  if (action === 'workflow') return '重新启动自动工作流';
+  if (action === 'workflow') return '从失败步骤重试';
   if (action === 'transcription') {
     return task?.error_code === 'APP_INTERRUPTED' ? '重新开始转写' : '使用备用模型重试';
   }

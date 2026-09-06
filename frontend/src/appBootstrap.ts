@@ -12,7 +12,7 @@ export interface AppBootstrapSnapshot {
  * local backend is reachable. Keychain-backed AI provider state is loaded only
  * when a project workspace or the settings center actually needs it.
  */
-export async function loadAppBootstrap(): Promise<AppBootstrapSnapshot> {
+export async function loadAppBootstrap(includeLibraries = true): Promise<AppBootstrapSnapshot> {
   // Keep the two library reads sequential during cold start. Some embedded
   // browser/WebView stacks cancel one of two simultaneous CORS-preflighted
   // requests while the bundled backend is still warming up, which made the
@@ -23,7 +23,7 @@ export async function loadAppBootstrap(): Promise<AppBootstrapSnapshot> {
     return { active, deleted };
   };
   const [{ active, deleted }, app] = await Promise.all([
-    loadLibraries(),
+    includeLibraries ? loadLibraries() : Promise.resolve({ active: {projects: []}, deleted: {projects: []} }),
     api.getAppSettings().catch(() => ({ settings: {} as AppSettings, warnings: [] })),
   ]);
 

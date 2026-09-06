@@ -58,6 +58,22 @@ class V02DatabaseMigrationTests(unittest.TestCase):
                 self.assertEqual(conn.execute("SELECT media_mode FROM projects").fetchone()["media_mode"], "local")
                 conn.close()
 
+    def test_legacy_web_mode_migrates_without_losing_project_content(self):
+        with tempfile.TemporaryDirectory() as folder:
+            with patch.object(database, "DB_PATH", Path(folder) / "legacy-web.db"):
+                database.init_db()
+                conn = database.get_db()
+                conn.execute("INSERT INTO projects (id,title,source_type,source_url,media_mode,audio_path,created_at,updated_at) VALUES ('web','Keep title','youtube','https://youtu.be/dQw4w9WgXcQ','web','/existing/audio.wav','old','old')")
+                conn.commit()
+                before = dict(conn.execute("SELECT * FROM projects WHERE id='web'").fetchone())
+                conn.close()
+                database.init_db()
+                conn = database.get_db()
+                after = dict(conn.execute("SELECT * FROM projects WHERE id='web'").fetchone())
+                conn.close()
+                before['media_mode'] = 'local'
+                self.assertEqual(after, before)
+
 
 class ProjectTrashAPITests(unittest.TestCase):
     def setUp(self):
@@ -119,7 +135,7 @@ class ProjectTrashAPITests(unittest.TestCase):
         self.assertEqual(restored.status_code, 200)
         self.assertIsNone(restored.json()["project"]["deleted_at"])
 
-    def test_new_youtube_project_uses_global_or_explicit_media_mode(self):
+    def test_new_youtube_project_ignores_legacy_web_default(self):
         with patch.object(projects, "get_app_settings", return_value={"youtube_media_mode": "web"}):
             created = self.client.post("/api/projects", json={
                 "source_type": "youtube",
@@ -128,7 +144,7 @@ class ProjectTrashAPITests(unittest.TestCase):
             })
         self.assertEqual(created.status_code, 201, created.text)
         project = self.client.get(f"/api/projects/{created.json()['project_id']}").json()
-        self.assertEqual(project["media_mode"], "web")
+        self.assertEqual(project["media_mode"], "local")
         self.assertEqual(project["youtube_video_id"], "dQw4w9WgXcQ")
         self.assertEqual(project["source_url"], "https://www.youtube.com/watch?v=dQw4w9WgXcQ")
 
@@ -231,14 +247,14 @@ class AppSettingsAPITests(unittest.TestCase):
             json={
                 "source_language": "vi",
                 "translation_target_language": "uk",
-                "youtube_media_mode": "web",
+                "youtube_media_mode": "local",
             },
         )
         self.assertEqual(updated.status_code, 200)
         reloaded = self.client.get("/api/settings/app").json()["settings"]
         self.assertEqual(reloaded["source_language"], "vi")
         self.assertEqual(reloaded["translation_target_language"], "uk")
-        self.assertEqual(reloaded["youtube_media_mode"], "web")
+        self.assertEqual(reloaded["youtube_media_mode"], "local")
 
     def test_invalid_model_path_falls_back_and_secret_fields_are_rejected(self):
         response = self.client.put(

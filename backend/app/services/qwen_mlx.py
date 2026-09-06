@@ -59,8 +59,12 @@ def _iter_segments(
     language: str,
     vad_path,
     audio_duration: float,
+    *, max_speech_seconds: float = 20.0,
 ) -> Iterator[QwenMlxSegment]:
     from mlx_qwen3_asr import transcribe
+
+    if not 5 <= max_speech_seconds <= 30:
+        raise ValueError("Qwen 实验切段长度必须在 5 到 30 秒之间")
 
     forced_language = None if language in {"", "auto"} else language
     for start, end, samples in iter_vad_audio_segments(
@@ -68,7 +72,7 @@ def _iter_segments(
         audio_path,
         vad_path,
         audio_duration,
-        max_speech_seconds=20.0,
+        max_speech_seconds=max_speech_seconds,
     ):
         task_manager.checkpoint(task_id)
         result: Any = transcribe(

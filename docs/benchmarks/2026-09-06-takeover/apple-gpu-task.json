@@ -1,0 +1,174 @@
+{
+  "id": "c3884392-da59-42c8-8b88-15796a4f11e0",
+  "project_id": "434da70a-90be-4261-8f93-45394312a737",
+  "type": "workflow",
+  "status": "success",
+  "step": "workflow_done",
+  "progress": 100.0,
+  "message": "字幕流程已完成，可以开始校对和导出",
+  "error": null,
+  "created_at": "2026-09-06 21:02:55",
+  "updated_at": "2026-09-06 21:03:00",
+  "details": {
+    "resume_policy": "automatic_local_only",
+    "resume_payload": {
+      "project_id": "434da70a-90be-4261-8f93-45394312a737",
+      "model": "qwen3-asr-0.6b-int8-2026-03-25",
+      "language": "en",
+      "source_url": null,
+      "runtime": "mlx",
+      "options": {
+        "enable_clean": false,
+        "enable_translate": false,
+        "target_language": "zh",
+        "clean_target_length": 42,
+        "text_processing_consent": false
+      }
+    },
+    "stages": {
+      "download": "success",
+      "extract_audio": "success",
+      "transcribe": "success"
+    },
+    "audio_cache_hit": false,
+    "audio_path": "<isolated-test-root>/data/audio/434da70a-90be-4261-8f93-45394312a737/audio.wav",
+    "file_size": 210988,
+    "engine": "PyAV",
+    "preparation_identity": [
+      "<isolated-test-root>/data/audio/434da70a-90be-4261-8f93-45394312a737/audio.wav",
+      210988,
+      1788699775348366937,
+      0,
+      null,
+      null,
+      "qwen3-asr-0.6b-int8-2026-03-25",
+      "en",
+      "mlx"
+    ],
+    "resolved_model": "qwen3-asr-0.6b-int8-2026-03-25",
+    "model_resolution": {
+      "requested_model": "qwen3-asr-0.6b-int8-2026-03-25",
+      "model_id": "qwen3-asr-0.6b-int8-2026-03-25",
+      "source": "app_download",
+      "fallback_reason": "",
+      "fell_back": false
+    },
+    "preparation_seconds": 2.369,
+    "mode": "incremental",
+    "model": "qwen3-asr-0.6b-int8-2026-03-25",
+    "model_id": "qwen3-asr-0.6b-int8-2026-03-25",
+    "model_source": "app_download",
+    "device": "Apple GPU (Metal)",
+    "is_generating_segments": false,
+    "is_postprocessing": false,
+    "generated_segments": 1,
+    "current_time": 6.6,
+    "audio_duration": 6.592,
+    "latest_segment": {
+      "index": 1,
+      "start": 0.07,
+      "end": 6.592,
+      "text": "Welcome to the subtitle workshop: import a video, check every sentence, and export the final subtitles."
+    },
+    "detected_language": "en",
+    "total_segments": 1,
+    "merged_short": 0,
+    "split_long": 0,
+    "timestamp_strategy": "word_or_token_aligned",
+    "min_duration": 6.522,
+    "max_duration": 6.522,
+    "avg_duration": 6.522,
+    "too_short_count": 0,
+    "too_long_count": 0,
+    "subtitle_stats": {
+      "total_segments": 1,
+      "audio_duration": 6.6,
+      "average_duration": 6.5,
+      "min_duration": 6.52,
+      "max_duration": 6.52,
+      "merged_short_segments": 0,
+      "split_long_segments": 0
+    },
+    "run_id": "8b8b5733-e73b-45ae-880a-9dea82b6a7b6",
+    "candidate_ready": false,
+    "elapsed_seconds": 4.81,
+    "realtime_factor": 0.73,
+    "result_revision": 1
+  },
+  "logs": [
+    {
+      "time": "2026-09-06 21:02:55",
+      "level": "info",
+      "step": "extracting_audio",
+      "message": "提取所选范围的 16kHz 单声道音频",
+      "detail": "",
+      "suggestion": ""
+    },
+    {
+      "time": "2026-09-06 21:02:55",
+      "level": "info",
+      "step": "语音转写",
+      "message": "正在准备转写模型...",
+      "detail": "",
+      "suggestion": ""
+    },
+    {
+      "time": "2026-09-06 21:02:55",
+      "level": "info",
+      "step": "语音转写",
+      "message": "加载模型: qwen3-asr-0.6b-int8-2026-03-25",
+      "detail": "",
+      "suggestion": ""
+    },
+    {
+      "time": "2026-09-06 21:02:57",
+      "level": "info",
+      "step": "语音转写",
+      "message": "模型 Qwen3-ASR 0.6B · MLX 已加载，设备: Apple GPU (Metal)",
+      "detail": "精度: MLX float16",
+      "suggestion": ""
+    },
+    {
+      "time": "2026-09-06 21:02:57",
+      "level": "info",
+      "step": "语音转写",
+      "message": "检测到语言: en, 音频时长: 6.6秒",
+      "detail": "",
+      "suggestion": ""
+    },
+    {
+      "time": "2026-09-06 21:03:00",
+      "level": "info",
+      "step": "字幕后处理",
+      "message": "转写完成, 1 条原始字幕, 开始后处理",
+      "detail": "",
+      "suggestion": ""
+    },
+    {
+      "time": "2026-09-06 21:03:00",
+      "level": "info",
+      "step": "字幕后处理",
+      "message": "后处理完成: 1 条字幕（合并 0 条，拆分 0 条）",
+      "detail": "最短: 6.5s, 最长: 6.5s, 平均: 6.5s",
+      "suggestion": ""
+    },
+    {
+      "time": "2026-09-06 21:03:00",
+      "level": "info",
+      "step": "转写完成",
+      "message": "语言: en, 共 1 条字幕, 音频时长: 6.6秒",
+      "detail": "",
+      "suggestion": ""
+    }
+  ],
+  "error_code": null,
+  "recoverable": false,
+  "available_actions": [],
+  "parent_task_id": null,
+  "attempt": 1,
+  "priority": 0,
+  "resource_class": "workflow",
+  "max_attempts": 1,
+  "next_retry_at": null,
+  "suggestion": ""
+}

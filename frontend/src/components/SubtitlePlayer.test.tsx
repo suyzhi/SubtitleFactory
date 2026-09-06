@@ -1,3 +1,5 @@
+import {createRef} from 'react';
+import type {SubtitlePlayerHandle} from './SubtitlePlayer';
 // @vitest-environment jsdom
 
 import '@testing-library/jest-dom/vitest';
@@ -61,6 +63,7 @@ describe('SubtitlePlayer frame controls', () => {
     const video = container.querySelector('video') as HTMLVideoElement;
     let current = 0;
     Object.defineProperty(video, 'duration', { configurable: true, value: 1 });
+    Object.defineProperty(video, 'readyState', { configurable: true, value: 1 });
     Object.defineProperty(video, 'currentTime', {
       configurable: true,
       get: () => current,
@@ -94,6 +97,20 @@ describe('SubtitlePlayer frame controls', () => {
     expect(HTMLMediaElement.prototype.play).toHaveBeenCalled();
   });
 
+  it('preserves a seek requested before video metadata is ready', async () => {
+    const ref=createRef<SubtitlePlayerHandle>();
+    const {container}=render(<SubtitlePlayer {...baseProps} initialTime={5} ref={ref}/>);
+    const video=container.querySelector('video') as HTMLVideoElement;
+    let current=0;
+    Object.defineProperty(video,'currentTime',{configurable:true,get:()=>current,set:value=>{current=Number(value);queueMicrotask(()=>video.dispatchEvent(new Event('seeked')));}});
+    ref.current?.seekTo(3);
+    expect(current).toBe(0);
+    Object.defineProperty(video,'readyState',{configurable:true,value:1});
+    Object.defineProperty(video,'duration',{configurable:true,value:10});
+    fireEvent.loadedMetadata(video);
+    await waitFor(()=>expect(current).toBe(3));
+  });
+
   it.each([0, 50, 86, 100])(
     'maps subtitle position %s to an edge-safe translate',
     position => {
@@ -110,7 +127,7 @@ describe('SubtitlePlayer frame controls', () => {
       />);
       const overlay = container.querySelector('.pro-subtitle-overlay') as HTMLElement;
       expect(overlay).toHaveStyle({
-        top: `${position}%`,
+        top: `${360 * position / 100}px`,
         transform: `translate(-50%, -${position}%)`,
       });
     },

@@ -1,0 +1,661 @@
+{
+  "manual_edit_after_candidate_undo": "TAKEOVER checked locally.",
+  "initial_tasks": [
+    {
+      "id": "bc27c06d-781e-4511-9192-9575a2ccfb82",
+      "project_id": "0b144c47-6dad-40e6-b5c1-cb705245bc00",
+      "type": "render",
+      "status": "success",
+      "step": "render_done",
+      "progress": 100.0,
+      "message": "视频压制完成",
+      "error": null,
+      "error_code": null,
+      "recoverable": false,
+      "available_actions": [],
+      "parent_task_id": null,
+      "attempt": 1,
+      "details": {
+        "format": "mp4",
+        "bilingual": false,
+        "style": {
+          "mode": "bilingual_original_first",
+          "verticalPosition": 82,
+          "fontSize": 22,
+          "originalFontSize": 22,
+          "translatedFontSize": 22,
+          "fontFamily": "Inter, \"PingFang SC\", \"Helvetica Neue\", sans-serif",
+          "originalTextColor": "#ffffff",
+          "translatedTextColor": "#ffffff",
+          "textColor": "#ffffff",
+          "backgroundMode": "black",
+          "shadow": true,
+          "maxWidth": 85,
+          "lineGap": 4
+        },
+        "stages": {
+          "download_video": "success",
+          "render_video": "success"
+        },
+        "video_path": "<isolated-test-root>/data/projects/0b144c47-6dad-40e6-b5c1-cb705245bc00/local_video.mp4",
+        "subtitle_path": "<isolated-test-root>/data/exports/0b144c47-6dad-40e6-b5c1-cb705245bc00_subtitles.ass",
+        "output_path": "<isolated-test-root>/data/exports/0b144c47-6dad-40e6-b5c1-cb705245bc00_hardsub.mp4",
+        "output_size": 80416,
+        "subtitle_mode": "burned_image",
+        "codec_info": "libx264 + AAC"
+      },
+      "logs": [
+        {
+          "time": "2026-09-06 14:01:09",
+          "level": "info",
+          "step": "rendering",
+          "message": "开始压制字幕到视频",
+          "detail": "视频: <isolated-test-root>/data/projects/0b144c47-6dad-40e6-b5c1-cb705245bc00/local_video.mp4, 字幕: <isolated-test-root>/data/exports/0b144c47-6dad-40e6-b5c1-cb705245bc00_subtitles.ass",
+          "suggestion": ""
+        },
+        {
+          "time": "2026-09-06 14:01:09",
+          "level": "info",
+          "step": "rendering",
+          "message": "正在编码视频",
+          "detail": "编码器: libx264, 音频: AAC, 字幕格式: .ass",
+          "suggestion": ""
+        },
+        {
+          "time": "2026-09-06 14:01:10",
+          "level": "info",
+          "step": "rendering",
+          "message": "正在使用内建字幕绘制器压制硬字幕",
+          "detail": "画面: 640×360 · 字幕图层: 2",
+          "suggestion": ""
+        },
+        {
+          "time": "2026-09-06 14:01:10",
+          "level": "info",
+          "step": "rendering",
+          "message": "视频压制完成",
+          "detail": "输出: <isolated-test-root>/data/exports/0b144c47-6dad-40e6-b5c1-cb705245bc00_hardsub.mp4, 大小: 0.1MB",
+          "suggestion": ""
+        }
+      ],
+      "created_at": "2026-09-06 14:01:09",
+      "updated_at": "2026-09-06 14:01:10",
+      "priority": 0,
+      "resource_class": "ffmpeg",
+      "max_attempts": 1,
+      "next_retry_at": null,
+      "suggestion": ""
+    },
+    {
+      "id": "b581058e-440c-414d-b701-5b4628eea280",
+      "project_id": "0b144c47-6dad-40e6-b5c1-cb705245bc00",
+      "type": "transcribe",
+      "status": "success",
+      "step": "transcription_done",
+      "progress": 100.0,
+      "message": "新转写候选已生成，共 2 条；原字幕已保留",
+      "error": null,
+      "error_code": null,
+      "recoverable": false,
+      "available_actions": [],
+      "parent_task_id": null,
+      "attempt": 1,
+      "details": {
+        "model_id": "small",
+        "runtime": "cpu",
+        "language": "auto",
+        "audio_cache_hit": true,
+        "audio_path": "<isolated-test-root>/data/audio/0b144c47-6dad-40e6-b5c1-cb705245bc00/audio.wav",
+        "model_resolution": {
+          "requested_model": "small",
+          "model_id": "small",
+          "source": "app_download",
+          "fallback_reason": "",
+          "fell_back": false
+        },
+        "model_cache_hit": true,
+        "model_load_seconds": 0.001,
+        "preparation_seconds": 1.936,
+        "mode": "incremental",
+        "model": "small",
+        "model_source": "app_download",
+        "device": "cpu",
+        "is_generating_segments": false,
+        "is_postprocessing": false,
+        "generated_segments": 2,
+        "current_time": 5.4,
+        "audio_duration": 6.592,
+        "latest_segment": {
+          "index": 1,
+          "start": 0.0,
+          "end": 5.36,
+          "text": "Welcome to the subtitle workshop, import a video, check every sentence, and export the"
+        },
+        "detected_language": "en",
+        "total_segments": 2,
+        "merged_short": 0,
+        "split_long": 0,
+        "timestamp_strategy": "word_or_token_aligned",
+        "min_duration": 0.8,
+        "max_duration": 5.36,
+        "avg_duration": 3.08,
+        "too_short_count": 1,
+        "too_long_count": 0,
+        "subtitle_stats": {
+          "total_segments": 2,
+          "audio_duration": 6.6,
+          "average_duration": 3.1,
+          "min_duration": 0.8,
+          "max_duration": 5.36,
+          "merged_short_segments": 0,
+          "split_long_segments": 0
+        },
+        "run_id": "c0cce35e-3b21-4e22-a0ff-4d7c9a85cc86",
+        "candidate_ready": true,
+        "elapsed_seconds": 7.28,
+        "realtime_factor": 1.105
+      },
+      "logs": [
+        {
+          "time": "2026-09-06 13:59:51",
+          "level": "info",
+          "step": "语音转写",
+          "message": "正在准备转写模型...",
+          "detail": "",
+          "suggestion": ""
+        },
+        {
+          "time": "2026-09-06 13:59:51",
+          "level": "info",
+          "step": "语音转写",
+          "message": "加载模型: small",
+          "detail": "",
+          "suggestion": ""
+        },
+        {
+          "time": "2026-09-06 13:59:53",
+          "level": "info",
+          "step": "语音转写",
+          "message": "模型 faster-whisper small 已加载，设备: cpu",
+          "detail": "精度: int8",
+          "suggestion": ""
+        },
+        {
+          "time": "2026-09-06 13:59:53",
+          "level": "info",
+          "step": "语音转写",
+          "message": "检测到语言: en, 音频时长: 6.6秒",
+          "detail": "",
+          "suggestion": ""
+        },
+        {
+          "time": "2026-09-06 13:59:58",
+          "level": "info",
+          "step": "语音转写",
+          "message": "已转写到 00:00:05 / 00:00:06，生成 1 条字幕",
+          "detail": "",
+          "suggestion": ""
+        },
+        {
+          "time": "2026-09-06 13:59:58",
+          "level": "info",
+          "step": "字幕后处理",
+          "message": "转写完成, 2 条原始字幕, 开始后处理",
+          "detail": "",
+          "suggestion": ""
+        },
+        {
+          "time": "2026-09-06 13:59:58",
+          "level": "info",
+          "step": "字幕后处理",
+          "message": "后处理完成: 2 条字幕（合并 0 条，拆分 0 条）",
+          "detail": "最短: 0.8s, 最长: 5.4s, 平均: 3.1s",
+          "suggestion": ""
+        },
+        {
+          "time": "2026-09-06 13:59:58",
+          "level": "info",
+          "step": "转写完成",
+          "message": "语言: en, 共 2 条字幕, 音频时长: 6.6秒",
+          "detail": "",
+          "suggestion": ""
+        }
+      ],
+      "created_at": "2026-09-06 13:59:51",
+      "updated_at": "2026-09-06 13:59:58",
+      "priority": 0,
+      "resource_class": "workflow",
+      "max_attempts": 1,
+      "next_retry_at": null,
+      "suggestion": ""
+    },
+    {
+      "id": "094314a0-1582-41de-9d0e-006e5c983575",
+      "project_id": "0b144c47-6dad-40e6-b5c1-cb705245bc00",
+      "type": "workflow",
+      "status": "success",
+      "step": "workflow_done",
+      "progress": 100.0,
+      "message": "字幕流程已完成，可以开始校对和导出",
+      "error": null,
+      "error_code": null,
+      "recoverable": false,
+      "available_actions": [],
+      "parent_task_id": null,
+      "attempt": 1,
+      "details": {
+        "resume_policy": "automatic_local_only",
+        "resume_payload": {
+          "project_id": "0b144c47-6dad-40e6-b5c1-cb705245bc00",
+          "model": "small",
+          "language": "auto",
+          "source_url": null,
+          "runtime": "cpu",
+          "options": {
+            "enable_clean": false,
+            "enable_translate": false,
+            "target_language": "zh",
+            "clean_target_length": 42,
+            "text_processing_consent": false
+          }
+        },
+        "stages": {
+          "download": "success",
+          "extract_audio": "success",
+          "transcribe": "success"
+        },
+        "audio_cache_hit": false,
+        "audio_path": "<isolated-test-root>/data/audio/0b144c47-6dad-40e6-b5c1-cb705245bc00/audio.wav",
+        "file_size": 210988,
+        "engine": "PyAV",
+        "preparation_identity": [
+          "<isolated-test-root>/data/audio/0b144c47-6dad-40e6-b5c1-cb705245bc00/audio.wav",
+          210988,
+          1788674208669519650,
+          0,
+          null,
+          null,
+          "small",
+          "auto",
+          "cpu"
+        ],
+        "resolved_model": "small",
+        "model_resolution": {
+          "requested_model": "small",
+          "model_id": "small",
+          "source": "app_download",
+          "fallback_reason": "",
+          "fell_back": false
+        },
+        "model_cache_hit": false,
+        "model_load_seconds": 0.406,
+        "preparation_seconds": 2.108,
+        "mode": "incremental",
+        "model": "small",
+        "model_id": "small",
+        "model_source": "app_download",
+        "device": "cpu",
+        "is_generating_segments": false,
+        "is_postprocessing": false,
+        "generated_segments": 2,
+        "current_time": 5.4,
+        "audio_duration": 6.592,
+        "latest_segment": {
+          "index": 1,
+          "start": 0.0,
+          "end": 5.36,
+          "text": "Welcome to the subtitle workshop, import a video, check every sentence, and export the"
+        },
+        "detected_language": "en",
+        "total_segments": 2,
+        "merged_short": 0,
+        "split_long": 0,
+        "timestamp_strategy": "word_or_token_aligned",
+        "min_duration": 0.8,
+        "max_duration": 5.36,
+        "avg_duration": 3.08,
+        "too_short_count": 1,
+        "too_long_count": 0,
+        "subtitle_stats": {
+          "total_segments": 2,
+          "audio_duration": 6.6,
+          "average_duration": 3.1,
+          "min_duration": 0.8,
+          "max_duration": 5.36,
+          "merged_short_segments": 0,
+          "split_long_segments": 0
+        },
+        "run_id": "cfd11f13-71d1-4483-b631-08bddb8df2cd",
+        "candidate_ready": false,
+        "elapsed_seconds": 4.26,
+        "realtime_factor": 0.647,
+        "result_revision": 1
+      },
+      "logs": [
+        {
+          "time": "2026-09-06 13:56:48",
+          "level": "info",
+          "step": "extracting_audio",
+          "message": "提取所选范围的 16kHz 单声道音频",
+          "detail": "",
+          "suggestion": ""
+        },
+        {
+          "time": "2026-09-06 13:56:48",
+          "level": "info",
+          "step": "语音转写",
+          "message": "正在准备转写模型...",
+          "detail": "",
+          "suggestion": ""
+        },
+        {
+          "time": "2026-09-06 13:56:48",
+          "level": "info",
+          "step": "语音转写",
+          "message": "加载模型: small",
+          "detail": "",
+          "suggestion": ""
+        },
+        {
+          "time": "2026-09-06 13:56:50",
+          "level": "info",
+          "step": "语音转写",
+          "message": "模型 faster-whisper small 已加载，设备: cpu",
+          "detail": "精度: int8",
+          "suggestion": ""
+        },
+        {
+          "time": "2026-09-06 13:56:50",
+          "level": "info",
+          "step": "语音转写",
+          "message": "检测到语言: en, 音频时长: 6.6秒",
+          "detail": "",
+          "suggestion": ""
+        },
+        {
+          "time": "2026-09-06 13:56:52",
+          "level": "info",
+          "step": "字幕后处理",
+          "message": "转写完成, 2 条原始字幕, 开始后处理",
+          "detail": "",
+          "suggestion": ""
+        },
+        {
+          "time": "2026-09-06 13:56:52",
+          "level": "info",
+          "step": "字幕后处理",
+          "message": "后处理完成: 2 条字幕（合并 0 条，拆分 0 条）",
+          "detail": "最短: 0.8s, 最长: 5.4s, 平均: 3.1s",
+          "suggestion": ""
+        },
+        {
+          "time": "2026-09-06 13:56:52",
+          "level": "info",
+          "step": "转写完成",
+          "message": "语言: en, 共 2 条字幕, 音频时长: 6.6秒",
+          "detail": "",
+          "suggestion": ""
+        }
+      ],
+      "created_at": "2026-09-06 13:56:48",
+      "updated_at": "2026-09-06 13:56:52",
+      "priority": 0,
+      "resource_class": "workflow",
+      "max_attempts": 1,
+      "next_retry_at": null,
+      "suggestion": ""
+    }
+  ],
+  "exports": {
+    "srt": 108,
+    "mp4": 80416
+  },
+  "decode_failure": {
+    "id": "0f5dd599-5bcc-46fc-8b74-b2452d10fa3b",
+    "project_id": "aa809fce-168e-4b73-a44d-3d7b24fdf113",
+    "type": "workflow",
+    "status": "failed",
+    "step": "extracting_audio",
+    "progress": 45,
+    "message": "[Errno 1094995529] Invalid data found when processing input: '<isolated-test-root>/data/projects/aa809fce-168e-4b73-a44d-3d7b24fdf113/local_video.mp4'",
+    "error": "[Errno 1094995529] Invalid data found when processing input: '<isolated-test-root>/data/projects/aa809fce-168e-4b73-a44d-3d7b24fdf113/local_video.mp4'",
+    "created_at": "2026-09-06 14:02:03",
+    "updated_at": "2026-09-06 14:02:03",
+    "details": {
+      "resume_policy": "automatic_local_only",
+      "resume_payload": {
+        "project_id": "aa809fce-168e-4b73-a44d-3d7b24fdf113",
+        "model": "small",
+        "language": "en",
+        "source_url": null,
+        "runtime": "cpu",
+        "options": {
+          "enable_clean": false,
+          "enable_translate": false,
+          "target_language": "zh",
+          "clean_target_length": 42,
+          "text_processing_consent": false
+        }
+      },
+      "stages": {
+        "download": "success",
+        "extract_audio": "failed",
+        "transcribe": "waiting"
+      },
+      "audio_cache_hit": false,
+      "failure_suggestion": "请复制诊断信息并检查运行日志"
+    },
+    "logs": [
+      {
+        "time": "2026-09-06 14:02:03",
+        "level": "info",
+        "step": "extracting_audio",
+        "message": "提取所选范围的 16kHz 单声道音频",
+        "detail": "",
+        "suggestion": ""
+      },
+      {
+        "time": "2026-09-06 14:02:03",
+        "level": "error",
+        "step": "任务失败",
+        "message": "[Errno 1094995529] Invalid data found when processing input: '<isolated-test-root>/data/projects/aa809fce-168e-4b73-a44d-3d7b24fdf113/local_video.mp4'",
+        "detail": "",
+        "suggestion": "请复制诊断信息并检查运行日志"
+      }
+    ],
+    "error_code": "UNEXPECTED_ERROR",
+    "recoverable": true,
+    "available_actions": [
+      "retry"
+    ],
+    "parent_task_id": null,
+    "attempt": 1,
+    "priority": 0,
+    "resource_class": "workflow",
+    "max_attempts": 1,
+    "next_retry_at": null,
+    "suggestion": "请复制诊断信息并检查运行日志"
+  },
+  "retry": {
+    "id": "60e77db2-9f41-4df9-863b-99c97f46929d",
+    "project_id": "aa809fce-168e-4b73-a44d-3d7b24fdf113",
+    "type": "workflow",
+    "status": "success",
+    "step": "workflow_done",
+    "progress": 100.0,
+    "message": "字幕流程已完成，可以开始校对和导出",
+    "error": null,
+    "created_at": "2026-09-06 14:02:03",
+    "updated_at": "2026-09-06 14:02:05",
+    "details": {
+      "resume_policy": "automatic_local_only",
+      "resume_payload": {
+        "project_id": "aa809fce-168e-4b73-a44d-3d7b24fdf113",
+        "model": "small",
+        "language": "en",
+        "source_url": null,
+        "runtime": "cpu",
+        "options": {
+          "enable_clean": false,
+          "enable_translate": false,
+          "target_language": "zh",
+          "clean_target_length": 42,
+          "text_processing_consent": false
+        }
+      },
+      "stages": {
+        "download": "success",
+        "extract_audio": "success",
+        "transcribe": "success"
+      },
+      "audio_cache_hit": false,
+      "audio_path": "<isolated-test-root>/data/audio/aa809fce-168e-4b73-a44d-3d7b24fdf113/audio.wav",
+      "file_size": 210988,
+      "engine": "PyAV",
+      "preparation_identity": [
+        "<isolated-test-root>/data/audio/aa809fce-168e-4b73-a44d-3d7b24fdf113/audio.wav",
+        210988,
+        1788674523451896139,
+        0,
+        null,
+        null,
+        "small",
+        "en",
+        "cpu"
+      ],
+      "resolved_model": "small",
+      "model_resolution": {
+        "requested_model": "small",
+        "model_id": "small",
+        "source": "app_download",
+        "fallback_reason": "",
+        "fell_back": false
+      },
+      "model_cache_hit": true,
+      "model_load_seconds": 0.0,
+      "preparation_seconds": 0.135,
+      "mode": "incremental",
+      "model": "small",
+      "model_id": "small",
+      "model_source": "app_download",
+      "device": "cpu",
+      "is_generating_segments": false,
+      "is_postprocessing": false,
+      "generated_segments": 2,
+      "current_time": 5.4,
+      "audio_duration": 6.592,
+      "latest_segment": {
+        "index": 1,
+        "start": 0.0,
+        "end": 5.36,
+        "text": "Welcome to the subtitle workshop, import a video, check every sentence, and export the"
+      },
+      "detected_language": "en",
+      "total_segments": 2,
+      "merged_short": 0,
+      "split_long": 0,
+      "timestamp_strategy": "word_or_token_aligned",
+      "min_duration": 0.8,
+      "max_duration": 5.36,
+      "avg_duration": 3.08,
+      "too_short_count": 1,
+      "too_long_count": 0,
+      "subtitle_stats": {
+        "total_segments": 2,
+        "audio_duration": 6.6,
+        "average_duration": 3.1,
+        "min_duration": 0.8,
+        "max_duration": 5.36,
+        "merged_short_segments": 0,
+        "split_long_segments": 0
+      },
+      "run_id": "8b840f88-fce8-4b12-b932-f3bfa56dc5e6",
+      "candidate_ready": false,
+      "elapsed_seconds": 1.87,
+      "realtime_factor": 0.284,
+      "result_revision": 1
+    },
+    "logs": [
+      {
+        "time": "2026-09-06 14:02:03",
+        "level": "info",
+        "step": "extracting_audio",
+        "message": "提取所选范围的 16kHz 单声道音频",
+        "detail": "",
+        "suggestion": ""
+      },
+      {
+        "time": "2026-09-06 14:02:03",
+        "level": "info",
+        "step": "语音转写",
+        "message": "正在准备转写模型...",
+        "detail": "",
+        "suggestion": ""
+      },
+      {
+        "time": "2026-09-06 14:02:03",
+        "level": "info",
+        "step": "语音转写",
+        "message": "加载模型: small",
+        "detail": "",
+        "suggestion": ""
+      },
+      {
+        "time": "2026-09-06 14:02:03",
+        "level": "info",
+        "step": "语音转写",
+        "message": "模型 faster-whisper small 已加载，设备: cpu",
+        "detail": "精度: int8",
+        "suggestion": ""
+      },
+      {
+        "time": "2026-09-06 14:02:03",
+        "level": "info",
+        "step": "语音转写",
+        "message": "检测到语言: en, 音频时长: 6.6秒",
+        "detail": "",
+        "suggestion": ""
+      },
+      {
+        "time": "2026-09-06 14:02:05",
+        "level": "info",
+        "step": "字幕后处理",
+        "message": "转写完成, 2 条原始字幕, 开始后处理",
+        "detail": "",
+        "suggestion": ""
+      },
+      {
+        "time": "2026-09-06 14:02:05",
+        "level": "info",
+        "step": "字幕后处理",
+        "message": "后处理完成: 2 条字幕（合并 0 条，拆分 0 条）",
+        "detail": "最短: 0.8s, 最长: 5.4s, 平均: 3.1s",
+        "suggestion": ""
+      },
+      {
+        "time": "2026-09-06 14:02:05",
+        "level": "info",
+        "step": "转写完成",
+        "message": "语言: en, 共 2 条字幕, 音频时长: 6.6秒",
+        "detail": "",
+        "suggestion": ""
+      }
+    ],
+    "error_code": null,
+    "recoverable": false,
+    "available_actions": [],
+    "parent_task_id": null,
+    "attempt": 1,
+    "priority": 0,
+    "resource_class": "workflow",
+    "max_attempts": 1,
+    "next_retry_at": null,
+    "suggestion": ""
+  },
+  "pagination": {
+    "total": 45,
+    "first": 40,
+    "second": 5
+  },
+  "long_task": "235b229a-c4f9-4667-b904-52118912b7ee"
+}

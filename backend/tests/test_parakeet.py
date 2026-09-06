@@ -312,7 +312,7 @@ class ParakeetInferenceAdapterTests(unittest.TestCase):
             db.close()
 
             fake_manager = SimpleNamespace(
-                create_task=lambda _project_id, _kind: "parakeet-task",
+                create_task=lambda _project_id, _kind, **_options: "parakeet-task",
                 update_task=lambda *_args, **_kwargs: None,
                 run_background=lambda *_args, **_kwargs: None,
             )

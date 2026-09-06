@@ -1,0 +1,186 @@
+[
+  {
+    "id": "48094d97-13bf-4b21-a923-6eca914cccf2",
+    "status": "success",
+    "type": "workflow",
+    "message": "新转写候选已生成；比较并采用后可继续整理和翻译",
+    "details": {
+      "resume_policy": "automatic_local_only",
+      "resume_payload": {
+        "project_id": "d46b0c47-0ef0-4057-8c23-8b67039f771d",
+        "model": "small",
+        "language": "en",
+        "source_url": null,
+        "runtime": "cpu",
+        "options": {
+          "enable_clean": false,
+          "enable_translate": false,
+          "target_language": "zh",
+          "clean_target_length": 42,
+          "text_processing_consent": false
+        }
+      },
+      "stages": {
+        "download": "success",
+        "extract_audio": "success",
+        "transcribe": "success"
+      },
+      "audio_cache_hit": true,
+      "audio_path": "/private/tmp/subtitle-workflow-qa-20260906/audio/d46b0c47-0ef0-4057-8c23-8b67039f771d/audio.wav",
+      "preparation_identity": [
+        "/private/tmp/subtitle-workflow-qa-20260906/audio/d46b0c47-0ef0-4057-8c23-8b67039f771d/audio.wav",
+        210988,
+        1788662471508674987,
+        0,
+        null,
+        null,
+        "small",
+        "en",
+        "cpu"
+      ],
+      "resolved_model": "small",
+      "model_resolution": {
+        "requested_model": "small",
+        "model_id": "small",
+        "source": "app_download",
+        "fallback_reason": "",
+        "fell_back": false
+      },
+      "model_cache_hit": false,
+      "model_load_seconds": 0.271,
+      "preparation_seconds": 0.334,
+      "mode": "incremental",
+      "model": "small",
+      "model_id": "small",
+      "model_source": "app_download",
+      "device": "cpu",
+      "is_generating_segments": false,
+      "is_postprocessing": false,
+      "generated_segments": 2,
+      "current_time": 5.4,
+      "audio_duration": 6.592,
+      "latest_segment": {
+        "index": 1,
+        "start": 0.0,
+        "end": 5.36,
+        "text": "Welcome to the subtitle workshop, import a video, check every sentence, and export the"
+      },
+      "detected_language": "en",
+      "total_segments": 2,
+      "merged_short": 0,
+      "split_long": 0,
+      "timestamp_strategy": "word_or_token_aligned",
+      "min_duration": 0.8,
+      "max_duration": 5.36,
+      "avg_duration": 3.08,
+      "too_short_count": 1,
+      "too_long_count": 0,
+      "subtitle_stats": {
+        "total_segments": 2,
+        "audio_duration": 6.6,
+        "average_duration": 3.1,
+        "min_duration": 0.8,
+        "max_duration": 5.36,
+        "merged_short_segments": 0,
+        "split_long_segments": 0
+      },
+      "run_id": "2c7cacb6-052e-461d-8c50-4ca5f5e3bd3f",
+      "candidate_ready": true,
+      "elapsed_seconds": 1.62,
+      "realtime_factor": 0.245,
+      "result_revision": 4
+    }
+  },
+  {
+    "id": "a48b3078-43fd-4070-b22d-89954a38ea55",
+    "status": "success",
+    "type": "workflow",
+    "message": "新转写候选已生成；比较并采用后可继续整理和翻译",
+    "details": {
+      "resume_policy": "automatic_local_only",
+      "resume_payload": {
+        "project_id": "d46b0c47-0ef0-4057-8c23-8b67039f771d",
+        "model": "small",
+        "language": "en",
+        "source_url": null,
+        "runtime": "cpu",
+        "options": {
+          "enable_clean": false,
+          "enable_translate": false,
+          "target_language": "zh",
+          "clean_target_length": 42,
+          "text_processing_consent": false
+        }
+      },
+      "stages": {
+        "download": "success",
+        "extract_audio": "success",
+        "transcribe": "success"
+      },
+      "audio_cache_hit": true,
+      "audio_path": "/private/tmp/subtitle-workflow-qa-20260906/audio/d46b0c47-0ef0-4057-8c23-8b67039f771d/audio.wav",
+      "preparation_identity": [
+        "/private/tmp/subtitle-workflow-qa-20260906/audio/d46b0c47-0ef0-4057-8c23-8b67039f771d/audio.wav",
+        210988,
+        1788662471508674987,
+        0,
+        null,
+        null,
+        "small",
+        "en",
+        "cpu"
+      ],
+      "resolved_model": "small",
+      "model_resolution": {
+        "requested_model": "small",
+        "model_id": "small",
+        "source": "app_download",
+        "fallback_reason": "",
+        "fell_back": false
+      },
+      "model_cache_hit": true,
+      "model_load_seconds": 0.0,
+      "preparation_seconds": 0.036,
+      "mode": "incremental",
+      "model": "small",
+      "model_id": "small",
+      "model_source": "app_download",
+      "device": "cpu",
+      "is_generating_segments": false,
+      "is_postprocessing": false,
+      "generated_segments": 2,
+      "current_time": 5.4,
+      "audio_duration": 6.592,
+      "latest_segment": {
+        "index": 1,
+        "start": 0.0,
+        "end": 5.36,
+        "text": "Welcome to the subtitle workshop, import a video, check every sentence, and export the"
+      },
+      "detected_language": "en",
+      "total_segments": 2,
+      "merged_short": 0,
+      "split_long": 0,
+      "timestamp_strategy": "word_or_token_aligned",
+      "min_duration": 0.8,
+      "max_duration": 5.36,
+      "avg_duration": 3.08,
+      "too_short_count": 1,
+      "too_long_count": 0,
+      "subtitle_stats": {
+        "total_segments": 2,
+        "audio_duration": 6.6,
+        "average_duration": 3.1,
+        "min_duration": 0.8,
+        "max_duration": 5.36,
+        "merged_short_segments": 0,
+        "split_long_segments": 0
+      },
+      "run_id": "2949c712-7c97-4125-a7ab-dacaa21b940e",
+      "candidate_ready": true,
+      "elapsed_seconds": 1.3,
+      "realtime_factor": 0.197,
+      "result_revision": 4
+    }
+  }
+]

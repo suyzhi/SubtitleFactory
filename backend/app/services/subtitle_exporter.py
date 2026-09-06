@@ -130,14 +130,19 @@ def export_ass(segments: list, output_path: str, bilingual: bool = False,
     settings = settings or {}
     raw_font = str(settings.get("fontFamily") or font_name)
     font_name = raw_font.split(",", 1)[0].strip().strip('"\'') or font_name
+    if "," in raw_font:
+        from PIL import ImageFont
+
+        from .clips import _font_path
+        font_name = ImageFont.truetype(_font_path(raw_font, False), 20).getname()[0]
     font_size = int(settings.get("originalFontSize") or settings.get("fontSize") or font_size)
     secondary_size = int(settings.get("translatedFontSize") or max(8, font_size - 2))
-    play_res_x = max(320, int(settings.get("_play_res_x") or 1920))
-    play_res_y = max(320, int(settings.get("_play_res_y") or 1080))
+    play_res_x = max(320, int(settings.get("_play_res_x") or 640))
+    play_res_y = max(320, int(settings.get("_play_res_y") or 360))
     vertical_position = max(5, min(95, float(settings.get("verticalPosition", 88))))
     safe_margin = max(0.03, min(0.15, float(settings.get("_safe_margin_ratio") or 0.03)))
     margin_vertical = max(round(play_res_y * safe_margin), round((100 - vertical_position) / 100 * play_res_y))
-    margin_horizontal = max(20, round(play_res_x * safe_margin))
+    margin_horizontal = max(20, round(play_res_x * max(safe_margin, (100 - float(settings.get("maxWidth", 94))) / 200)))
     background_mode = settings.get("backgroundMode", "none")
     shadow_enabled = bool(settings.get("shadow", True))
 

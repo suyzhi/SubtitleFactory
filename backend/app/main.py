@@ -46,7 +46,7 @@ from .api import (
     terminology,
     watch_folders,
 )
-from .security import ALLOWED_ORIGINS, require_loopback_session
+from .security import ALLOWED_ORIGINS, require_local_origin
 from .services.distribution import (
     DistributionPolicyError,
     distribution_capabilities,
@@ -163,10 +163,8 @@ async def block_writes_during_database_restore(request: Request, call_next):
         task_manager.end_api_mutation()
 
 
-# Register authentication last so Starlette places it on the outside of the
-# maintenance gate. An unauthenticated loopback client must always receive 401
-# and must never learn whether a database restore is currently pending.
-app.middleware("http")(require_loopback_session)
+# Reject requests originating from unrelated websites.
+app.middleware("http")(require_local_origin)
 
 
 @app.exception_handler(HTTPException)

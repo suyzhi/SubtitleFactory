@@ -30,7 +30,7 @@ describe('task recovery routing', () => {
   it('restarts an automatic workflow when its download stage fails', () => {
     const task = failedTask('workflow', 'NETWORK_TEMPORARY');
     expect(isDownloadFailure(task)).toBe(true);
-    expect(recoveryActionLabel(task)).toBe('重新启动自动工作流');
+    expect(recoveryActionLabel(task)).toBe('从失败步骤重试');
   });
 
   it('offers a fallback model only for transcription failures', () => {

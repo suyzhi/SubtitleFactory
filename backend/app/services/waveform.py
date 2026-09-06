@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import hashlib
 import json
-import math
 import os
 import uuid
 import wave
 from array import array
+from functools import lru_cache
 from pathlib import Path
+
+import numpy as np
 
 from ..models.database import get_db
 from ..utils.config import PROJECTS_DIR
@@ -18,6 +20,13 @@ RESOLUTIONS = (1_000, 4_000, 16_000)
 
 
 def audio_fingerprint(path: str) -> str:
+    resolved = str(Path(path).resolve())
+    stat = os.stat(resolved)
+    return _cached_fingerprint(resolved, stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns)
+
+
+@lru_cache(maxsize=128)
+def _cached_fingerprint(path: str, *identity: int) -> str:
     digest = hashlib.sha256()
     with open(path, "rb") as source:
         for chunk in iter(lambda: source.read(1024 * 1024), b""):
@@ -47,14 +56,14 @@ def _peaks(samples: array, count: int) -> list[float]:
     if not samples:
         return []
     count = max(1, min(count, len(samples)))
-    bucket = len(samples) / count
-    result: list[float] = []
-    for index in range(count):
-        start = math.floor(index * bucket)
-        end = max(start + 1, math.floor((index + 1) * bucket))
-        peak = max(abs(value) for value in samples[start:end]) / 32768
-        result.append(round(min(1.0, peak), 4))
-    return result
+    # View PCM without copying it, and reduce each bucket in native code.
+    # Widen only the small result arrays so -32768 cannot overflow on abs().
+    values = np.frombuffer(samples, dtype=np.int16)
+    starts = np.floor(np.arange(count) * (len(samples) / count)).astype(np.intp)
+    high = np.maximum.reduceat(values, starts).astype(np.int32)
+    low = np.minimum.reduceat(values, starts).astype(np.int32)
+    peaks = np.maximum(high, -low) / 32768
+    return [round(float(value), 4) for value in peaks]
 
 
 def get_waveform(project_id: str, requested_points: int = 4_000) -> dict:

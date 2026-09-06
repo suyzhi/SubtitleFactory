@@ -16,8 +16,8 @@ import re
 import sys
 import time as time_module
 import uuid
+from contextlib import ExitStack
 from dataclasses import asdict, dataclass
-from functools import partial
 from pathlib import Path
 from typing import List
 
@@ -332,6 +332,13 @@ def resolve_transcription_model(
 
 
 def transcribe_audio(task_id: str, audio_path: str, project_id: str, language: str = "auto", model_size: str | None = None, runtime: str | None = None):
+    # Workflow preparation does not occupy the inference slot. Standalone
+    # transcription already holds it; resource_slot is reentrant in that case.
+    with task_manager.resource_slot(task_id, "ml"), ExitStack() as resources:
+        return _transcribe_audio(task_id, audio_path, project_id, language, model_size, runtime, resources)
+
+
+def _transcribe_audio(task_id, audio_path, project_id, language, model_size, runtime, resources):
     """
     转写音频文件，生成字幕段（segments）。
     增量写入：每生成一个 segment 立即写数据库，前端可实时拉取。
@@ -352,6 +359,8 @@ def transcribe_audio(task_id: str, audio_path: str, project_id: str, language: s
         coreml_model_path=app_settings.get("coreml_model_path"),
         coreml_cli_path=app_settings.get("coreml_cli_path"),
     )
+    if resolution.fell_back and model_size and model_size != "auto":
+        raise TranscriptionError("所选模型不可用，未改用其他模型", "MODEL_UNAVAILABLE", suggestion=resolution.fallback_reason)
     model_id = resolution.model_id
     runtime = runtime or (app_settings.get("transcription_runtime_by_model") or {}).get(model_id)
     if not runtime:
@@ -385,6 +394,7 @@ def transcribe_audio(task_id: str, audio_path: str, project_id: str, language: s
         )
     run_id = str(uuid.uuid4())
     started_at = time_module.time()
+    inference_started = time_module.perf_counter()
     db_run = get_db()
     db_run.execute(
         """INSERT INTO transcription_runs
@@ -504,11 +514,9 @@ def transcribe_audio(task_id: str, audio_path: str, project_id: str, language: s
         runtime_model_name = f"MLX Whisper {model_id}"
         progress_start = 5.0
     else:
-        import ctranslate2
         from faster_whisper import WhisperModel
 
-        device = "cuda" if ctranslate2.get_cuda_device_count() > 0 else "cpu"
-        compute_type = "float16" if device == "cuda" else "int8"
+        device, compute_type = "cpu", "int8"
         load_target = resolution.load_target
         if model_id in WHISPER_MODEL_IDS and resolution.source != "built_in":
             local_model = resolve_local_model(model_id, "cpu")
@@ -522,11 +530,16 @@ def transcribe_audio(task_id: str, audio_path: str, project_id: str, language: s
                     suggestion="请在模型中心修复此模型的 CPU 格式",
                 )
             load_target = str(local_model)
-        model = WhisperModel(
-            load_target,
-            device=device,
-            compute_type=compute_type,
-        )
+        from .model_pool import cpu_model_pool, model_identity
+        load_started = time_module.perf_counter()
+        model, reused = resources.enter_context(cpu_model_pool.lease(
+            model_identity(str(load_target), device, compute_type),
+            lambda: WhisperModel(load_target, device=device, compute_type=compute_type),
+        ))
+        task_manager.update_task(task_id, details={
+            "model_cache_hit": reused,
+            "model_load_seconds": round(time_module.perf_counter() - load_started, 3),
+        })
         task_manager.checkpoint(task_id)
 
         lang = None if language in ("auto", "") else language
@@ -543,6 +556,8 @@ def transcribe_audio(task_id: str, audio_path: str, project_id: str, language: s
         runtime_model_name = f"faster-whisper {model_id}"
         progress_start = 5.0
 
+    preparation_seconds = time_module.perf_counter() - inference_started
+    task_manager.update_task(task_id, details={"preparation_seconds": round(preparation_seconds, 3)})
     logger.info(
         "[Transcriber] 运行模型: %s, 设备: %s, 精度: %s",
         runtime_model_name, device, compute_type,
@@ -578,69 +593,67 @@ def transcribe_audio(task_id: str, audio_path: str, project_id: str, language: s
     generated_count = 0
     last_log_time = time_module.time()
 
-    for segment in segments_gen:
-        task_manager.checkpoint(task_id)
-        current_time = segment.end
+    from .transcription_buffer import DraftWriter
+    with DraftWriter() as draft_writer:
+        for segment in segments_gen:
+            task_manager.checkpoint(task_id)
+            current_time = segment.end
 
-        # Write to a run-scoped staging table. Existing published subtitles are
-        # intentionally untouched until this run has a valid final result.
-        seg_id = str(uuid.uuid4())
-        text = segment.text.strip()
-        if not text:
-            continue
-        generated_count += 1
-        timings_json = json.dumps(
-            _segment_word_timings(segment, time_offset), ensure_ascii=False, separators=(",", ":")
-        )
+            # Write to a run-scoped staging table. Existing published subtitles are
+            # intentionally untouched until this run has a valid final result.
+            seg_id = str(uuid.uuid4())
+            text = segment.text.strip()
+            if not text:
+                continue
+            generated_count += 1
+            timings_json = json.dumps(
+                _segment_word_timings(segment, time_offset), ensure_ascii=False, separators=(",", ":")
+            )
 
-        db_writer = get_db()
-        db_writer.execute(
-            """INSERT INTO transcription_segments
-               (id, run_id, project_id, idx, start, end, text, timings_json, is_draft)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)""",
-            (seg_id, run_id, project_id, generated_count, segment.start + time_offset,
-             segment.end + time_offset, text, timings_json)
-        )
-        db_writer.commit()
-        db_writer.close()
+            flushed = draft_writer.append((
+                seg_id, run_id, project_id, generated_count, segment.start + time_offset,
+                segment.end + time_offset, text, timings_json,
+            ))
+            if not flushed:
+                continue
 
-        # 不同引擎会预留各自的模型准备/CLI 运行进度区间。
-        progress_span = 90 - progress_start
-        progress = min(progress_start + (current_time / max(audio_duration, 1)) * progress_span, 90)
+            # 不同引擎会预留各自的模型准备/CLI 运行进度区间。
+            progress_span = 90 - progress_start
+            progress = min(progress_start + (current_time / max(audio_duration, 1)) * progress_span, 90)
 
-        # 节流：每 5 条或每 3 秒写一次日志
-        now = time_module.time()
-        should_log = (generated_count % LOG_THROTTLE_INTERVAL == 0) or (now - last_log_time > 3)
-        log_msg = ""
-        if should_log:
-            log_msg = f"已转写到 {_fmt_time(current_time)} / {_fmt_time(audio_duration)}，生成 {generated_count} 条字幕"
-            last_log_time = now
-            logger.info(f"[Transcriber] {log_msg}")
+            # 节流：每 5 条或每 3 秒写一次日志
+            now = time_module.time()
+            should_log = (generated_count % LOG_THROTTLE_INTERVAL == 0) or (now - last_log_time > 3)
+            log_msg = ""
+            if should_log:
+                log_msg = f"已转写到 {_fmt_time(current_time)} / {_fmt_time(audio_duration)}，生成 {generated_count} 条字幕"
+                last_log_time = now
+                logger.info(f"[Transcriber] {log_msg}")
 
-        # 更新 task details（每条都更新，不节流，前端需要）
-        detail_update = {
-            "mode": "incremental",
-            "is_generating_segments": True,
-            "is_postprocessing": False,
-            "generated_segments": generated_count,
-            "current_time": round(current_time, 1),
-            "audio_duration": round(audio_duration, 1),
-            "latest_segment": {
-                "index": generated_count,
-                "start": round(segment.start + time_offset, 3),
-                "end": round(segment.end + time_offset, 3),
-                "text": text,
-            },
-        }
-        task_manager.update_task(
-            task_id,
-            step="transcribing",
-            progress=progress,
-            message=f"正在转写 {_fmt_time(current_time)} / {_fmt_time(audio_duration)}，已生成 {generated_count} 条字幕",
-            details=detail_update,
-        )
-        if should_log:
-            task_manager.add_log(task_id, "info", "语音转写", log_msg)
+            # Publish only committed draft counts; avoid per-segment SQLite writes.
+            detail_update = {
+                "mode": "incremental",
+                "is_generating_segments": True,
+                "is_postprocessing": False,
+                "generated_segments": generated_count,
+                "current_time": round(current_time, 1),
+                "audio_duration": round(audio_duration, 1),
+                "latest_segment": {
+                    "index": generated_count,
+                    "start": round(segment.start + time_offset, 3),
+                    "end": round(segment.end + time_offset, 3),
+                    "text": text,
+                },
+            }
+            task_manager.update_task(
+                task_id,
+                step="transcribing",
+                progress=progress,
+                message=f"正在转写 {_fmt_time(current_time)} / {_fmt_time(audio_duration)}，已生成 {generated_count} 条字幕",
+                details=detail_update,
+            )
+            if should_log:
+                task_manager.add_log(task_id, "info", "语音转写", log_msg)
 
     task_manager.checkpoint(task_id)
     if generated_count == 0:
@@ -692,6 +705,7 @@ def transcribe_audio(task_id: str, audio_path: str, project_id: str, language: s
             "timings": _decode_timings(r["timings_json"]),
         })
 
+    needs_review = False
     if draft_segments:
         processed, merge_count, split_count = _post_process_segments(draft_segments)
         task_manager.checkpoint(task_id)
@@ -700,21 +714,23 @@ def transcribe_audio(task_id: str, audio_path: str, project_id: str, language: s
         db_writer = get_db()
         try:
             db_writer.execute("BEGIN IMMEDIATE")
-            db_writer.execute("DELETE FROM segments WHERE project_id=?", (project_id,))
-            for seg_index, seg in enumerate(processed):
-                if seg_index % 20 == 0:
-                    task_manager.checkpoint(task_id)
-                seg_id = str(uuid.uuid4())
-                db_writer.execute(
-                    """INSERT INTO segments
-                       (id,project_id,idx,start,end,raw_text,clean_text,is_draft,source_stage,transcription_run_id)
-                       VALUES (?,?,?,?,?,?,?,0,'postprocessed',?)""",
-                    (seg_id, project_id, seg["index"], seg["start"], seg["end"], seg["text"], seg["text"], run_id)
-                )
+            existing = db_writer.execute("SELECT 1 FROM segments WHERE project_id=? LIMIT 1", (project_id,)).fetchone()
+            needs_review = existing is not None
+            if not needs_review:
+                for seg_index, seg in enumerate(processed):
+                    if seg_index % 20 == 0:
+                        task_manager.checkpoint(task_id)
+                    db_writer.execute(
+                        """INSERT INTO segments
+                           (id,project_id,idx,start,end,raw_text,clean_text,is_draft,source_stage,transcription_run_id)
+                           VALUES (?,?,?,?,?,?,?,0,'postprocessed',?)""",
+                        (str(uuid.uuid4()), project_id, seg["index"], seg["start"], seg["end"], seg["text"], seg["text"], run_id)
+                    )
+                db_writer.execute("UPDATE projects SET edit_revision=COALESCE(edit_revision,0)+1, updated_at=datetime('now','localtime') WHERE id=?", (project_id,))
             db_writer.execute(
-                """UPDATE transcription_runs SET status='success', segments_count=?,
+                """UPDATE transcription_runs SET status=?, segments_count=?, result_json=?,
                    finished_at=datetime('now','localtime') WHERE id=?""",
-                (len(processed), run_id),
+                ('candidate' if needs_review else 'success', len(processed), json.dumps(processed, ensure_ascii=False), run_id),
             )
             # Preserve the model's raw segment/token timeline for diagnostics and
             # future reprocessing.  Published subtitles remain in ``segments``.
@@ -754,7 +770,7 @@ def transcribe_audio(task_id: str, audio_path: str, project_id: str, language: s
     # ── 完成 ──
     task_manager.update_task(
         task_id, step="transcription_done", progress=100,
-        message=f"转写完成（{detected_lang}），共 {total_final} 条字幕",
+        message=(f"新转写候选已生成，共 {total_final} 条；原字幕已保留" if needs_review else f"转写完成（{detected_lang}），共 {total_final} 条字幕"),
         details={
             "mode": "incremental",
             "is_generating_segments": False,
@@ -783,6 +799,7 @@ def transcribe_audio(task_id: str, audio_path: str, project_id: str, language: s
                 "split_long_segments": split_count,
             },
             "run_id": run_id,
+            "candidate_ready": needs_review,
             "elapsed_seconds": round(time_module.time() - started_at, 2),
             "realtime_factor": round((time_module.time() - started_at) / max(audio_duration, 0.1), 3),
         }
@@ -808,7 +825,7 @@ def _segment_word_timings(segment, time_offset: float = 0.0) -> list[dict]:
     source = getattr(segment, "timings", None) or getattr(segment, "words", None) or []
     result: list[dict] = []
     for item in source:
-        getter = item.get if isinstance(item, dict) else partial(getattr, item)
+        getter = item.get if isinstance(item, dict) else lambda key, default=None, item=item: getattr(item, key, default)
         text = str(getter("text") or getter("word") or getter("token") or "")
         try:
             start = float(getter("start", getter("startTime", 0.0))) + time_offset

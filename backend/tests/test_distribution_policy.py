@@ -15,7 +15,6 @@ if "SUBTITLE_FACTORY_DATA_DIR" not in os.environ:
         prefix="subtitle-factory-distribution-tests-",
     )
 
-from app import security
 from app.main import app
 from app.models.database import get_db
 from app.services import (
@@ -37,8 +36,6 @@ from app.utils.task_manager import task_manager
 class DistributionPolicyTests(unittest.TestCase):
     def setUp(self):
         self.token = "distribution-test-token"
-        self.token_patch = patch.object(security, "API_TOKEN", self.token)
-        self.token_patch.start()
         self.client = TestClient(
             app,
             headers={"Authorization": f"Bearer {self.token}"},
@@ -46,7 +43,6 @@ class DistributionPolicyTests(unittest.TestCase):
 
     def tearDown(self):
         self.client.close()
-        self.token_patch.stop()
 
     def test_unknown_channel_falls_back_to_direct(self):
         with patch.dict(os.environ, {CHANNEL_ENV: "unexpected"}):
@@ -194,9 +190,6 @@ class DistributionPolicyTests(unittest.TestCase):
                     "source_type": "youtube",
                     "source_url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
                 }),
-                self.client.get(
-                    "/api/player/youtube/dQw4w9WgXcQ/session?channel=test-channel",
-                ),
                 self.client.post("/api/batches/playlist/preview", json={
                     "url": "https://www.youtube.com/playlist?list=PL-test",
                 }),
@@ -380,7 +373,7 @@ class DistributionPolicyTests(unittest.TestCase):
             "title": "portable legacy project",
             "source_type": "youtube",
             "source_url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
-            "media_mode": "web",
+            "media_mode": "local",
         })
         self.assertEqual(created.status_code, 201, created.text)
         package = project_packages.export_project_package(

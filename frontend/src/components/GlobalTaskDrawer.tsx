@@ -1,3 +1,7 @@
+import {useTaskSnapshot} from '../taskStore';
+import {taskProgressLabel} from '../projectState';
+import {useState} from 'react';
+import type {TaskStatus} from '../types';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import * as api from '../api/backend';
 import { recoveryActionLabel } from '../taskRecovery';
@@ -29,25 +33,38 @@ interface Props {
 
 export default function GlobalTaskDrawer({ open, onClose, onOpenProject, onOpenSettings }: Props) {
   const client = useQueryClient();
+  const [error,setError]=useState('');
   const query = useQuery({
-    queryKey: ['global-tasks'], queryFn: () => api.getGlobalTasks(), enabled: open,
-    refetchInterval: open ? 2000 : false,
+    queryKey: ['global-tasks'], queryFn: () => api.getGlobalTasks(),
+    refetchInterval: open ? 2000 : 5000,
   });
   const act = async (taskId: string, action: 'pause' | 'resume' | 'cancel') => {
+    setError('');
+    try {
     if (action === 'pause') await api.pauseTask(taskId);
     else if (action === 'resume') await api.resumeTask(taskId);
     else await api.cancelTask(taskId);
     await client.invalidateQueries({ queryKey: ['global-tasks'] });
+    } catch(error) {setError(error instanceof Error ? error.message : '操作失败，请重试');}
   };
   if (!open) return null;
   const tasks = query.data?.tasks || [];
   return <aside className="global-task-drawer" aria-label="全局任务中心">
     <header><div><small>所有项目</small><h2>任务中心</h2></div><button aria-label="关闭任务中心" onClick={onClose}>×</button></header>
     <div className="global-task-list">
-      {!tasks.length && <div className="global-task-empty">暂无任务</div>}
-      {tasks.map(task => { const batchTitle=String(task.details?.batch_title||''); const batchItem=String(task.details?.batch_item_title||''); return <article key={task.id} className={task.status}>
+      {(error || query.error) && <p role="alert">{error || String(query.error)}<button onClick={() => void query.refetch()}>重新加载</button></p>}
+      {query.isLoading && <p role="status">正在加载任务…</p>}
+      {!tasks.length && !query.isLoading && <div className="global-task-empty">暂无任务</div>}
+      {tasks.map(task => <TaskCard key={task.id} initial={task} act={act} onOpenProject={onOpenProject} onOpenSettings={onOpenSettings}/>)}
+    </div>
+  </aside>;
+}
+
+function TaskCard({initial,act,onOpenProject,onOpenSettings}:{initial:TaskStatus;act:(id:string,action:'pause'|'resume'|'cancel')=>Promise<void>;onOpenProject:(id:string)=>void;onOpenSettings?:()=>void}) {
+  const task=useTaskSnapshot(initial.id) || initial;
+  const batchTitle=String(task.details?.batch_title||''); const batchItem=String(task.details?.batch_item_title||''); return <article className={task.status}>
         <button className="global-task-main" onClick={() => task.project_id && onOpenProject(task.project_id)}>
-          <span><strong>{batchTitle ? `${batchTitle} · ${task.details?.batch_position}. ${batchItem}` : TASK_LABELS[task.type] || task.type}</strong><small>{batchTitle ? `${TASK_LABELS[task.type] || task.type} · ${task.message || task.step || '等待开始'}` : task.message || task.step || '等待开始'}</small></span><em>{Math.round(task.progress || 0)}%</em>
+          <span><strong>{batchTitle ? `${batchTitle} · ${task.details?.batch_position}. ${batchItem}` : TASK_LABELS[task.type] || task.type}</strong><small>{batchTitle ? `${TASK_LABELS[task.type] || task.type} · ${task.message || task.step || '等待开始'}` : task.message || task.step || '等待开始'}</small></span><em>{taskProgressLabel(task)}</em>
           <progress max={100} value={task.progress || 0}/>
         </button>
         {task.status === 'failed' && <section className="global-task-failure">
@@ -55,7 +72,5 @@ export default function GlobalTaskDrawer({ open, onClose, onOpenProject, onOpenS
           <span>{task.suggestion || task.details?.failure_suggestion || task.error || ''}</span>
         </section>}
         <div>{task.status === 'running' && <button onClick={() => void act(task.id, 'pause')}>暂停</button>}{task.status === 'paused' && <button onClick={() => void act(task.id, 'resume')}>继续</button>}{['pending', 'running', 'paused'].includes(task.status) && <button onClick={() => void act(task.id, 'cancel')}>取消</button>}{task.status === 'failed' && task.recoverable && task.project_id && <button onClick={() => onOpenProject(task.project_id)}>打开项目 · {recoveryActionLabel(task)}</button>}{task.available_actions?.includes('open_settings') && onOpenSettings && <button onClick={onOpenSettings}>打开设置</button>}</div>
-      </article>; })}
-    </div>
-  </aside>;
+      </article>;
 }

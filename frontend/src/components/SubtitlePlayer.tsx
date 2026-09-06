@@ -15,9 +15,8 @@ import * as api from '../api/backend';
 
 interface Props {
   projectId: string;
+  initialTime?: number;
   videoUrl?: string;
-  youtubeVideoId?: string;
-  onWebPlayerError?: (code: number) => void;
   segments: SubtitleSegment[];
   style: SubtitleStyleSettings;
   activeIdx: number;
@@ -59,25 +58,23 @@ function ControlIcon({ src }: { src: string }) {
 }
 
 const SubtitlePlayer = forwardRef<SubtitlePlayerHandle, Props>(function SubtitlePlayer({
-  projectId, videoUrl, youtubeVideoId, onWebPlayerError, segments, style, activeIdx,
+  projectId, videoUrl, segments, style, activeIdx, initialTime = 0,
   presentationMode, onTimeUpdate, onDurationChange, onStyleChange,
   onPresentationModeChange,
 }, ref) {
   const videoRef = useRef<HTMLVideoElement>(null);
-  const iframeRef = useRef<HTMLIFrameElement>(null);
+  const pendingSeek = useRef<number | null>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
   const hideTimer = useRef<number | null>(null);
-  const webReadyTimer = useRef<number | null>(null);
-  const bridgeOriginRef = useRef('');
-  const channelRef = useRef(globalThis.crypto?.randomUUID?.() || Math.random().toString(36).slice(2));
+  const [captionScale, setCaptionScale] = useState(1);
+  const [captionBounds, setCaptionBounds] = useState({top:0,height:360,width:640});
   const [playing, setPlaying] = useState(false);
   const [duration, setDuration] = useState(0);
   const [time, setTime] = useState(0);
   const [volume, setVolume] = useState(1);
   const [muted, setMuted] = useState(false);
   const [rate, setRate] = useState(1);
-  const [availableRates, setAvailableRates] = useState([0.5, 0.75, 1, 1.25, 1.5, 2]);
-  const [bridgeUrl, setBridgeUrl] = useState('');
+  const availableRates = [0.5, 0.75, 1, 1.25, 1.5, 2];
   const [loopCurrent, setLoopCurrent] = useState(false);
   const [previewRangeState, setPreviewRangeState] = useState<{ start: number; end: number } | null>(null);
   const [showSubtitleMenu, setShowSubtitleMenu] = useState(false);
@@ -86,24 +83,24 @@ const SubtitlePlayer = forwardRef<SubtitlePlayerHandle, Props>(function Subtitle
   const [frameRateReliable, setFrameRateReliable] = useState(false);
   const fullscreen = presentationMode === 'fullscreen';
   const theaterMode = presentationMode === 'theater';
-  const isWeb = Boolean(youtubeVideoId);
   const active = activeIdx >= 0 && activeIdx < segments.length ? segments[activeIdx] : null;
 
-  const sendWebCommand = useCallback((
-    command: 'play' | 'pause' | 'seek' | 'volume' | 'mute' | 'unmute' | 'rate',
-    value?: number,
-    allowSeekAhead = true,
-  ) => {
-    const origin = bridgeOriginRef.current;
-    if (!origin) return;
-    iframeRef.current?.contentWindow?.postMessage({
-      source: 'subtitle-factory-host',
-      channel: channelRef.current,
-      command,
-      value,
-      allowSeekAhead,
-    }, origin);
-  }, []);
+  useEffect(() => {
+    const element = wrapperRef.current;
+    if (!element || typeof ResizeObserver === 'undefined') return;
+    const resize = () => {
+      const video = videoRef.current;
+      const aspect = video?.videoWidth && video?.videoHeight ? video.videoWidth / video.videoHeight : 16 / 9;
+      const height = Math.min(element.clientHeight, element.clientWidth / aspect);
+      setCaptionScale(height / 360 || 1);
+      setCaptionBounds({ top: (element.clientHeight-height)/2, height, width:height*aspect });
+    };
+    const observer = new ResizeObserver(resize);
+    observer.observe(element);
+    videoRef.current?.addEventListener('loadedmetadata', resize);
+    const video = videoRef.current;
+    return () => { observer.disconnect(); video?.removeEventListener('loadedmetadata', resize); };
+  }, [videoUrl]);
 
   const publishTime = useCallback((video: HTMLVideoElement) => {
     setTime(video.currentTime);
@@ -112,7 +109,7 @@ const SubtitlePlayer = forwardRef<SubtitlePlayerHandle, Props>(function Subtitle
 
   const seekAndRefresh = useCallback(async (next: number) => {
     const video = videoRef.current;
-    if (!video) return;
+    if (!video || video.readyState === 0) { pendingSeek.current = next; return; }
     const upper = Number.isFinite(video.duration) ? video.duration : Math.max(0, next);
     const target = Math.max(0, Math.min(next, upper));
     if (Math.abs(video.currentTime - target) < 0.000001) {
@@ -147,63 +144,34 @@ const SubtitlePlayer = forwardRef<SubtitlePlayerHandle, Props>(function Subtitle
   }, [publishTime]);
 
   const seekTo = useCallback((next: number) => {
-    if (isWeb) {
-      const target = Math.max(0, Math.min(next, duration || next));
-      sendWebCommand('seek', target);
-      setTime(target);
-      onTimeUpdate(target);
-      return;
-    }
     void seekAndRefresh(next);
-  }, [duration, isWeb, onTimeUpdate, seekAndRefresh, sendWebCommand]);
+  }, [seekAndRefresh]);
 
   const stepFrame = useCallback((direction: -1 | 1) => {
-    if (isWeb) {
-      sendWebCommand('pause');
-      setPlaying(false);
-      seekTo(time + direction * frameDuration);
-      return;
-    }
     const video = videoRef.current;
     if (!video) return;
     video.pause();
     setPlaying(false);
     void seekAndRefresh(video.currentTime + direction * frameDuration);
-  }, [frameDuration, isWeb, seekAndRefresh, seekTo, sendWebCommand, time]);
+  }, [frameDuration, seekAndRefresh]);
 
   const replay = useCallback(async () => {
-    if (isWeb) {
-      sendWebCommand('seek', 0);
-      sendWebCommand('play');
-      setTime(0);
-      setPlaying(true);
-      onTimeUpdate(0);
-      return;
-    }
     const video = videoRef.current;
     if (!video) return;
     await seekAndRefresh(0);
     await video.play().catch(() => undefined);
-  }, [isWeb, onTimeUpdate, seekAndRefresh, sendWebCommand]);
+  }, [seekAndRefresh]);
 
   const previewRange = useCallback(async (start: number, end: number) => {
     if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return;
     const range = { start: Math.max(0, start), end };
     setLoopCurrent(false);
     setPreviewRangeState(range);
-    if (isWeb) {
-      sendWebCommand('seek', range.start);
-      sendWebCommand('play');
-      setTime(range.start);
-      setPlaying(true);
-      onTimeUpdate(range.start);
-      return;
-    }
     const video = videoRef.current;
     if (!video) return;
     await seekAndRefresh(range.start);
     await video.play().catch(() => undefined);
-  }, [isWeb, onTimeUpdate, seekAndRefresh, sendWebCommand]);
+  }, [seekAndRefresh]);
 
   const clearPreviewRange = useCallback(() => setPreviewRangeState(null), []);
 
@@ -214,13 +182,6 @@ const SubtitlePlayer = forwardRef<SubtitlePlayerHandle, Props>(function Subtitle
   );
 
   useEffect(() => {
-    if (isWeb) {
-      setPlaying(false);
-      setTime(0);
-      setDuration(0);
-      setPreviewRangeState(null);
-      return;
-    }
     const video = videoRef.current;
     if (!video) return;
     video.pause();
@@ -229,85 +190,7 @@ const SubtitlePlayer = forwardRef<SubtitlePlayerHandle, Props>(function Subtitle
     setTime(0);
     setDuration(0);
     setPreviewRangeState(null);
-  }, [isWeb, videoUrl, youtubeVideoId]);
-
-  useEffect(() => {
-    if (!youtubeVideoId) {
-      setBridgeUrl('');
-      bridgeOriginRef.current = '';
-      return;
-    }
-    let cancelled = false;
-    api.createYoutubePlayerSession(youtubeVideoId, channelRef.current)
-      .then(url => {
-        if (cancelled) return;
-        bridgeOriginRef.current = new URL(url).origin;
-        setBridgeUrl(url);
-      })
-      .catch(() => {
-        if (!cancelled) onWebPlayerError?.(401);
-      });
-    return () => { cancelled = true; };
-  }, [onWebPlayerError, youtubeVideoId]);
-
-  useEffect(() => {
-    if (!isWeb || !bridgeUrl) return;
-    let ready = false;
-    const handleMessage = (event: MessageEvent) => {
-      if (event.origin !== bridgeOriginRef.current
-          || event.source !== iframeRef.current?.contentWindow) return;
-      const data = event.data;
-      if (!data || data.source !== 'subtitle-factory-youtube'
-          || data.channel !== channelRef.current) return;
-      if (data.type === 'ready') {
-        ready = true;
-        if (webReadyTimer.current) window.clearTimeout(webReadyTimer.current);
-        const nextDuration = Number(data.duration || 0);
-        setDuration(nextDuration);
-        onDurationChange?.(nextDuration);
-        setVolume(Math.max(0, Math.min(1, Number(data.volume ?? 100) / 100)));
-        setMuted(Boolean(data.muted));
-        const rates = Array.isArray(data.rates)
-          ? data.rates.map(Number).filter((item: number) => Number.isFinite(item) && item > 0)
-          : [];
-        if (rates.length) setAvailableRates(rates);
-      }
-      if (data.type === 'time') {
-        const nextTime = Number(data.time || 0);
-        const nextDuration = Number(data.duration || 0);
-        if (previewRangeState && nextTime >= previewRangeState.end) {
-          seekTo(previewRangeState.start);
-          return;
-        }
-        if (loopCurrent && active && nextTime >= active.end) {
-          seekTo(active.start);
-          return;
-        }
-        setTime(nextTime);
-        onTimeUpdate(nextTime);
-        if (nextDuration > 0) {
-          setDuration(nextDuration);
-          onDurationChange?.(nextDuration);
-        }
-        if (Number.isFinite(Number(data.state))) setPlaying(Number(data.state) === 1);
-      }
-      if (data.type === 'state') setPlaying(Number(data.state) === 1);
-      if (data.type === 'rate') setRate(Number(data.rate || 1));
-      if (data.type === 'autoplayBlocked') {
-        setPlaying(false);
-        setControlsVisible(true);
-      }
-      if (data.type === 'error') onWebPlayerError?.(Number(data.code || 5));
-    };
-    window.addEventListener('message', handleMessage);
-    webReadyTimer.current = window.setTimeout(() => {
-      if (!ready) onWebPlayerError?.(153);
-    }, 12000);
-    return () => {
-      window.removeEventListener('message', handleMessage);
-      if (webReadyTimer.current) window.clearTimeout(webReadyTimer.current);
-    };
-  }, [active, bridgeUrl, isWeb, loopCurrent, onDurationChange, onTimeUpdate, onWebPlayerError, previewRangeState, seekTo]);
+  }, [videoUrl]);
 
   useEffect(() => {
     let activeRequest = true;
@@ -323,7 +206,7 @@ const SubtitlePlayer = forwardRef<SubtitlePlayerHandle, Props>(function Subtitle
       setFrameRateReliable(false);
     });
     return () => { activeRequest = false; };
-  }, [projectId, videoUrl, youtubeVideoId]);
+  }, [projectId, videoUrl]);
 
   useEffect(() => {
     if ('__TAURI_INTERNALS__' in window) return;
@@ -362,10 +245,6 @@ const SubtitlePlayer = forwardRef<SubtitlePlayerHandle, Props>(function Subtitle
   }, [playing, showSubtitleMenu, revealControls]);
 
   const togglePlay = useCallback(() => {
-    if (isWeb) {
-      sendWebCommand(playing ? 'pause' : 'play');
-      return;
-    }
     const video = videoRef.current;
     if (!video) return;
     if (video.paused) {
@@ -374,7 +253,7 @@ const SubtitlePlayer = forwardRef<SubtitlePlayerHandle, Props>(function Subtitle
         setControlsVisible(true);
       });
     } else video.pause();
-  }, [isWeb, playing, sendWebCommand]);
+  }, []);
 
   const toggleFullscreen = useCallback(() => {
     onPresentationModeChange(fullscreen ? 'normal' : 'fullscreen');
@@ -421,7 +300,7 @@ const SubtitlePlayer = forwardRef<SubtitlePlayerHandle, Props>(function Subtitle
           onPresentationModeChange('normal');
         }
       }}>
-      {!isWeb && videoUrl && <video ref={videoRef} className="pro-player-video" preload="metadata" playsInline
+      {videoUrl && <video ref={videoRef} className="pro-player-video" preload="metadata" playsInline
         onClick={togglePlay}
         onDoubleClick={toggleFullscreen}
         onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)}
@@ -434,35 +313,28 @@ const SubtitlePlayer = forwardRef<SubtitlePlayerHandle, Props>(function Subtitle
         onLoadedMetadata={() => {
           const next = videoRef.current?.duration || 0;
           setDuration(next); onDurationChange?.(next);
+          const target = pendingSeek.current ?? initialTime;
+          pendingSeek.current = null;
+          if (target > 0) seekTo(target);
         }}
         onEnded={() => setPlaying(false)}>
         <source src={videoUrl} />
       </video>}
 
-      {isWeb && bridgeUrl && <iframe
-        ref={iframeRef}
-        className="pro-player-video pro-player-web"
-        src={bridgeUrl}
-        title="YouTube 网页播放器"
-        allow="autoplay; encrypted-media; picture-in-picture"
-        referrerPolicy="strict-origin-when-cross-origin"
-      />}
-
-      {!videoUrl && !isWeb && <div className="player-empty">选择或导入视频开始工作</div>}
-      {isWeb && !bridgeUrl && <div className="player-empty">正在连接网页播放器…</div>}
+      {!videoUrl && <div className="player-empty">选择或导入视频开始工作</div>}
 
       {lines.length > 0 && <div className="pro-subtitle-overlay"
         style={{
-          top: `${style.verticalPosition}%`,
-          maxWidth: `${style.maxWidth}%`,
+          top: `${captionBounds.top + captionBounds.height * style.verticalPosition / 100}px`,
+          maxWidth: `${captionBounds.width * style.maxWidth / 100}px`,
           transform: `translate(-50%, -${style.verticalPosition}%)`,
         }}>
         {lines.map((line, index) => <div key={`${active?.id}-${line.kind}`} className={`pro-subtitle-line ${line.kind}`}
           style={{
-            fontSize: `${line.kind === 'original' ? style.originalFontSize : style.translatedFontSize}px`,
+            fontSize: `${(line.kind === 'original' ? style.originalFontSize : style.translatedFontSize) * captionScale}px`,
             fontFamily: style.fontFamily,
             color: line.kind === 'original' ? style.originalTextColor : style.translatedTextColor,
-            background, marginTop: index ? `${style.lineGap}px` : 0,
+            background, marginTop: index ? `${style.lineGap * captionScale}px` : 0,
             // 白字配浅色背景时也保留描边，避免用户切换背景后字幕失去对比度。
             textShadow: style.shadow
               ? '-1px -1px 2px #000,1px -1px 2px #000,-1px 1px 2px #000,1px 1px 2px #000' : 'none',
@@ -495,23 +367,20 @@ const SubtitlePlayer = forwardRef<SubtitlePlayerHandle, Props>(function Subtitle
             <button className="player-icon-btn" aria-label={muted ? '取消静音' : '静音'} onClick={() => {
               const next = !muted;
               setMuted(next);
-              if (isWeb) sendWebCommand(next ? 'mute' : 'unmute');
-              else if (videoRef.current) videoRef.current.muted = next;
+              if (videoRef.current) videoRef.current.muted = next;
             }}><ControlIcon src={muted || volume === 0 ? mutedIcon : volumeIcon} /></button>
             <input className="volume-slider" aria-label="音量" type="range" min={0} max={1} step={0.05} value={volume}
               onChange={event => {
                 const next = Number(event.target.value);
                 setVolume(next);
-                if (isWeb) sendWebCommand('volume', next * 100);
-                else if (videoRef.current) videoRef.current.volume = next;
+                if (videoRef.current) videoRef.current.volume = next;
               }} />
             <span className="player-time">{timecode(time)} / {timecode(duration)}</span>
             <span className="control-spacer" />
             <AppSelect className="rate-select" label="播放速度" popoverMinWidth={112} value={String(rate)} onChange={value=>{
               const next=Number(value);
               setRate(next);
-              if (isWeb) sendWebCommand('rate', next);
-              else if(videoRef.current) videoRef.current.playbackRate=next;
+              if(videoRef.current) videoRef.current.playbackRate=next;
             }} options={availableRates.map(value=>({value:String(value),label:`${value}×`}))}/>
             <button className={`player-icon-btn ${style.mode !== 'off' ? 'active' : ''}`} aria-label="字幕设置"
               aria-haspopup="dialog" aria-expanded={showSubtitleMenu}

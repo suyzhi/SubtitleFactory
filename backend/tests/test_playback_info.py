@@ -31,6 +31,20 @@ def make_video(path: Path, fps: int) -> None:
 
 
 class PlaybackInfoTests(unittest.TestCase):
+    def test_cache_reuses_metadata_but_invalidates_replaced_media(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "media.mp4"
+            make_video(path, 24)
+            with patch("app.services.playback_info.av.open", wraps=av.open) as opened:
+                first = get_playback_info(path)
+                first["frame_rate"] = 999
+                self.assertEqual(get_playback_info(path)["frame_rate"], 24)
+                self.assertEqual(opened.call_count, 1)
+            replacement = Path(folder) / "replacement.mp4"
+            make_video(replacement, 60)
+            replacement.replace(path)
+            self.assertEqual(get_playback_info(path)["frame_rate"], 60)
+
     def test_common_frame_rates(self):
         with tempfile.TemporaryDirectory() as folder:
             for fps in (24, 25, 30, 60):

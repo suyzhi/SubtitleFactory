@@ -14,7 +14,7 @@ class ProjectCreate(BaseModel):
     title: Optional[str] = None
     language: str = "auto"
     target_language: str = "zh"
-    media_mode: Optional[Literal["local", "web"]] = None
+    media_mode: Optional[Literal["local"]] = None
 
 
 class ProjectResponse(BaseModel):
@@ -36,7 +36,7 @@ class ProjectResponse(BaseModel):
     segments_count: int = 0
     edit_revision: int = 0
     media_status: str = "ready"
-    media_mode: Literal["local", "web"] = "local"
+    media_mode: Literal["local"] = "local"
     youtube_video_id: Optional[str] = None
     video_available: bool = False
     audio_available: bool = False
@@ -72,7 +72,7 @@ class ProjectGroupUpdate(BaseModel):
 
 
 class ProjectMediaModeUpdate(BaseModel):
-    media_mode: Literal["local", "web"]
+    media_mode: Literal["local"]
 
 
 # ── Segment ─────────────────────────────────────────────
@@ -234,6 +234,12 @@ class WorkflowRequest(BaseModel):
     runtime: Optional[str] = None
     source_url: Optional[str] = None
     stop_after: Literal["transcribe"] = "transcribe"
+    enable_clean: bool = False
+    enable_translate: bool = False
+    target_language: str = "zh"
+    clean_target_length: int = Field(default=42, ge=16, le=100)
+    text_processing_consent: bool = False
+    resume_task_id: Optional[str] = None
 
 
 class TranscriptionRetryRequest(BaseModel):
@@ -304,7 +310,7 @@ class AppSettingsUpdate(BaseModel):
     translation_target_language: Optional[str] = None
     bilingual_order: Optional[Literal["original_first", "translated_first"]] = None
     favorite_languages: Optional[List[str]] = None
-    youtube_media_mode: Optional[Literal["local", "web"]] = None
+    youtube_media_mode: Optional[Literal["local"]] = None
     download_quality: Optional[str] = None
     download_container: Optional[Literal["mp4", "mkv", "webm"]] = None
     ffmpeg_path: Optional[str] = None

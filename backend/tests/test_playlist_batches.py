@@ -273,7 +273,7 @@ class PlaylistBatchTests(unittest.TestCase):
         self.assertEqual(len(by_id), 3)
         self.assertEqual(self.client.get("/api/projects").json()["projects"], [])
 
-    def test_new_playlist_projects_follow_web_media_default(self):
+    def test_new_playlist_projects_ignore_legacy_web_media_default(self):
         with patch.object(
             playlist_batches,
             "get_app_settings",
@@ -284,7 +284,7 @@ class PlaylistBatchTests(unittest.TestCase):
             )
         detail = playlist_batches.get_batch_detail(created["batch_id"])
         project = detail["items"][0]["project"]
-        self.assertEqual(project["media_mode"], "web")
+        self.assertEqual(project["media_mode"], "local")
         self.assertFalse(project["video_available"])
 
     def test_delete_playlist_purges_children_and_managed_files_only(self):

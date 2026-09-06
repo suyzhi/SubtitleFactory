@@ -1,0 +1,4629 @@
+[
+  {
+    "sample": "short",
+    "iteration": 0,
+    "mode": "baseline",
+    "duration": 6.57325,
+    "model_load_seconds": 0.2736247910070233,
+    "first_result_seconds": 1.4391957079642452,
+    "total_seconds": 1.4392633329844102,
+    "process_peak_rss_bytes": 1136787456,
+    "segments": [
+      {
+        "start": 0.0,
+        "end": 1.66,
+        "text": " Welcome to the subtitle workshop.",
+        "words": [
+          {
+            "start": 0.0,
+            "end": 0.26,
+            "word": " Welcome"
+          },
+          {
+            "start": 0.26,
+            "end": 0.52,
+            "word": " to"
+          },
+          {
+            "start": 0.52,
+            "end": 0.64,
+            "word": " the"
+          },
+          {
+            "start": 0.64,
+            "end": 1.22,
+            "word": " subtitle"
+          },
+          {
+            "start": 1.22,
+            "end": 1.66,
+            "word": " workshop."
+          }
+        ]
+      },
+      {
+        "start": 2.06,
+        "end": 6.14,
+        "text": " Import a video, check every sentence, and export the final subtitles.",
+        "words": [
+          {
+            "start": 2.06,
+            "end": 2.34,
+            "word": " Import"
+          },
+          {
+            "start": 2.34,
+            "end": 2.52,
+            "word": " a"
+          },
+          {
+            "start": 2.52,
+            "end": 2.84,
+            "word": " video,"
+          },
+          {
+            "start": 3.16,
+            "end": 3.4,
+            "word": " check"
+          },
+          {
+            "start": 3.4,
+            "end": 3.7,
+            "word": " every"
+          },
+          {
+            "start": 3.7,
+            "end": 4.1,
+            "word": " sentence,"
+          },
+          {
+            "start": 4.62,
+            "end": 4.74,
+            "word": " and"
+          },
+          {
+            "start": 4.74,
+            "end": 5.16,
+            "word": " export"
+          },
+          {
+            "start": 5.16,
+            "end": 5.36,
+            "word": " the"
+          },
+          {
+            "start": 5.36,
+            "end": 5.68,
+            "word": " final"
+          },
+          {
+            "start": 5.68,
+            "end": 6.14,
+            "word": " subtitles."
+          }
+        ]
+      }
+    ],
+    "character_errors": 0,
+    "reference_characters": 84,
+    "cer": 0.0,
+    "out_of_bounds": 0,
+    "adjacent_duplicates": 0
+  },
+  {
+    "sample": "mixed",
+    "iteration": 0,
+    "mode": "baseline",
+    "duration": 15.0031875,
+    "model_load_seconds": 0.2736247910070233,
+    "first_result_seconds": 2.355928541976027,
+    "total_seconds": 2.3559465419966727,
+    "process_peak_rss_bytes": 1146208256,
+    "segments": [
+      {
+        "start": 7.3,
+        "end": 14.86,
+        "text": "歡迎使用字幕工廠,請導入視頻,檢查每一句字幕,然後導出最終文件。",
+        "words": [
+          {
+            "start": 7.3,
+            "end": 7.78,
+            "word": "歡迎"
+          },
+          {
+            "start": 7.78,
+            "end": 8.18,
+            "word": "使"
+          },
+          {
+            "start": 8.18,
+            "end": 8.38,
+            "word": "用"
+          },
+          {
+            "start": 8.38,
+            "end": 8.56,
+            "word": "字"
+          },
+          {
+            "start": 8.56,
+            "end": 8.78,
+            "word": "幕"
+          },
+          {
+            "start": 8.78,
+            "end": 9.0,
+            "word": "工"
+          },
+          {
+            "start": 9.0,
+            "end": 9.34,
+            "word": "廠,"
+          },
+          {
+            "start": 9.6,
+            "end": 9.8,
+            "word": "請"
+          },
+          {
+            "start": 9.8,
+            "end": 10.04,
+            "word": "導"
+          },
+          {
+            "start": 10.04,
+            "end": 10.26,
+            "word": "入"
+          },
+          {
+            "start": 10.26,
+            "end": 10.5,
+            "word": "視"
+          },
+          {
+            "start": 10.5,
+            "end": 10.8,
+            "word": "頻,"
+          },
+          {
+            "start": 11.16,
+            "end": 11.4,
+            "word": "檢"
+          },
+          {
+            "start": 11.4,
+            "end": 11.7,
+            "word": "查"
+          },
+          {
+            "start": 11.7,
+            "end": 11.9,
+            "word": "每"
+          },
+          {
+            "start": 11.9,
+            "end": 12.12,
+            "word": "一"
+          },
+          {
+            "start": 12.12,
+            "end": 12.28,
+            "word": "句"
+          },
+          {
+            "start": 12.28,
+            "end": 12.54,
+            "word": "字"
+          },
+          {
+            "start": 12.54,
+            "end": 12.8,
+            "word": "幕,"
+          },
+          {
+            "start": 13.1,
+            "end": 13.42,
+            "word": "然後"
+          },
+          {
+            "start": 13.42,
+            "end": 13.76,
+            "word": "導"
+          },
+          {
+            "start": 13.76,
+            "end": 14.02,
+            "word": "出"
+          },
+          {
+            "start": 14.02,
+            "end": 14.24,
+            "word": "最"
+          },
+          {
+            "start": 14.24,
+            "end": 14.44,
+            "word": "終"
+          },
+          {
+            "start": 14.44,
+            "end": 14.64,
+            "word": "文"
+          },
+          {
+            "start": 14.64,
+            "end": 14.86,
+            "word": "件。"
+          }
+        ]
+      }
+    ],
+    "character_errors": 94,
+    "reference_characters": 112,
+    "cer": 0.8392857142857143,
+    "out_of_bounds": 0,
+    "adjacent_duplicates": 0
+  },
+  {
+    "sample": "dialogue",
+    "iteration": 0,
+    "mode": "baseline",
+    "duration": 13.12275,
+    "model_load_seconds": 0.2736247910070233,
+    "first_result_seconds": 1.8510206250357442,
+    "total_seconds": 1.851107333030086,
+    "process_peak_rss_bytes": 1163329536,
+    "segments": [
+      {
+        "start": 0.0,
+        "end": 5.36,
+        "text": " Welcome to the subtitle workshop, import a video, check every sentence, and export the",
+        "words": [
+          {
+            "start": 0.0,
+            "end": 0.26,
+            "word": " Welcome"
+          },
+          {
+            "start": 0.26,
+            "end": 0.52,
+            "word": " to"
+          },
+          {
+            "start": 0.52,
+            "end": 0.64,
+            "word": " the"
+          },
+          {
+            "start": 0.64,
+            "end": 1.22,
+            "word": " subtitle"
+          },
+          {
+            "start": 1.22,
+            "end": 1.68,
+            "word": " workshop,"
+          },
+          {
+            "start": 2.06,
+            "end": 2.36,
+            "word": " import"
+          },
+          {
+            "start": 2.36,
+            "end": 2.52,
+            "word": " a"
+          },
+          {
+            "start": 2.52,
+            "end": 2.86,
+            "word": " video,"
+          },
+          {
+            "start": 3.18,
+            "end": 3.42,
+            "word": " check"
+          },
+          {
+            "start": 3.42,
+            "end": 3.7,
+            "word": " every"
+          },
+          {
+            "start": 3.7,
+            "end": 4.12,
+            "word": " sentence,"
+          },
+          {
+            "start": 4.62,
+            "end": 4.76,
+            "word": " and"
+          },
+          {
+            "start": 4.76,
+            "end": 5.18,
+            "word": " export"
+          },
+          {
+            "start": 5.18,
+            "end": 5.36,
+            "word": " the"
+          }
+        ]
+      },
+      {
+        "start": 5.36,
+        "end": 6.3,
+        "text": " final subtitles.",
+        "words": [
+          {
+            "start": 5.36,
+            "end": 5.68,
+            "word": " final"
+          },
+          {
+            "start": 5.68,
+            "end": 6.3,
+            "word": " subtitles."
+          }
+        ]
+      },
+      {
+        "start": 7.2,
+        "end": 9.32,
+        "text": " The meeting begins at 9.30.",
+        "words": [
+          {
+            "start": 7.2,
+            "end": 7.68,
+            "word": " The"
+          },
+          {
+            "start": 7.68,
+            "end": 7.92,
+            "word": " meeting"
+          },
+          {
+            "start": 7.92,
+            "end": 8.42,
+            "word": " begins"
+          },
+          {
+            "start": 8.42,
+            "end": 8.62,
+            "word": " at"
+          },
+          {
+            "start": 8.62,
+            "end": 8.86,
+            "word": " 9"
+          },
+          {
+            "start": 8.86,
+            "end": 9.32,
+            "word": ".30."
+          }
+        ]
+      },
+      {
+        "start": 9.82,
+        "end": 12.86,
+        "text": " Please keep the original recording and review the final version.",
+        "words": [
+          {
+            "start": 9.82,
+            "end": 10.04,
+            "word": " Please"
+          },
+          {
+            "start": 10.04,
+            "end": 10.3,
+            "word": " keep"
+          },
+          {
+            "start": 10.3,
+            "end": 10.52,
+            "word": " the"
+          },
+          {
+            "start": 10.52,
+            "end": 10.88,
+            "word": " original"
+          },
+          {
+            "start": 10.88,
+            "end": 11.4,
+            "word": " recording"
+          },
+          {
+            "start": 11.4,
+            "end": 11.64,
+            "word": " and"
+          },
+          {
+            "start": 11.64,
+            "end": 11.94,
+            "word": " review"
+          },
+          {
+            "start": 11.94,
+            "end": 12.12,
+            "word": " the"
+          },
+          {
+            "start": 12.12,
+            "end": 12.44,
+            "word": " final"
+          },
+          {
+            "start": 12.44,
+            "end": 12.86,
+            "word": " version."
+          }
+        ]
+      }
+    ],
+    "character_errors": 10,
+    "reference_characters": 166,
+    "cer": 0.060240963855421686,
+    "out_of_bounds": 0,
+    "adjacent_duplicates": 0
+  },
+  {
+    "sample": "long_silence",
+    "iteration": 0,
+    "mode": "baseline",
+    "duration": 57.12275,
+    "model_load_seconds": 0.2736247910070233,
+    "first_result_seconds": 1.979466249991674,
+    "total_seconds": 1.9795460830209777,
+    "process_peak_rss_bytes": 1163657216,
+    "segments": [
+      {
+        "start": 0.0,
+        "end": 5.36,
+        "text": " Welcome to the subtitle workshop, import a video, check every sentence, and export the",
+        "words": [
+          {
+            "start": 0.0,
+            "end": 0.26,
+            "word": " Welcome"
+          },
+          {
+            "start": 0.26,
+            "end": 0.52,
+            "word": " to"
+          },
+          {
+            "start": 0.52,
+            "end": 0.64,
+            "word": " the"
+          },
+          {
+            "start": 0.64,
+            "end": 1.22,
+            "word": " subtitle"
+          },
+          {
+            "start": 1.22,
+            "end": 1.66,
+            "word": " workshop,"
+          },
+          {
+            "start": 2.06,
+            "end": 2.36,
+            "word": " import"
+          },
+          {
+            "start": 2.36,
+            "end": 2.52,
+            "word": " a"
+          },
+          {
+            "start": 2.52,
+            "end": 2.84,
+            "word": " video,"
+          },
+          {
+            "start": 3.18,
+            "end": 3.42,
+            "word": " check"
+          },
+          {
+            "start": 3.42,
+            "end": 3.7,
+            "word": " every"
+          },
+          {
+            "start": 3.7,
+            "end": 4.1,
+            "word": " sentence,"
+          },
+          {
+            "start": 4.62,
+            "end": 4.76,
+            "word": " and"
+          },
+          {
+            "start": 4.76,
+            "end": 5.16,
+            "word": " export"
+          },
+          {
+            "start": 5.16,
+            "end": 5.36,
+            "word": " the"
+          }
+        ]
+      },
+      {
+        "start": 5.36,
+        "end": 6.28,
+        "text": " final subtitles.",
+        "words": [
+          {
+            "start": 5.36,
+            "end": 5.68,
+            "word": " final"
+          },
+          {
+            "start": 5.68,
+            "end": 6.28,
+            "word": " subtitles."
+          }
+        ]
+      },
+      {
+        "start": 51.19,
+        "end": 53.31,
+        "text": " The meeting begins at 9.30.",
+        "words": [
+          {
+            "start": 51.19,
+            "end": 51.67,
+            "word": " The"
+          },
+          {
+            "start": 51.67,
+            "end": 51.93,
+            "word": " meeting"
+          },
+          {
+            "start": 51.93,
+            "end": 52.41,
+            "word": " begins"
+          },
+          {
+            "start": 52.41,
+            "end": 52.61,
+            "word": " at"
+          },
+          {
+            "start": 52.61,
+            "end": 52.85,
+            "word": " 9"
+          },
+          {
+            "start": 52.85,
+            "end": 53.31,
+            "word": ".30."
+          }
+        ]
+      },
+      {
+        "start": 53.79,
+        "end": 56.85,
+        "text": " Please keep the original recording and review the final version.",
+        "words": [
+          {
+            "start": 53.79,
+            "end": 54.03,
+            "word": " Please"
+          },
+          {
+            "start": 54.03,
+            "end": 54.29,
+            "word": " keep"
+          },
+          {
+            "start": 54.29,
+            "end": 54.53,
+            "word": " the"
+          },
+          {
+            "start": 54.53,
+            "end": 54.85,
+            "word": " original"
+          },
+          {
+            "start": 54.85,
+            "end": 55.41,
+            "word": " recording"
+          },
+          {
+            "start": 55.41,
+            "end": 55.63,
+            "word": " and"
+          },
+          {
+            "start": 55.63,
+            "end": 55.93,
+            "word": " review"
+          },
+          {
+            "start": 55.93,
+            "end": 56.13,
+            "word": " the"
+          },
+          {
+            "start": 56.13,
+            "end": 56.43,
+            "word": " final"
+          },
+          {
+            "start": 56.43,
+            "end": 56.85,
+            "word": " version."
+          }
+        ]
+      }
+    ],
+    "character_errors": 10,
+    "reference_characters": 166,
+    "cer": 0.060240963855421686,
+    "out_of_bounds": 0,
+    "adjacent_duplicates": 0
+  },
+  {
+    "sample": "long",
+    "iteration": 0,
+    "mode": "baseline",
+    "duration": 128.982,
+    "model_load_seconds": 0.2736247910070233,
+    "first_result_seconds": 15.327752832963597,
+    "total_seconds": 48.15973358298652,
+    "process_peak_rss_bytes": 1877213184,
+    "segments": [
+      {
+        "start": 0.0,
+        "end": 1.5,
+        "text": " Welcome to the subtitle workshop.",
+        "words": [
+          {
+            "start": 0.0,
+            "end": 0.28,
+            "word": " Welcome"
+          },
+          {
+            "start": 0.28,
+            "end": 0.52,
+            "word": " to"
+          },
+          {
+            "start": 0.52,
+            "end": 0.66,
+            "word": " the"
+          },
+          {
+            "start": 0.66,
+            "end": 1.2,
+            "word": " subtitle"
+          },
+          {
+            "start": 1.2,
+            "end": 1.5,
+            "word": " workshop."
+          }
+        ]
+      },
+      {
+        "start": 2.04,
+        "end": 6.26,
+        "text": " Import a video, check every sentence, and export the final subtitles.",
+        "words": [
+          {
+            "start": 2.04,
+            "end": 2.34,
+            "word": " Import"
+          },
+          {
+            "start": 2.34,
+            "end": 2.52,
+            "word": " a"
+          },
+          {
+            "start": 2.52,
+            "end": 2.82,
+            "word": " video,"
+          },
+          {
+            "start": 3.18,
+            "end": 3.42,
+            "word": " check"
+          },
+          {
+            "start": 3.42,
+            "end": 3.72,
+            "word": " every"
+          },
+          {
+            "start": 3.72,
+            "end": 4.06,
+            "word": " sentence,"
+          },
+          {
+            "start": 4.58,
+            "end": 4.76,
+            "word": " and"
+          },
+          {
+            "start": 4.76,
+            "end": 5.18,
+            "word": " export"
+          },
+          {
+            "start": 5.18,
+            "end": 5.36,
+            "word": " the"
+          },
+          {
+            "start": 5.36,
+            "end": 5.68,
+            "word": " final"
+          },
+          {
+            "start": 5.68,
+            "end": 6.26,
+            "word": " subtitles."
+          }
+        ]
+      },
+      {
+        "start": 7.22,
+        "end": 9.3,
+        "text": " The meeting begins at 9.30.",
+        "words": [
+          {
+            "start": 7.22,
+            "end": 7.68,
+            "word": " The"
+          },
+          {
+            "start": 7.68,
+            "end": 7.94,
+            "word": " meeting"
+          },
+          {
+            "start": 7.94,
+            "end": 8.4,
+            "word": " begins"
+          },
+          {
+            "start": 8.4,
+            "end": 8.64,
+            "word": " at"
+          },
+          {
+            "start": 8.64,
+            "end": 8.84,
+            "word": " 9"
+          },
+          {
+            "start": 8.84,
+            "end": 9.3,
+            "word": ".30."
+          }
+        ]
+      },
+      {
+        "start": 9.74,
+        "end": 12.9,
+        "text": " Please keep the original recording and review the final version.",
+        "words": [
+          {
+            "start": 9.74,
+            "end": 10.04,
+            "word": " Please"
+          },
+          {
+            "start": 10.04,
+            "end": 10.3,
+            "word": " keep"
+          },
+          {
+            "start": 10.3,
+            "end": 10.52,
+            "word": " the"
+          },
+          {
+            "start": 10.52,
+            "end": 10.88,
+            "word": " original"
+          },
+          {
+            "start": 10.88,
+            "end": 11.36,
+            "word": " recording"
+          },
+          {
+            "start": 11.36,
+            "end": 11.64,
+            "word": " and"
+          },
+          {
+            "start": 11.64,
+            "end": 11.94,
+            "word": " review"
+          },
+          {
+            "start": 11.94,
+            "end": 12.12,
+            "word": " the"
+          },
+          {
+            "start": 12.12,
+            "end": 12.44,
+            "word": " final"
+          },
+          {
+            "start": 12.44,
+            "end": 12.9,
+            "word": " version."
+          }
+        ]
+      },
+      {
+        "start": 16.12,
+        "end": 17.78,
+        "text": " Welcome to the subtitle workshop.",
+        "words": [
+          {
+            "start": 16.12,
+            "end": 16.38,
+            "word": " Welcome"
+          },
+          {
+            "start": 16.38,
+            "end": 16.64,
+            "word": " to"
+          },
+          {
+            "start": 16.64,
+            "end": 16.76,
+            "word": " the"
+          },
+          {
+            "start": 16.76,
+            "end": 17.32,
+            "word": " subtitle"
+          },
+          {
+            "start": 17.32,
+            "end": 17.78,
+            "word": " workshop."
+          }
+        ]
+      },
+      {
+        "start": 18.2,
+        "end": 22.36,
+        "text": " Import a video, check every sentence, and export the final subtitles.",
+        "words": [
+          {
+            "start": 18.2,
+            "end": 18.44,
+            "word": " Import"
+          },
+          {
+            "start": 18.44,
+            "end": 18.64,
+            "word": " a"
+          },
+          {
+            "start": 18.64,
+            "end": 18.96,
+            "word": " video,"
+          },
+          {
+            "start": 19.34,
+            "end": 19.54,
+            "word": " check"
+          },
+          {
+            "start": 19.54,
+            "end": 19.82,
+            "word": " every"
+          },
+          {
+            "start": 19.82,
+            "end": 20.2,
+            "word": " sentence,"
+          },
+          {
+            "start": 20.7,
+            "end": 20.88,
+            "word": " and"
+          },
+          {
+            "start": 20.88,
+            "end": 21.28,
+            "word": " export"
+          },
+          {
+            "start": 21.28,
+            "end": 21.48,
+            "word": " the"
+          },
+          {
+            "start": 21.48,
+            "end": 21.82,
+            "word": " final"
+          },
+          {
+            "start": 21.82,
+            "end": 22.36,
+            "word": " subtitles."
+          }
+        ]
+      },
+      {
+        "start": 23.62,
+        "end": 25.44,
+        "text": " The meeting begins at 9.30.",
+        "words": [
+          {
+            "start": 23.62,
+            "end": 23.8,
+            "word": " The"
+          },
+          {
+            "start": 23.8,
+            "end": 24.04,
+            "word": " meeting"
+          },
+          {
+            "start": 24.04,
+            "end": 24.46,
+            "word": " begins"
+          },
+          {
+            "start": 24.46,
+            "end": 24.76,
+            "word": " at"
+          },
+          {
+            "start": 24.76,
+            "end": 25.0,
+            "word": " 9"
+          },
+          {
+            "start": 25.0,
+            "end": 25.44,
+            "word": ".30."
+          }
+        ]
+      },
+      {
+        "start": 25.82,
+        "end": 29.06,
+        "text": " Please keep the original recording and review the final version.",
+        "words": [
+          {
+            "start": 25.82,
+            "end": 26.16,
+            "word": " Please"
+          },
+          {
+            "start": 26.16,
+            "end": 26.42,
+            "word": " keep"
+          },
+          {
+            "start": 26.42,
+            "end": 26.62,
+            "word": " the"
+          },
+          {
+            "start": 26.62,
+            "end": 27.0,
+            "word": " original"
+          },
+          {
+            "start": 27.0,
+            "end": 27.52,
+            "word": " recording"
+          },
+          {
+            "start": 27.52,
+            "end": 27.78,
+            "word": " and"
+          },
+          {
+            "start": 27.78,
+            "end": 28.04,
+            "word": " review"
+          },
+          {
+            "start": 28.04,
+            "end": 28.26,
+            "word": " the"
+          },
+          {
+            "start": 28.26,
+            "end": 28.56,
+            "word": " final"
+          },
+          {
+            "start": 28.56,
+            "end": 29.06,
+            "word": " version."
+          }
+        ]
+      },
+      {
+        "start": 32.1,
+        "end": 33.94,
+        "text": " Welcome to the subtitle workshop.",
+        "words": [
+          {
+            "start": 32.1,
+            "end": 32.48,
+            "word": " Welcome"
+          },
+          {
+            "start": 32.48,
+            "end": 32.76,
+            "word": " to"
+          },
+          {
+            "start": 32.76,
+            "end": 32.88,
+            "word": " the"
+          },
+          {
+            "start": 32.88,
+            "end": 33.44,
+            "word": " subtitle"
+          },
+          {
+            "start": 33.44,
+            "end": 33.94,
+            "word": " workshop."
+          }
+        ]
+      },
+      {
+        "start": 33.94,
+        "end": 38.48,
+        "text": " Import a video, check every sentence, and export the final subtitles.",
+        "words": [
+          {
+            "start": 33.94,
+            "end": 34.58,
+            "word": " Import"
+          },
+          {
+            "start": 34.58,
+            "end": 34.76,
+            "word": " a"
+          },
+          {
+            "start": 34.76,
+            "end": 35.04,
+            "word": " video,"
+          },
+          {
+            "start": 35.42,
+            "end": 35.66,
+            "word": " check"
+          },
+          {
+            "start": 35.66,
+            "end": 35.96,
+            "word": " every"
+          },
+          {
+            "start": 35.96,
+            "end": 36.3,
+            "word": " sentence,"
+          },
+          {
+            "start": 36.8,
+            "end": 37.0,
+            "word": " and"
+          },
+          {
+            "start": 37.0,
+            "end": 37.42,
+            "word": " export"
+          },
+          {
+            "start": 37.42,
+            "end": 37.62,
+            "word": " the"
+          },
+          {
+            "start": 37.62,
+            "end": 37.94,
+            "word": " final"
+          },
+          {
+            "start": 37.94,
+            "end": 38.48,
+            "word": " subtitles."
+          }
+        ]
+      },
+      {
+        "start": 39.42,
+        "end": 45.14,
+        "text": " The meeting begins at 9.30. Please keep the original recording and review the final version.",
+        "words": [
+          {
+            "start": 39.42,
+            "end": 39.94,
+            "word": " The"
+          },
+          {
+            "start": 39.94,
+            "end": 40.18,
+            "word": " meeting"
+          },
+          {
+            "start": 40.18,
+            "end": 40.64,
+            "word": " begins"
+          },
+          {
+            "start": 40.64,
+            "end": 40.88,
+            "word": " at"
+          },
+          {
+            "start": 40.88,
+            "end": 41.1,
+            "word": " 9"
+          },
+          {
+            "start": 41.1,
+            "end": 41.54,
+            "word": ".30."
+          },
+          {
+            "start": 42.0,
+            "end": 42.3,
+            "word": " Please"
+          },
+          {
+            "start": 42.3,
+            "end": 42.54,
+            "word": " keep"
+          },
+          {
+            "start": 42.54,
+            "end": 42.76,
+            "word": " the"
+          },
+          {
+            "start": 42.76,
+            "end": 43.12,
+            "word": " original"
+          },
+          {
+            "start": 43.12,
+            "end": 43.6,
+            "word": " recording"
+          },
+          {
+            "start": 43.6,
+            "end": 43.9,
+            "word": " and"
+          },
+          {
+            "start": 43.9,
+            "end": 44.18,
+            "word": " review"
+          },
+          {
+            "start": 44.18,
+            "end": 44.36,
+            "word": " the"
+          },
+          {
+            "start": 44.36,
+            "end": 44.68,
+            "word": " final"
+          },
+          {
+            "start": 44.68,
+            "end": 45.14,
+            "word": " version."
+          }
+        ]
+      },
+      {
+        "start": 48.36,
+        "end": 54.58,
+        "text": " Welcome to the subtitle workshop. Import a video, check every sentence, and export the final subtitles.",
+        "words": [
+          {
+            "start": 48.36,
+            "end": 48.64,
+            "word": " Welcome"
+          },
+          {
+            "start": 48.64,
+            "end": 48.88,
+            "word": " to"
+          },
+          {
+            "start": 48.88,
+            "end": 49.0,
+            "word": " the"
+          },
+          {
+            "start": 49.0,
+            "end": 49.58,
+            "word": " subtitle"
+          },
+          {
+            "start": 49.58,
+            "end": 50.02,
+            "word": " workshop."
+          },
+          {
+            "start": 50.4,
+            "end": 50.7,
+            "word": " Import"
+          },
+          {
+            "start": 50.7,
+            "end": 50.9,
+            "word": " a"
+          },
+          {
+            "start": 50.9,
+            "end": 51.18,
+            "word": " video,"
+          },
+          {
+            "start": 51.54,
+            "end": 51.78,
+            "word": " check"
+          },
+          {
+            "start": 51.78,
+            "end": 52.06,
+            "word": " every"
+          },
+          {
+            "start": 52.06,
+            "end": 52.46,
+            "word": " sentence,"
+          },
+          {
+            "start": 52.92,
+            "end": 53.12,
+            "word": " and"
+          },
+          {
+            "start": 53.12,
+            "end": 53.54,
+            "word": " export"
+          },
+          {
+            "start": 53.54,
+            "end": 53.74,
+            "word": " the"
+          },
+          {
+            "start": 53.74,
+            "end": 54.06,
+            "word": " final"
+          },
+          {
+            "start": 54.06,
+            "end": 54.58,
+            "word": " subtitles."
+          }
+        ]
+      },
+      {
+        "start": 55.82,
+        "end": 61.3,
+        "text": " The meeting begins at 9.30. Please keep the original recording and review the final version.",
+        "words": [
+          {
+            "start": 55.82,
+            "end": 56.06,
+            "word": " The"
+          },
+          {
+            "start": 56.06,
+            "end": 56.3,
+            "word": " meeting"
+          },
+          {
+            "start": 56.3,
+            "end": 56.7,
+            "word": " begins"
+          },
+          {
+            "start": 56.7,
+            "end": 56.98,
+            "word": " at"
+          },
+          {
+            "start": 56.98,
+            "end": 57.24,
+            "word": " 9"
+          },
+          {
+            "start": 57.24,
+            "end": 57.66,
+            "word": ".30."
+          },
+          {
+            "start": 58.08,
+            "end": 58.4,
+            "word": " Please"
+          },
+          {
+            "start": 58.4,
+            "end": 58.68,
+            "word": " keep"
+          },
+          {
+            "start": 58.68,
+            "end": 58.88,
+            "word": " the"
+          },
+          {
+            "start": 58.88,
+            "end": 59.26,
+            "word": " original"
+          },
+          {
+            "start": 59.26,
+            "end": 59.74,
+            "word": " recording"
+          },
+          {
+            "start": 59.74,
+            "end": 60.02,
+            "word": " and"
+          },
+          {
+            "start": 60.02,
+            "end": 60.3,
+            "word": " review"
+          },
+          {
+            "start": 60.3,
+            "end": 60.5,
+            "word": " the"
+          },
+          {
+            "start": 60.5,
+            "end": 60.82,
+            "word": " final"
+          },
+          {
+            "start": 60.82,
+            "end": 61.3,
+            "word": " version."
+          }
+        ]
+      },
+      {
+        "start": 63.54,
+        "end": 70.74,
+        "text": " Welcome to the subtitle workshop. Import a video, check every sentence, and export the final subtitles.",
+        "words": [
+          {
+            "start": 63.54,
+            "end": 64.72,
+            "word": " Welcome"
+          },
+          {
+            "start": 64.72,
+            "end": 65.0,
+            "word": " to"
+          },
+          {
+            "start": 65.0,
+            "end": 65.14,
+            "word": " the"
+          },
+          {
+            "start": 65.14,
+            "end": 65.68,
+            "word": " subtitle"
+          },
+          {
+            "start": 65.68,
+            "end": 65.98,
+            "word": " workshop."
+          },
+          {
+            "start": 66.56,
+            "end": 66.82,
+            "word": " Import"
+          },
+          {
+            "start": 66.82,
+            "end": 67.02,
+            "word": " a"
+          },
+          {
+            "start": 67.02,
+            "end": 67.3,
+            "word": " video,"
+          },
+          {
+            "start": 67.68,
+            "end": 67.9,
+            "word": " check"
+          },
+          {
+            "start": 67.9,
+            "end": 68.2,
+            "word": " every"
+          },
+          {
+            "start": 68.2,
+            "end": 68.54,
+            "word": " sentence,"
+          },
+          {
+            "start": 69.06,
+            "end": 69.24,
+            "word": " and"
+          },
+          {
+            "start": 69.24,
+            "end": 69.66,
+            "word": " export"
+          },
+          {
+            "start": 69.66,
+            "end": 69.86,
+            "word": " the"
+          },
+          {
+            "start": 69.86,
+            "end": 70.16,
+            "word": " final"
+          },
+          {
+            "start": 70.16,
+            "end": 70.74,
+            "word": " subtitles."
+          }
+        ]
+      },
+      {
+        "start": 71.9,
+        "end": 77.4,
+        "text": " The meeting begins at 9.30. Please keep the original recording and review the final version.",
+        "words": [
+          {
+            "start": 71.9,
+            "end": 72.18,
+            "word": " The"
+          },
+          {
+            "start": 72.18,
+            "end": 72.42,
+            "word": " meeting"
+          },
+          {
+            "start": 72.42,
+            "end": 72.9,
+            "word": " begins"
+          },
+          {
+            "start": 72.9,
+            "end": 73.12,
+            "word": " at"
+          },
+          {
+            "start": 73.12,
+            "end": 73.36,
+            "word": " 9"
+          },
+          {
+            "start": 73.36,
+            "end": 73.78,
+            "word": ".30."
+          },
+          {
+            "start": 74.24,
+            "end": 74.54,
+            "word": " Please"
+          },
+          {
+            "start": 74.54,
+            "end": 74.8,
+            "word": " keep"
+          },
+          {
+            "start": 74.8,
+            "end": 75.0,
+            "word": " the"
+          },
+          {
+            "start": 75.0,
+            "end": 75.36,
+            "word": " original"
+          },
+          {
+            "start": 75.36,
+            "end": 75.84,
+            "word": " recording"
+          },
+          {
+            "start": 75.84,
+            "end": 76.14,
+            "word": " and"
+          },
+          {
+            "start": 76.14,
+            "end": 76.42,
+            "word": " review"
+          },
+          {
+            "start": 76.42,
+            "end": 76.62,
+            "word": " the"
+          },
+          {
+            "start": 76.62,
+            "end": 76.94,
+            "word": " final"
+          },
+          {
+            "start": 76.94,
+            "end": 77.4,
+            "word": " version."
+          }
+        ]
+      },
+      {
+        "start": 80.64,
+        "end": 86.84,
+        "text": " Welcome to the subtitle workshop. Import a video, check every sentence, and export the final subtitles.",
+        "words": [
+          {
+            "start": 80.64,
+            "end": 80.86,
+            "word": " Welcome"
+          },
+          {
+            "start": 80.86,
+            "end": 81.12,
+            "word": " to"
+          },
+          {
+            "start": 81.12,
+            "end": 81.24,
+            "word": " the"
+          },
+          {
+            "start": 81.24,
+            "end": 81.82,
+            "word": " subtitle"
+          },
+          {
+            "start": 81.82,
+            "end": 82.3,
+            "word": " workshop."
+          },
+          {
+            "start": 82.68,
+            "end": 82.94,
+            "word": " Import"
+          },
+          {
+            "start": 82.94,
+            "end": 83.14,
+            "word": " a"
+          },
+          {
+            "start": 83.14,
+            "end": 83.44,
+            "word": " video,"
+          },
+          {
+            "start": 83.8,
+            "end": 84.04,
+            "word": " check"
+          },
+          {
+            "start": 84.04,
+            "end": 84.3,
+            "word": " every"
+          },
+          {
+            "start": 84.3,
+            "end": 84.68,
+            "word": " sentence,"
+          },
+          {
+            "start": 85.18,
+            "end": 85.36,
+            "word": " and"
+          },
+          {
+            "start": 85.36,
+            "end": 85.76,
+            "word": " export"
+          },
+          {
+            "start": 85.76,
+            "end": 85.98,
+            "word": " the"
+          },
+          {
+            "start": 85.98,
+            "end": 86.32,
+            "word": " final"
+          },
+          {
+            "start": 86.32,
+            "end": 86.84,
+            "word": " subtitles."
+          }
+        ]
+      },
+      {
+        "start": 88.04,
+        "end": 93.56,
+        "text": " The meeting begins at 9.30. Please keep the original recording and review the final version.",
+        "words": [
+          {
+            "start": 88.04,
+            "end": 88.3,
+            "word": " The"
+          },
+          {
+            "start": 88.3,
+            "end": 88.54,
+            "word": " meeting"
+          },
+          {
+            "start": 88.54,
+            "end": 88.98,
+            "word": " begins"
+          },
+          {
+            "start": 88.98,
+            "end": 89.24,
+            "word": " at"
+          },
+          {
+            "start": 89.24,
+            "end": 89.5,
+            "word": " 9"
+          },
+          {
+            "start": 89.5,
+            "end": 89.9,
+            "word": ".30."
+          },
+          {
+            "start": 90.32,
+            "end": 90.64,
+            "word": " Please"
+          },
+          {
+            "start": 90.64,
+            "end": 90.92,
+            "word": " keep"
+          },
+          {
+            "start": 90.92,
+            "end": 91.12,
+            "word": " the"
+          },
+          {
+            "start": 91.12,
+            "end": 91.5,
+            "word": " original"
+          },
+          {
+            "start": 91.5,
+            "end": 91.98,
+            "word": " recording"
+          },
+          {
+            "start": 91.98,
+            "end": 92.26,
+            "word": " and"
+          },
+          {
+            "start": 92.26,
+            "end": 92.54,
+            "word": " review"
+          },
+          {
+            "start": 92.54,
+            "end": 92.74,
+            "word": " the"
+          },
+          {
+            "start": 92.74,
+            "end": 93.06,
+            "word": " final"
+          },
+          {
+            "start": 93.06,
+            "end": 93.56,
+            "word": " version."
+          }
+        ]
+      },
+      {
+        "start": 95.8,
+        "end": 103.0,
+        "text": " Welcome to the subtitle workshop. Import a video, check every sentence, and export the final subtitles.",
+        "words": [
+          {
+            "start": 95.8,
+            "end": 97.0,
+            "word": " Welcome"
+          },
+          {
+            "start": 97.0,
+            "end": 97.26,
+            "word": " to"
+          },
+          {
+            "start": 97.26,
+            "end": 97.38,
+            "word": " the"
+          },
+          {
+            "start": 97.38,
+            "end": 97.94,
+            "word": " subtitle"
+          },
+          {
+            "start": 97.94,
+            "end": 98.38,
+            "word": " workshop."
+          },
+          {
+            "start": 98.82,
+            "end": 99.08,
+            "word": " Import"
+          },
+          {
+            "start": 99.08,
+            "end": 99.26,
+            "word": " a"
+          },
+          {
+            "start": 99.26,
+            "end": 99.56,
+            "word": " video,"
+          },
+          {
+            "start": 99.92,
+            "end": 100.14,
+            "word": " check"
+          },
+          {
+            "start": 100.14,
+            "end": 100.44,
+            "word": " every"
+          },
+          {
+            "start": 100.44,
+            "end": 100.8,
+            "word": " sentence,"
+          },
+          {
+            "start": 101.32,
+            "end": 101.5,
+            "word": " and"
+          },
+          {
+            "start": 101.5,
+            "end": 101.9,
+            "word": " export"
+          },
+          {
+            "start": 101.9,
+            "end": 102.1,
+            "word": " the"
+          },
+          {
+            "start": 102.1,
+            "end": 102.42,
+            "word": " final"
+          },
+          {
+            "start": 102.42,
+            "end": 103.0,
+            "word": " subtitles."
+          }
+        ]
+      },
+      {
+        "start": 104.22,
+        "end": 109.66,
+        "text": " The meeting begins at 9.30. Please keep the original recording and review the final version.",
+        "words": [
+          {
+            "start": 104.22,
+            "end": 104.42,
+            "word": " The"
+          },
+          {
+            "start": 104.42,
+            "end": 104.68,
+            "word": " meeting"
+          },
+          {
+            "start": 104.68,
+            "end": 105.14,
+            "word": " begins"
+          },
+          {
+            "start": 105.14,
+            "end": 105.36,
+            "word": " at"
+          },
+          {
+            "start": 105.36,
+            "end": 105.6,
+            "word": " 9"
+          },
+          {
+            "start": 105.6,
+            "end": 106.02,
+            "word": ".30."
+          },
+          {
+            "start": 106.5,
+            "end": 106.78,
+            "word": " Please"
+          },
+          {
+            "start": 106.78,
+            "end": 107.04,
+            "word": " keep"
+          },
+          {
+            "start": 107.04,
+            "end": 107.24,
+            "word": " the"
+          },
+          {
+            "start": 107.24,
+            "end": 107.62,
+            "word": " original"
+          },
+          {
+            "start": 107.62,
+            "end": 108.08,
+            "word": " recording"
+          },
+          {
+            "start": 108.08,
+            "end": 108.38,
+            "word": " and"
+          },
+          {
+            "start": 108.38,
+            "end": 108.66,
+            "word": " review"
+          },
+          {
+            "start": 108.66,
+            "end": 108.86,
+            "word": " the"
+          },
+          {
+            "start": 108.86,
+            "end": 109.18,
+            "word": " final"
+          },
+          {
+            "start": 109.18,
+            "end": 109.66,
+            "word": " version."
+          }
+        ]
+      },
+      {
+        "start": 112.88,
+        "end": 119.08,
+        "text": " Welcome to the subtitle workshop. Import a video, check every sentence, and export the final subtitles.",
+        "words": [
+          {
+            "start": 112.88,
+            "end": 113.1,
+            "word": " Welcome"
+          },
+          {
+            "start": 113.1,
+            "end": 113.38,
+            "word": " to"
+          },
+          {
+            "start": 113.38,
+            "end": 113.5,
+            "word": " the"
+          },
+          {
+            "start": 113.5,
+            "end": 114.06,
+            "word": " subtitle"
+          },
+          {
+            "start": 114.06,
+            "end": 114.54,
+            "word": " workshop."
+          },
+          {
+            "start": 114.98,
+            "end": 115.2,
+            "word": " Import"
+          },
+          {
+            "start": 115.2,
+            "end": 115.38,
+            "word": " a"
+          },
+          {
+            "start": 115.38,
+            "end": 115.7,
+            "word": " video,"
+          },
+          {
+            "start": 116.06,
+            "end": 116.26,
+            "word": " check"
+          },
+          {
+            "start": 116.26,
+            "end": 116.54,
+            "word": " every"
+          },
+          {
+            "start": 116.54,
+            "end": 116.92,
+            "word": " sentence,"
+          },
+          {
+            "start": 117.48,
+            "end": 117.62,
+            "word": " and"
+          },
+          {
+            "start": 117.62,
+            "end": 118.02,
+            "word": " export"
+          },
+          {
+            "start": 118.02,
+            "end": 118.22,
+            "word": " the"
+          },
+          {
+            "start": 118.22,
+            "end": 118.56,
+            "word": " final"
+          },
+          {
+            "start": 118.56,
+            "end": 119.08,
+            "word": " subtitles."
+          }
+        ]
+      },
+      {
+        "start": 120.24,
+        "end": 125.78,
+        "text": " The meeting begins at 9.30. Please keep the original recording and review the final version.",
+        "words": [
+          {
+            "start": 120.24,
+            "end": 120.54,
+            "word": " The"
+          },
+          {
+            "start": 120.54,
+            "end": 120.8,
+            "word": " meeting"
+          },
+          {
+            "start": 120.8,
+            "end": 121.22,
+            "word": " begins"
+          },
+          {
+            "start": 121.22,
+            "end": 121.48,
+            "word": " at"
+          },
+          {
+            "start": 121.48,
+            "end": 121.74,
+            "word": " 9"
+          },
+          {
+            "start": 121.74,
+            "end": 122.16,
+            "word": ".30."
+          },
+          {
+            "start": 122.6,
+            "end": 122.9,
+            "word": " Please"
+          },
+          {
+            "start": 122.9,
+            "end": 123.16,
+            "word": " keep"
+          },
+          {
+            "start": 123.16,
+            "end": 123.36,
+            "word": " the"
+          },
+          {
+            "start": 123.36,
+            "end": 123.74,
+            "word": " original"
+          },
+          {
+            "start": 123.74,
+            "end": 124.24,
+            "word": " recording"
+          },
+          {
+            "start": 124.24,
+            "end": 124.5,
+            "word": " and"
+          },
+          {
+            "start": 124.5,
+            "end": 124.78,
+            "word": " review"
+          },
+          {
+            "start": 124.78,
+            "end": 124.98,
+            "word": " the"
+          },
+          {
+            "start": 124.98,
+            "end": 125.3,
+            "word": " final"
+          },
+          {
+            "start": 125.3,
+            "end": 125.78,
+            "word": " version."
+          }
+        ]
+      }
+    ],
+    "character_errors": 80,
+    "reference_characters": 1328,
+    "cer": 0.060240963855421686,
+    "out_of_bounds": 0,
+    "adjacent_duplicates": 0
+  },
+  {
+    "sample": "music",
+    "iteration": 0,
+    "mode": "baseline",
+    "duration": 13.12275,
+    "model_load_seconds": 0.2736247910070233,
+    "first_result_seconds": 2.0394347079563886,
+    "total_seconds": 2.0395226670079865,
+    "process_peak_rss_bytes": 1877213184,
+    "segments": [
+      {
+        "start": 0.0,
+        "end": 6.28,
+        "text": " Welcome to the subtitle workshop, import a video, check every sentence, and export the final subtitles.",
+        "words": [
+          {
+            "start": 0.0,
+            "end": 0.26,
+            "word": " Welcome"
+          },
+          {
+            "start": 0.26,
+            "end": 0.52,
+            "word": " to"
+          },
+          {
+            "start": 0.52,
+            "end": 0.64,
+            "word": " the"
+          },
+          {
+            "start": 0.64,
+            "end": 1.22,
+            "word": " subtitle"
+          },
+          {
+            "start": 1.22,
+            "end": 1.66,
+            "word": " workshop,"
+          },
+          {
+            "start": 2.06,
+            "end": 2.36,
+            "word": " import"
+          },
+          {
+            "start": 2.36,
+            "end": 2.52,
+            "word": " a"
+          },
+          {
+            "start": 2.52,
+            "end": 2.84,
+            "word": " video,"
+          },
+          {
+            "start": 3.18,
+            "end": 3.4,
+            "word": " check"
+          },
+          {
+            "start": 3.4,
+            "end": 3.7,
+            "word": " every"
+          },
+          {
+            "start": 3.7,
+            "end": 4.1,
+            "word": " sentence,"
+          },
+          {
+            "start": 4.62,
+            "end": 4.76,
+            "word": " and"
+          },
+          {
+            "start": 4.76,
+            "end": 5.16,
+            "word": " export"
+          },
+          {
+            "start": 5.16,
+            "end": 5.36,
+            "word": " the"
+          },
+          {
+            "start": 5.36,
+            "end": 5.68,
+            "word": " final"
+          },
+          {
+            "start": 5.68,
+            "end": 6.28,
+            "word": " subtitles."
+          }
+        ]
+      },
+      {
+        "start": 7.06,
+        "end": 12.86,
+        "text": " The meeting begins at 9.30. Please keep the original recording and review the final version.",
+        "words": [
+          {
+            "start": 7.06,
+            "end": 7.68,
+            "word": " The"
+          },
+          {
+            "start": 7.68,
+            "end": 7.94,
+            "word": " meeting"
+          },
+          {
+            "start": 7.94,
+            "end": 8.42,
+            "word": " begins"
+          },
+          {
+            "start": 8.42,
+            "end": 8.62,
+            "word": " at"
+          },
+          {
+            "start": 8.62,
+            "end": 8.86,
+            "word": " 9"
+          },
+          {
+            "start": 8.86,
+            "end": 9.32,
+            "word": ".30."
+          },
+          {
+            "start": 9.8,
+            "end": 10.04,
+            "word": " Please"
+          },
+          {
+            "start": 10.04,
+            "end": 10.3,
+            "word": " keep"
+          },
+          {
+            "start": 10.3,
+            "end": 10.52,
+            "word": " the"
+          },
+          {
+            "start": 10.52,
+            "end": 10.86,
+            "word": " original"
+          },
+          {
+            "start": 10.86,
+            "end": 11.4,
+            "word": " recording"
+          },
+          {
+            "start": 11.4,
+            "end": 11.64,
+            "word": " and"
+          },
+          {
+            "start": 11.64,
+            "end": 11.92,
+            "word": " review"
+          },
+          {
+            "start": 11.92,
+            "end": 12.12,
+            "word": " the"
+          },
+          {
+            "start": 12.12,
+            "end": 12.44,
+            "word": " final"
+          },
+          {
+            "start": 12.44,
+            "end": 12.86,
+            "word": " version."
+          }
+        ]
+      }
+    ],
+    "character_errors": 10,
+    "reference_characters": 166,
+    "cer": 0.060240963855421686,
+    "out_of_bounds": 0,
+    "adjacent_duplicates": 0
+  },
+  {
+    "sample": "short",
+    "iteration": 1,
+    "mode": "baseline",
+    "duration": 6.57325,
+    "model_load_seconds": 0.2736247910070233,
+    "first_result_seconds": 1.628619167022407,
+    "total_seconds": 1.628683709015604,
+    "process_peak_rss_bytes": 1877213184,
+    "segments": [
+      {
+        "start": 0.0,
+        "end": 1.66,
+        "text": " Welcome to the subtitle workshop.",
+        "words": [
+          {
+            "start": 0.0,
+            "end": 0.26,
+            "word": " Welcome"
+          },
+          {
+            "start": 0.26,
+            "end": 0.52,
+            "word": " to"
+          },
+          {
+            "start": 0.52,
+            "end": 0.64,
+            "word": " the"
+          },
+          {
+            "start": 0.64,
+            "end": 1.22,
+            "word": " subtitle"
+          },
+          {
+            "start": 1.22,
+            "end": 1.66,
+            "word": " workshop."
+          }
+        ]
+      },
+      {
+        "start": 2.06,
+        "end": 6.14,
+        "text": " Import a video, check every sentence, and export the final subtitles.",
+        "words": [
+          {
+            "start": 2.06,
+            "end": 2.34,
+            "word": " Import"
+          },
+          {
+            "start": 2.34,
+            "end": 2.52,
+            "word": " a"
+          },
+          {
+            "start": 2.52,
+            "end": 2.84,
+            "word": " video,"
+          },
+          {
+            "start": 3.16,
+            "end": 3.4,
+            "word": " check"
+          },
+          {
+            "start": 3.4,
+            "end": 3.7,
+            "word": " every"
+          },
+          {
+            "start": 3.7,
+            "end": 4.1,
+            "word": " sentence,"
+          },
+          {
+            "start": 4.62,
+            "end": 4.74,
+            "word": " and"
+          },
+          {
+            "start": 4.74,
+            "end": 5.16,
+            "word": " export"
+          },
+          {
+            "start": 5.16,
+            "end": 5.36,
+            "word": " the"
+          },
+          {
+            "start": 5.36,
+            "end": 5.68,
+            "word": " final"
+          },
+          {
+            "start": 5.68,
+            "end": 6.14,
+            "word": " subtitles."
+          }
+        ]
+      }
+    ],
+    "character_errors": 0,
+    "reference_characters": 84,
+    "cer": 0.0,
+    "out_of_bounds": 0,
+    "adjacent_duplicates": 0
+  },
+  {
+    "sample": "mixed",
+    "iteration": 1,
+    "mode": "baseline",
+    "duration": 15.0031875,
+    "model_load_seconds": 0.2736247910070233,
+    "first_result_seconds": 2.7193180000176653,
+    "total_seconds": 2.719330124964472,
+    "process_peak_rss_bytes": 1877213184,
+    "segments": [
+      {
+        "start": 7.3,
+        "end": 14.86,
+        "text": "歡迎使用字幕工廠,請導入視頻,檢查每一句字幕,然後導出最終文件。",
+        "words": [
+          {
+            "start": 7.3,
+            "end": 7.78,
+            "word": "歡迎"
+          },
+          {
+            "start": 7.78,
+            "end": 8.18,
+            "word": "使"
+          },
+          {
+            "start": 8.18,
+            "end": 8.38,
+            "word": "用"
+          },
+          {
+            "start": 8.38,
+            "end": 8.56,
+            "word": "字"
+          },
+          {
+            "start": 8.56,
+            "end": 8.78,
+            "word": "幕"
+          },
+          {
+            "start": 8.78,
+            "end": 9.0,
+            "word": "工"
+          },
+          {
+            "start": 9.0,
+            "end": 9.34,
+            "word": "廠,"
+          },
+          {
+            "start": 9.6,
+            "end": 9.8,
+            "word": "請"
+          },
+          {
+            "start": 9.8,
+            "end": 10.04,
+            "word": "導"
+          },
+          {
+            "start": 10.04,
+            "end": 10.26,
+            "word": "入"
+          },
+          {
+            "start": 10.26,
+            "end": 10.5,
+            "word": "視"
+          },
+          {
+            "start": 10.5,
+            "end": 10.8,
+            "word": "頻,"
+          },
+          {
+            "start": 11.16,
+            "end": 11.4,
+            "word": "檢"
+          },
+          {
+            "start": 11.4,
+            "end": 11.7,
+            "word": "查"
+          },
+          {
+            "start": 11.7,
+            "end": 11.9,
+            "word": "每"
+          },
+          {
+            "start": 11.9,
+            "end": 12.12,
+            "word": "一"
+          },
+          {
+            "start": 12.12,
+            "end": 12.28,
+            "word": "句"
+          },
+          {
+            "start": 12.28,
+            "end": 12.54,
+            "word": "字"
+          },
+          {
+            "start": 12.54,
+            "end": 12.8,
+            "word": "幕,"
+          },
+          {
+            "start": 13.1,
+            "end": 13.42,
+            "word": "然後"
+          },
+          {
+            "start": 13.42,
+            "end": 13.76,
+            "word": "導"
+          },
+          {
+            "start": 13.76,
+            "end": 14.02,
+            "word": "出"
+          },
+          {
+            "start": 14.02,
+            "end": 14.24,
+            "word": "最"
+          },
+          {
+            "start": 14.24,
+            "end": 14.44,
+            "word": "終"
+          },
+          {
+            "start": 14.44,
+            "end": 14.64,
+            "word": "文"
+          },
+          {
+            "start": 14.64,
+            "end": 14.86,
+            "word": "件。"
+          }
+        ]
+      }
+    ],
+    "character_errors": 94,
+    "reference_characters": 112,
+    "cer": 0.8392857142857143,
+    "out_of_bounds": 0,
+    "adjacent_duplicates": 0
+  },
+  {
+    "sample": "dialogue",
+    "iteration": 1,
+    "mode": "baseline",
+    "duration": 13.12275,
+    "model_load_seconds": 0.2736247910070233,
+    "first_result_seconds": 2.0267374589457177,
+    "total_seconds": 2.0268272919929586,
+    "process_peak_rss_bytes": 1877213184,
+    "segments": [
+      {
+        "start": 0.0,
+        "end": 5.36,
+        "text": " Welcome to the subtitle workshop, import a video, check every sentence, and export the",
+        "words": [
+          {
+            "start": 0.0,
+            "end": 0.26,
+            "word": " Welcome"
+          },
+          {
+            "start": 0.26,
+            "end": 0.52,
+            "word": " to"
+          },
+          {
+            "start": 0.52,
+            "end": 0.64,
+            "word": " the"
+          },
+          {
+            "start": 0.64,
+            "end": 1.22,
+            "word": " subtitle"
+          },
+          {
+            "start": 1.22,
+            "end": 1.68,
+            "word": " workshop,"
+          },
+          {
+            "start": 2.06,
+            "end": 2.36,
+            "word": " import"
+          },
+          {
+            "start": 2.36,
+            "end": 2.52,
+            "word": " a"
+          },
+          {
+            "start": 2.52,
+            "end": 2.86,
+            "word": " video,"
+          },
+          {
+            "start": 3.18,
+            "end": 3.42,
+            "word": " check"
+          },
+          {
+            "start": 3.42,
+            "end": 3.7,
+            "word": " every"
+          },
+          {
+            "start": 3.7,
+            "end": 4.12,
+            "word": " sentence,"
+          },
+          {
+            "start": 4.62,
+            "end": 4.76,
+            "word": " and"
+          },
+          {
+            "start": 4.76,
+            "end": 5.18,
+            "word": " export"
+          },
+          {
+            "start": 5.18,
+            "end": 5.36,
+            "word": " the"
+          }
+        ]
+      },
+      {
+        "start": 5.36,
+        "end": 6.3,
+        "text": " final subtitles.",
+        "words": [
+          {
+            "start": 5.36,
+            "end": 5.68,
+            "word": " final"
+          },
+          {
+            "start": 5.68,
+            "end": 6.3,
+            "word": " subtitles."
+          }
+        ]
+      },
+      {
+        "start": 7.2,
+        "end": 9.32,
+        "text": " The meeting begins at 9.30.",
+        "words": [
+          {
+            "start": 7.2,
+            "end": 7.68,
+            "word": " The"
+          },
+          {
+            "start": 7.68,
+            "end": 7.92,
+            "word": " meeting"
+          },
+          {
+            "start": 7.92,
+            "end": 8.42,
+            "word": " begins"
+          },
+          {
+            "start": 8.42,
+            "end": 8.62,
+            "word": " at"
+          },
+          {
+            "start": 8.62,
+            "end": 8.86,
+            "word": " 9"
+          },
+          {
+            "start": 8.86,
+            "end": 9.32,
+            "word": ".30."
+          }
+        ]
+      },
+      {
+        "start": 9.82,
+        "end": 12.86,
+        "text": " Please keep the original recording and review the final version.",
+        "words": [
+          {
+            "start": 9.82,
+            "end": 10.04,
+            "word": " Please"
+          },
+          {
+            "start": 10.04,
+            "end": 10.3,
+            "word": " keep"
+          },
+          {
+            "start": 10.3,
+            "end": 10.52,
+            "word": " the"
+          },
+          {
+            "start": 10.52,
+            "end": 10.88,
+            "word": " original"
+          },
+          {
+            "start": 10.88,
+            "end": 11.4,
+            "word": " recording"
+          },
+          {
+            "start": 11.4,
+            "end": 11.64,
+            "word": " and"
+          },
+          {
+            "start": 11.64,
+            "end": 11.94,
+            "word": " review"
+          },
+          {
+            "start": 11.94,
+            "end": 12.12,
+            "word": " the"
+          },
+          {
+            "start": 12.12,
+            "end": 12.44,
+            "word": " final"
+          },
+          {
+            "start": 12.44,
+            "end": 12.86,
+            "word": " version."
+          }
+        ]
+      }
+    ],
+    "character_errors": 10,
+    "reference_characters": 166,
+    "cer": 0.060240963855421686,
+    "out_of_bounds": 0,
+    "adjacent_duplicates": 0
+  },
+  {
+    "sample": "long_silence",
+    "iteration": 1,
+    "mode": "baseline",
+    "duration": 57.12275,
+    "model_load_seconds": 0.2736247910070233,
+    "first_result_seconds": 2.079732000012882,
+    "total_seconds": 2.07982866599923,
+    "process_peak_rss_bytes": 1877213184,
+    "segments": [
+      {
+        "start": 0.0,
+        "end": 5.36,
+        "text": " Welcome to the subtitle workshop, import a video, check every sentence, and export the",
+        "words": [
+          {
+            "start": 0.0,
+            "end": 0.26,
+            "word": " Welcome"
+          },
+          {
+            "start": 0.26,
+            "end": 0.52,
+            "word": " to"
+          },
+          {
+            "start": 0.52,
+            "end": 0.64,
+            "word": " the"
+          },
+          {
+            "start": 0.64,
+            "end": 1.22,
+            "word": " subtitle"
+          },
+          {
+            "start": 1.22,
+            "end": 1.66,
+            "word": " workshop,"
+          },
+          {
+            "start": 2.06,
+            "end": 2.36,
+            "word": " import"
+          },
+          {
+            "start": 2.36,
+            "end": 2.52,
+            "word": " a"
+          },
+          {
+            "start": 2.52,
+            "end": 2.84,
+            "word": " video,"
+          },
+          {
+            "start": 3.18,
+            "end": 3.42,
+            "word": " check"
+          },
+          {
+            "start": 3.42,
+            "end": 3.7,
+            "word": " every"
+          },
+          {
+            "start": 3.7,
+            "end": 4.1,
+            "word": " sentence,"
+          },
+          {
+            "start": 4.62,
+            "end": 4.76,
+            "word": " and"
+          },
+          {
+            "start": 4.76,
+            "end": 5.16,
+            "word": " export"
+          },
+          {
+            "start": 5.16,
+            "end": 5.36,
+            "word": " the"
+          }
+        ]
+      },
+      {
+        "start": 5.36,
+        "end": 6.28,
+        "text": " final subtitles.",
+        "words": [
+          {
+            "start": 5.36,
+            "end": 5.68,
+            "word": " final"
+          },
+          {
+            "start": 5.68,
+            "end": 6.28,
+            "word": " subtitles."
+          }
+        ]
+      },
+      {
+        "start": 51.19,
+        "end": 53.31,
+        "text": " The meeting begins at 9.30.",
+        "words": [
+          {
+            "start": 51.19,
+            "end": 51.67,
+            "word": " The"
+          },
+          {
+            "start": 51.67,
+            "end": 51.93,
+            "word": " meeting"
+          },
+          {
+            "start": 51.93,
+            "end": 52.41,
+            "word": " begins"
+          },
+          {
+            "start": 52.41,
+            "end": 52.61,
+            "word": " at"
+          },
+          {
+            "start": 52.61,
+            "end": 52.85,
+            "word": " 9"
+          },
+          {
+            "start": 52.85,
+            "end": 53.31,
+            "word": ".30."
+          }
+        ]
+      },
+      {
+        "start": 53.79,
+        "end": 56.85,
+        "text": " Please keep the original recording and review the final version.",
+        "words": [
+          {
+            "start": 53.79,
+            "end": 54.03,
+            "word": " Please"
+          },
+          {
+            "start": 54.03,
+            "end": 54.29,
+            "word": " keep"
+          },
+          {
+            "start": 54.29,
+            "end": 54.53,
+            "word": " the"
+          },
+          {
+            "start": 54.53,
+            "end": 54.85,
+            "word": " original"
+          },
+          {
+            "start": 54.85,
+            "end": 55.41,
+            "word": " recording"
+          },
+          {
+            "start": 55.41,
+            "end": 55.63,
+            "word": " and"
+          },
+          {
+            "start": 55.63,
+            "end": 55.93,
+            "word": " review"
+          },
+          {
+            "start": 55.93,
+            "end": 56.13,
+            "word": " the"
+          },
+          {
+            "start": 56.13,
+            "end": 56.43,
+            "word": " final"
+          },
+          {
+            "start": 56.43,
+            "end": 56.85,
+            "word": " version."
+          }
+        ]
+      }
+    ],
+    "character_errors": 10,
+    "reference_characters": 166,
+    "cer": 0.060240963855421686,
+    "out_of_bounds": 0,
+    "adjacent_duplicates": 0
+  },
+  {
+    "sample": "long",
+    "iteration": 1,
+    "mode": "baseline",
+    "duration": 128.982,
+    "model_load_seconds": 0.2736247910070233,
+    "first_result_seconds": 20.16823941702023,
+    "total_seconds": 97.00283833401045,
+    "process_peak_rss_bytes": 1877213184,
+    "segments": [
+      {
+        "start": 0.0,
+        "end": 1.5,
+        "text": " Welcome to the subtitle workshop.",
+        "words": [
+          {
+            "start": 0.0,
+            "end": 0.28,
+            "word": " Welcome"
+          },
+          {
+            "start": 0.28,
+            "end": 0.52,
+            "word": " to"
+          },
+          {
+            "start": 0.52,
+            "end": 0.66,
+            "word": " the"
+          },
+          {
+            "start": 0.66,
+            "end": 1.2,
+            "word": " subtitle"
+          },
+          {
+            "start": 1.2,
+            "end": 1.5,
+            "word": " workshop."
+          }
+        ]
+      },
+      {
+        "start": 2.04,
+        "end": 6.26,
+        "text": " Import a video, check every sentence, and export the final subtitles.",
+        "words": [
+          {
+            "start": 2.04,
+            "end": 2.34,
+            "word": " Import"
+          },
+          {
+            "start": 2.34,
+            "end": 2.52,
+            "word": " a"
+          },
+          {
+            "start": 2.52,
+            "end": 2.82,
+            "word": " video,"
+          },
+          {
+            "start": 3.18,
+            "end": 3.42,
+            "word": " check"
+          },
+          {
+            "start": 3.42,
+            "end": 3.72,
+            "word": " every"
+          },
+          {
+            "start": 3.72,
+            "end": 4.06,
+            "word": " sentence,"
+          },
+          {
+            "start": 4.58,
+            "end": 4.76,
+            "word": " and"
+          },
+          {
+            "start": 4.76,
+            "end": 5.18,
+            "word": " export"
+          },
+          {
+            "start": 5.18,
+            "end": 5.36,
+            "word": " the"
+          },
+          {
+            "start": 5.36,
+            "end": 5.68,
+            "word": " final"
+          },
+          {
+            "start": 5.68,
+            "end": 6.26,
+            "word": " subtitles."
+          }
+        ]
+      },
+      {
+        "start": 7.22,
+        "end": 9.3,
+        "text": " The meeting begins at 9.30.",
+        "words": [
+          {
+            "start": 7.22,
+            "end": 7.68,
+            "word": " The"
+          },
+          {
+            "start": 7.68,
+            "end": 7.94,
+            "word": " meeting"
+          },
+          {
+            "start": 7.94,
+            "end": 8.4,
+            "word": " begins"
+          },
+          {
+            "start": 8.4,
+            "end": 8.64,
+            "word": " at"
+          },
+          {
+            "start": 8.64,
+            "end": 8.84,
+            "word": " 9"
+          },
+          {
+            "start": 8.84,
+            "end": 9.3,
+            "word": ".30."
+          }
+        ]
+      },
+      {
+        "start": 9.74,
+        "end": 12.9,
+        "text": " Please keep the original recording and review the final version.",
+        "words": [
+          {
+            "start": 9.74,
+            "end": 10.04,
+            "word": " Please"
+          },
+          {
+            "start": 10.04,
+            "end": 10.3,
+            "word": " keep"
+          },
+          {
+            "start": 10.3,
+            "end": 10.52,
+            "word": " the"
+          },
+          {
+            "start": 10.52,
+            "end": 10.88,
+            "word": " original"
+          },
+          {
+            "start": 10.88,
+            "end": 11.36,
+            "word": " recording"
+          },
+          {
+            "start": 11.36,
+            "end": 11.64,
+            "word": " and"
+          },
+          {
+            "start": 11.64,
+            "end": 11.94,
+            "word": " review"
+          },
+          {
+            "start": 11.94,
+            "end": 12.12,
+            "word": " the"
+          },
+          {
+            "start": 12.12,
+            "end": 12.44,
+            "word": " final"
+          },
+          {
+            "start": 12.44,
+            "end": 12.9,
+            "word": " version."
+          }
+        ]
+      },
+      {
+        "start": 16.12,
+        "end": 17.78,
+        "text": " Welcome to the subtitle workshop.",
+        "words": [
+          {
+            "start": 16.12,
+            "end": 16.38,
+            "word": " Welcome"
+          },
+          {
+            "start": 16.38,
+            "end": 16.64,
+            "word": " to"
+          },
+          {
+            "start": 16.64,
+            "end": 16.76,
+            "word": " the"
+          },
+          {
+            "start": 16.76,
+            "end": 17.32,
+            "word": " subtitle"
+          },
+          {
+            "start": 17.32,
+            "end": 17.78,
+            "word": " workshop."
+          }
+        ]
+      },
+      {
+        "start": 18.2,
+        "end": 22.36,
+        "text": " Import a video, check every sentence, and export the final subtitles.",
+        "words": [
+          {
+            "start": 18.2,
+            "end": 18.44,
+            "word": " Import"
+          },
+          {
+            "start": 18.44,
+            "end": 18.64,
+            "word": " a"
+          },
+          {
+            "start": 18.64,
+            "end": 18.96,
+            "word": " video,"
+          },
+          {
+            "start": 19.34,
+            "end": 19.54,
+            "word": " check"
+          },
+          {
+            "start": 19.54,
+            "end": 19.82,
+            "word": " every"
+          },
+          {
+            "start": 19.82,
+            "end": 20.2,
+            "word": " sentence,"
+          },
+          {
+            "start": 20.7,
+            "end": 20.88,
+            "word": " and"
+          },
+          {
+            "start": 20.88,
+            "end": 21.28,
+            "word": " export"
+          },
+          {
+            "start": 21.28,
+            "end": 21.48,
+            "word": " the"
+          },
+          {
+            "start": 21.48,
+            "end": 21.82,
+            "word": " final"
+          },
+          {
+            "start": 21.82,
+            "end": 22.36,
+            "word": " subtitles."
+          }
+        ]
+      },
+      {
+        "start": 23.62,
+        "end": 25.44,
+        "text": " The meeting begins at 9.30.",
+        "words": [
+          {
+            "start": 23.62,
+            "end": 23.8,
+            "word": " The"
+          },
+          {
+            "start": 23.8,
+            "end": 24.04,
+            "word": " meeting"
+          },
+          {
+            "start": 24.04,
+            "end": 24.46,
+            "word": " begins"
+          },
+          {
+            "start": 24.46,
+            "end": 24.76,
+            "word": " at"
+          },
+          {
+            "start": 24.76,
+            "end": 25.0,
+            "word": " 9"
+          },
+          {
+            "start": 25.0,
+            "end": 25.44,
+            "word": ".30."
+          }
+        ]
+      },
+      {
+        "start": 25.82,
+        "end": 29.06,
+        "text": " Please keep the original recording and review the final version.",
+        "words": [
+          {
+            "start": 25.82,
+            "end": 26.16,
+            "word": " Please"
+          },
+          {
+            "start": 26.16,
+            "end": 26.42,
+            "word": " keep"
+          },
+          {
+            "start": 26.42,
+            "end": 26.62,
+            "word": " the"
+          },
+          {
+            "start": 26.62,
+            "end": 27.0,
+            "word": " original"
+          },
+          {
+            "start": 27.0,
+            "end": 27.52,
+            "word": " recording"
+          },
+          {
+            "start": 27.52,
+            "end": 27.78,
+            "word": " and"
+          },
+          {
+            "start": 27.78,
+            "end": 28.04,
+            "word": " review"
+          },
+          {
+            "start": 28.04,
+            "end": 28.26,
+            "word": " the"
+          },
+          {
+            "start": 28.26,
+            "end": 28.56,
+            "word": " final"
+          },
+          {
+            "start": 28.56,
+            "end": 29.06,
+            "word": " version."
+          }
+        ]
+      },
+      {
+        "start": 32.1,
+        "end": 33.94,
+        "text": " Welcome to the subtitle workshop.",
+        "words": [
+          {
+            "start": 32.1,
+            "end": 32.48,
+            "word": " Welcome"
+          },
+          {
+            "start": 32.48,
+            "end": 32.76,
+            "word": " to"
+          },
+          {
+            "start": 32.76,
+            "end": 32.88,
+            "word": " the"
+          },
+          {
+            "start": 32.88,
+            "end": 33.44,
+            "word": " subtitle"
+          },
+          {
+            "start": 33.44,
+            "end": 33.94,
+            "word": " workshop."
+          }
+        ]
+      },
+      {
+        "start": 33.94,
+        "end": 38.48,
+        "text": " Import a video, check every sentence, and export the final subtitles.",
+        "words": [
+          {
+            "start": 33.94,
+            "end": 34.58,
+            "word": " Import"
+          },
+          {
+            "start": 34.58,
+            "end": 34.76,
+            "word": " a"
+          },
+          {
+            "start": 34.76,
+            "end": 35.04,
+            "word": " video,"
+          },
+          {
+            "start": 35.42,
+            "end": 35.66,
+            "word": " check"
+          },
+          {
+            "start": 35.66,
+            "end": 35.96,
+            "word": " every"
+          },
+          {
+            "start": 35.96,
+            "end": 36.3,
+            "word": " sentence,"
+          },
+          {
+            "start": 36.8,
+            "end": 37.0,
+            "word": " and"
+          },
+          {
+            "start": 37.0,
+            "end": 37.42,
+            "word": " export"
+          },
+          {
+            "start": 37.42,
+            "end": 37.62,
+            "word": " the"
+          },
+          {
+            "start": 37.62,
+            "end": 37.94,
+            "word": " final"
+          },
+          {
+            "start": 37.94,
+            "end": 38.48,
+            "word": " subtitles."
+          }
+        ]
+      },
+      {
+        "start": 39.42,
+        "end": 45.14,
+        "text": " The meeting begins at 9.30. Please keep the original recording and review the final version.",
+        "words": [
+          {
+            "start": 39.42,
+            "end": 39.94,
+            "word": " The"
+          },
+          {
+            "start": 39.94,
+            "end": 40.18,
+            "word": " meeting"
+          },
+          {
+            "start": 40.18,
+            "end": 40.64,
+            "word": " begins"
+          },
+          {
+            "start": 40.64,
+            "end": 40.88,
+            "word": " at"
+          },
+          {
+            "start": 40.88,
+            "end": 41.1,
+            "word": " 9"
+          },
+          {
+            "start": 41.1,
+            "end": 41.54,
+            "word": ".30."
+          },
+          {
+            "start": 42.0,
+            "end": 42.3,
+            "word": " Please"
+          },
+          {
+            "start": 42.3,
+            "end": 42.54,
+            "word": " keep"
+          },
+          {
+            "start": 42.54,
+            "end": 42.76,
+            "word": " the"
+          },
+          {
+            "start": 42.76,
+            "end": 43.12,
+            "word": " original"
+          },
+          {
+            "start": 43.12,
+            "end": 43.6,
+            "word": " recording"
+          },
+          {
+            "start": 43.6,
+            "end": 43.9,
+            "word": " and"
+          },
+          {
+            "start": 43.9,
+            "end": 44.18,
+            "word": " review"
+          },
+          {
+            "start": 44.18,
+            "end": 44.36,
+            "word": " the"
+          },
+          {
+            "start": 44.36,
+            "end": 44.68,
+            "word": " final"
+          },
+          {
+            "start": 44.68,
+            "end": 45.14,
+            "word": " version."
+          }
+        ]
+      },
+      {
+        "start": 48.36,
+        "end": 54.58,
+        "text": " Welcome to the subtitle workshop. Import a video, check every sentence, and export the final subtitles.",
+        "words": [
+          {
+            "start": 48.36,
+            "end": 48.64,
+            "word": " Welcome"
+          },
+          {
+            "start": 48.64,
+            "end": 48.88,
+            "word": " to"
+          },
+          {
+            "start": 48.88,
+            "end": 49.0,
+            "word": " the"
+          },
+          {
+            "start": 49.0,
+            "end": 49.58,
+            "word": " subtitle"
+          },
+          {
+            "start": 49.58,
+            "end": 50.02,
+            "word": " workshop."
+          },
+          {
+            "start": 50.4,
+            "end": 50.7,
+            "word": " Import"
+          },
+          {
+            "start": 50.7,
+            "end": 50.9,
+            "word": " a"
+          },
+          {
+            "start": 50.9,
+            "end": 51.18,
+            "word": " video,"
+          },
+          {
+            "start": 51.54,
+            "end": 51.78,
+            "word": " check"
+          },
+          {
+            "start": 51.78,
+            "end": 52.06,
+            "word": " every"
+          },
+          {
+            "start": 52.06,
+            "end": 52.46,
+            "word": " sentence,"
+          },
+          {
+            "start": 52.92,
+            "end": 53.12,
+            "word": " and"
+          },
+          {
+            "start": 53.12,
+            "end": 53.54,
+            "word": " export"
+          },
+          {
+            "start": 53.54,
+            "end": 53.74,
+            "word": " the"
+          },
+          {
+            "start": 53.74,
+            "end": 54.06,
+            "word": " final"
+          },
+          {
+            "start": 54.06,
+            "end": 54.58,
+            "word": " subtitles."
+          }
+        ]
+      },
+      {
+        "start": 55.82,
+        "end": 61.3,
+        "text": " The meeting begins at 9.30. Please keep the original recording and review the final version.",
+        "words": [
+          {
+            "start": 55.82,
+            "end": 56.06,
+            "word": " The"
+          },
+          {
+            "start": 56.06,
+            "end": 56.3,
+            "word": " meeting"
+          },
+          {
+            "start": 56.3,
+            "end": 56.7,
+            "word": " begins"
+          },
+          {
+            "start": 56.7,
+            "end": 56.98,
+            "word": " at"
+          },
+          {
+            "start": 56.98,
+            "end": 57.24,
+            "word": " 9"
+          },
+          {
+            "start": 57.24,
+            "end": 57.66,
+            "word": ".30."
+          },
+          {
+            "start": 58.08,
+            "end": 58.4,
+            "word": " Please"
+          },
+          {
+            "start": 58.4,
+            "end": 58.68,
+            "word": " keep"
+          },
+          {
+            "start": 58.68,
+            "end": 58.88,
+            "word": " the"
+          },
+          {
+            "start": 58.88,
+            "end": 59.26,
+            "word": " original"
+          },
+          {
+            "start": 59.26,
+            "end": 59.74,
+            "word": " recording"
+          },
+          {
+            "start": 59.74,
+            "end": 60.02,
+            "word": " and"
+          },
+          {
+            "start": 60.02,
+            "end": 60.3,
+            "word": " review"
+          },
+          {
+            "start": 60.3,
+            "end": 60.5,
+            "word": " the"
+          },
+          {
+            "start": 60.5,
+            "end": 60.82,
+            "word": " final"
+          },
+          {
+            "start": 60.82,
+            "end": 61.3,
+            "word": " version."
+          }
+        ]
+      },
+      {
+        "start": 63.54,
+        "end": 70.74,
+        "text": " Welcome to the subtitle workshop. Import a video, check every sentence, and export the final subtitles.",
+        "words": [
+          {
+            "start": 63.54,
+            "end": 64.72,
+            "word": " Welcome"
+          },
+          {
+            "start": 64.72,
+            "end": 65.0,
+            "word": " to"
+          },
+          {
+            "start": 65.0,
+            "end": 65.14,
+            "word": " the"
+          },
+          {
+            "start": 65.14,
+            "end": 65.68,
+            "word": " subtitle"
+          },
+          {
+            "start": 65.68,
+            "end": 65.98,
+            "word": " workshop."
+          },
+          {
+            "start": 66.56,
+            "end": 66.82,
+            "word": " Import"
+          },
+          {
+            "start": 66.82,
+            "end": 67.02,
+            "word": " a"
+          },
+          {
+            "start": 67.02,
+            "end": 67.3,
+            "word": " video,"
+          },
+          {
+            "start": 67.68,
+            "end": 67.9,
+            "word": " check"
+          },
+          {
+            "start": 67.9,
+            "end": 68.2,
+            "word": " every"
+          },
+          {
+            "start": 68.2,
+            "end": 68.54,
+            "word": " sentence,"
+          },
+          {
+            "start": 69.06,
+            "end": 69.24,
+            "word": " and"
+          },
+          {
+            "start": 69.24,
+            "end": 69.66,
+            "word": " export"
+          },
+          {
+            "start": 69.66,
+            "end": 69.86,
+            "word": " the"
+          },
+          {
+            "start": 69.86,
+            "end": 70.16,
+            "word": " final"
+          },
+          {
+            "start": 70.16,
+            "end": 70.74,
+            "word": " subtitles."
+          }
+        ]
+      },
+      {
+        "start": 71.9,
+        "end": 77.4,
+        "text": " The meeting begins at 9.30. Please keep the original recording and review the final version.",
+        "words": [
+          {
+            "start": 71.9,
+            "end": 72.18,
+            "word": " The"
+          },
+          {
+            "start": 72.18,
+            "end": 72.42,
+            "word": " meeting"
+          },
+          {
+            "start": 72.42,
+            "end": 72.9,
+            "word": " begins"
+          },
+          {
+            "start": 72.9,
+            "end": 73.12,
+            "word": " at"
+          },
+          {
+            "start": 73.12,
+            "end": 73.36,
+            "word": " 9"
+          },
+          {
+            "start": 73.36,
+            "end": 73.78,
+            "word": ".30."
+          },
+          {
+            "start": 74.24,
+            "end": 74.54,
+            "word": " Please"
+          },
+          {
+            "start": 74.54,
+            "end": 74.8,
+            "word": " keep"
+          },
+          {
+            "start": 74.8,
+            "end": 75.0,
+            "word": " the"
+          },
+          {
+            "start": 75.0,
+            "end": 75.36,
+            "word": " original"
+          },
+          {
+            "start": 75.36,
+            "end": 75.84,
+            "word": " recording"
+          },
+          {
+            "start": 75.84,
+            "end": 76.14,
+            "word": " and"
+          },
+          {
+            "start": 76.14,
+            "end": 76.42,
+            "word": " review"
+          },
+          {
+            "start": 76.42,
+            "end": 76.62,
+            "word": " the"
+          },
+          {
+            "start": 76.62,
+            "end": 76.94,
+            "word": " final"
+          },
+          {
+            "start": 76.94,
+            "end": 77.4,
+            "word": " version."
+          }
+        ]
+      },
+      {
+        "start": 80.64,
+        "end": 86.84,
+        "text": " Welcome to the subtitle workshop. Import a video, check every sentence, and export the final subtitles.",
+        "words": [
+          {
+            "start": 80.64,
+            "end": 80.86,
+            "word": " Welcome"
+          },
+          {
+            "start": 80.86,
+            "end": 81.12,
+            "word": " to"
+          },
+          {
+            "start": 81.12,
+            "end": 81.24,
+            "word": " the"
+          },
+          {
+            "start": 81.24,
+            "end": 81.82,
+            "word": " subtitle"
+          },
+          {
+            "start": 81.82,
+            "end": 82.3,
+            "word": " workshop."
+          },
+          {
+            "start": 82.68,
+            "end": 82.94,
+            "word": " Import"
+          },
+          {
+            "start": 82.94,
+            "end": 83.14,
+            "word": " a"
+          },
+          {
+            "start": 83.14,
+            "end": 83.44,
+            "word": " video,"
+          },
+          {
+            "start": 83.8,
+            "end": 84.04,
+            "word": " check"
+          },
+          {
+            "start": 84.04,
+            "end": 84.3,
+            "word": " every"
+          },
+          {
+            "start": 84.3,
+            "end": 84.68,
+            "word": " sentence,"
+          },
+          {
+            "start": 85.18,
+            "end": 85.36,
+            "word": " and"
+          },
+          {
+            "start": 85.36,
+            "end": 85.76,
+            "word": " export"
+          },
+          {
+            "start": 85.76,
+            "end": 85.98,
+            "word": " the"
+          },
+          {
+            "start": 85.98,
+            "end": 86.32,
+            "word": " final"
+          },
+          {
+            "start": 86.32,
+            "end": 86.84,
+            "word": " subtitles."
+          }
+        ]
+      },
+      {
+        "start": 88.04,
+        "end": 93.56,
+        "text": " The meeting begins at 9.30. Please keep the original recording and review the final version.",
+        "words": [
+          {
+            "start": 88.04,
+            "end": 88.3,
+            "word": " The"
+          },
+          {
+            "start": 88.3,
+            "end": 88.54,
+            "word": " meeting"
+          },
+          {
+            "start": 88.54,
+            "end": 88.98,
+            "word": " begins"
+          },
+          {
+            "start": 88.98,
+            "end": 89.24,
+            "word": " at"
+          },
+          {
+            "start": 89.24,
+            "end": 89.5,
+            "word": " 9"
+          },
+          {
+            "start": 89.5,
+            "end": 89.9,
+            "word": ".30."
+          },
+          {
+            "start": 90.32,
+            "end": 90.64,
+            "word": " Please"
+          },
+          {
+            "start": 90.64,
+            "end": 90.92,
+            "word": " keep"
+          },
+          {
+            "start": 90.92,
+            "end": 91.12,
+            "word": " the"
+          },
+          {
+            "start": 91.12,
+            "end": 91.5,
+            "word": " original"
+          },
+          {
+            "start": 91.5,
+            "end": 91.98,
+            "word": " recording"
+          },
+          {
+            "start": 91.98,
+            "end": 92.26,
+            "word": " and"
+          },
+          {
+            "start": 92.26,
+            "end": 92.54,
+            "word": " review"
+          },
+          {
+            "start": 92.54,
+            "end": 92.74,
+            "word": " the"
+          },
+          {
+            "start": 92.74,
+            "end": 93.06,
+            "word": " final"
+          },
+          {
+            "start": 93.06,
+            "end": 93.56,
+            "word": " version."
+          }
+        ]
+      },
+      {
+        "start": 95.8,
+        "end": 102.1,
+        "text": " Welcome to the subtitle workshop. Import a video, check every sentence and export the",
+        "words": [
+          {
+            "start": 95.8,
+            "end": 97.0,
+            "word": " Welcome"
+          },
+          {
+            "start": 97.0,
+            "end": 97.26,
+            "word": " to"
+          },
+          {
+            "start": 97.26,
+            "end": 97.38,
+            "word": " the"
+          },
+          {
+            "start": 97.38,
+            "end": 97.94,
+            "word": " subtitle"
+          },
+          {
+            "start": 97.94,
+            "end": 98.38,
+            "word": " workshop."
+          },
+          {
+            "start": 98.82,
+            "end": 99.08,
+            "word": " Import"
+          },
+          {
+            "start": 99.08,
+            "end": 99.26,
+            "word": " a"
+          },
+          {
+            "start": 99.26,
+            "end": 99.56,
+            "word": " video,"
+          },
+          {
+            "start": 99.92,
+            "end": 100.14,
+            "word": " check"
+          },
+          {
+            "start": 100.14,
+            "end": 100.44,
+            "word": " every"
+          },
+          {
+            "start": 100.44,
+            "end": 100.8,
+            "word": " sentence"
+          },
+          {
+            "start": 100.8,
+            "end": 101.48,
+            "word": " and"
+          },
+          {
+            "start": 101.48,
+            "end": 101.9,
+            "word": " export"
+          },
+          {
+            "start": 101.9,
+            "end": 102.1,
+            "word": " the"
+          }
+        ]
+      },
+      {
+        "start": 102.1,
+        "end": 108.66,
+        "text": " final subtitles. The meeting begins at 9.30. Please keep the original recording and review",
+        "words": [
+          {
+            "start": 102.1,
+            "end": 102.42,
+            "word": " final"
+          },
+          {
+            "start": 102.42,
+            "end": 103.0,
+            "word": " subtitles."
+          },
+          {
+            "start": 104.0,
+            "end": 104.42,
+            "word": " The"
+          },
+          {
+            "start": 104.42,
+            "end": 104.68,
+            "word": " meeting"
+          },
+          {
+            "start": 104.68,
+            "end": 105.16,
+            "word": " begins"
+          },
+          {
+            "start": 105.16,
+            "end": 105.36,
+            "word": " at"
+          },
+          {
+            "start": 105.36,
+            "end": 105.6,
+            "word": " 9"
+          },
+          {
+            "start": 105.6,
+            "end": 106.02,
+            "word": ".30."
+          },
+          {
+            "start": 106.5,
+            "end": 106.78,
+            "word": " Please"
+          },
+          {
+            "start": 106.78,
+            "end": 107.04,
+            "word": " keep"
+          },
+          {
+            "start": 107.04,
+            "end": 107.24,
+            "word": " the"
+          },
+          {
+            "start": 107.24,
+            "end": 107.62,
+            "word": " original"
+          },
+          {
+            "start": 107.62,
+            "end": 108.08,
+            "word": " recording"
+          },
+          {
+            "start": 108.08,
+            "end": 108.38,
+            "word": " and"
+          },
+          {
+            "start": 108.38,
+            "end": 108.66,
+            "word": " review"
+          }
+        ]
+      },
+      {
+        "start": 108.66,
+        "end": 116.92,
+        "text": " the final version. Welcome to the subtitle workshop. Import a video, check every sentence",
+        "words": [
+          {
+            "start": 108.66,
+            "end": 108.86,
+            "word": " the"
+          },
+          {
+            "start": 108.86,
+            "end": 109.18,
+            "word": " final"
+          },
+          {
+            "start": 109.18,
+            "end": 109.64,
+            "word": " version."
+          },
+          {
+            "start": 112.9,
+            "end": 113.1,
+            "word": " Welcome"
+          },
+          {
+            "start": 113.1,
+            "end": 113.38,
+            "word": " to"
+          },
+          {
+            "start": 113.38,
+            "end": 113.5,
+            "word": " the"
+          },
+          {
+            "start": 113.5,
+            "end": 114.06,
+            "word": " subtitle"
+          },
+          {
+            "start": 114.06,
+            "end": 114.54,
+            "word": " workshop."
+          },
+          {
+            "start": 114.98,
+            "end": 115.2,
+            "word": " Import"
+          },
+          {
+            "start": 115.2,
+            "end": 115.38,
+            "word": " a"
+          },
+          {
+            "start": 115.38,
+            "end": 115.72,
+            "word": " video,"
+          },
+          {
+            "start": 116.06,
+            "end": 116.26,
+            "word": " check"
+          },
+          {
+            "start": 116.26,
+            "end": 116.54,
+            "word": " every"
+          },
+          {
+            "start": 116.54,
+            "end": 116.92,
+            "word": " sentence"
+          }
+        ]
+      },
+      {
+        "start": 117.28,
+        "end": 123.76,
+        "text": " and export the final subtitles. The meeting begins at 9.30. Please keep the original",
+        "words": [
+          {
+            "start": 117.28,
+            "end": 117.6,
+            "word": " and"
+          },
+          {
+            "start": 117.6,
+            "end": 118.02,
+            "word": " export"
+          },
+          {
+            "start": 118.02,
+            "end": 118.22,
+            "word": " the"
+          },
+          {
+            "start": 118.22,
+            "end": 118.54,
+            "word": " final"
+          },
+          {
+            "start": 118.54,
+            "end": 119.1,
+            "word": " subtitles."
+          },
+          {
+            "start": 120.24,
+            "end": 120.54,
+            "word": " The"
+          },
+          {
+            "start": 120.54,
+            "end": 120.8,
+            "word": " meeting"
+          },
+          {
+            "start": 120.8,
+            "end": 121.22,
+            "word": " begins"
+          },
+          {
+            "start": 121.22,
+            "end": 121.48,
+            "word": " at"
+          },
+          {
+            "start": 121.48,
+            "end": 121.74,
+            "word": " 9"
+          },
+          {
+            "start": 121.74,
+            "end": 122.16,
+            "word": ".30."
+          },
+          {
+            "start": 122.6,
+            "end": 122.9,
+            "word": " Please"
+          },
+          {
+            "start": 122.9,
+            "end": 123.16,
+            "word": " keep"
+          },
+          {
+            "start": 123.16,
+            "end": 123.38,
+            "word": " the"
+          },
+          {
+            "start": 123.38,
+            "end": 123.76,
+            "word": " original"
+          }
+        ]
+      },
+      {
+        "start": 123.76,
+        "end": 125.7,
+        "text": " recording and review the final version.",
+        "words": [
+          {
+            "start": 123.76,
+            "end": 124.3,
+            "word": " recording"
+          },
+          {
+            "start": 124.3,
+            "end": 124.5,
+            "word": " and"
+          },
+          {
+            "start": 124.5,
+            "end": 124.78,
+            "word": " review"
+          },
+          {
+            "start": 124.78,
+            "end": 124.98,
+            "word": " the"
+          },
+          {
+            "start": 124.98,
+            "end": 125.28,
+            "word": " final"
+          },
+          {
+            "start": 125.28,
+            "end": 125.7,
+            "word": " version."
+          }
+        ]
+      }
+    ],
+    "character_errors": 80,
+    "reference_characters": 1328,
+    "cer": 0.060240963855421686,
+    "out_of_bounds": 0,
+    "adjacent_duplicates": 0
+  },
+  {
+    "sample": "music",
+    "iteration": 1,
+    "mode": "baseline",
+    "duration": 13.12275,
+    "model_load_seconds": 0.2736247910070233,
+    "first_result_seconds": 4.173701417050324,
+    "total_seconds": 4.173945875023492,
+    "process_peak_rss_bytes": 1877213184,
+    "segments": [
+      {
+        "start": 0.0,
+        "end": 6.28,
+        "text": " Welcome to the subtitle workshop, import a video, check every sentence, and export the final subtitles.",
+        "words": [
+          {
+            "start": 0.0,
+            "end": 0.26,
+            "word": " Welcome"
+          },
+          {
+            "start": 0.26,
+            "end": 0.52,
+            "word": " to"
+          },
+          {
+            "start": 0.52,
+            "end": 0.64,
+            "word": " the"
+          },
+          {
+            "start": 0.64,
+            "end": 1.22,
+            "word": " subtitle"
+          },
+          {
+            "start": 1.22,
+            "end": 1.66,
+            "word": " workshop,"
+          },
+          {
+            "start": 2.06,
+            "end": 2.36,
+            "word": " import"
+          },
+          {
+            "start": 2.36,
+            "end": 2.52,
+            "word": " a"
+          },
+          {
+            "start": 2.52,
+            "end": 2.84,
+            "word": " video,"
+          },
+          {
+            "start": 3.18,
+            "end": 3.4,
+            "word": " check"
+          },
+          {
+            "start": 3.4,
+            "end": 3.7,
+            "word": " every"
+          },
+          {
+            "start": 3.7,
+            "end": 4.1,
+            "word": " sentence,"
+          },
+          {
+            "start": 4.62,
+            "end": 4.76,
+            "word": " and"
+          },
+          {
+            "start": 4.76,
+            "end": 5.16,
+            "word": " export"
+          },
+          {
+            "start": 5.16,
+            "end": 5.36,
+            "word": " the"
+          },
+          {
+            "start": 5.36,
+            "end": 5.68,
+            "word": " final"
+          },
+          {
+            "start": 5.68,
+            "end": 6.28,
+            "word": " subtitles."
+          }
+        ]
+      },
+      {
+        "start": 7.06,
+        "end": 12.86,
+        "text": " The meeting begins at 9.30. Please keep the original recording and review the final version.",
+        "words": [
+          {
+            "start": 7.06,
+            "end": 7.68,
+            "word": " The"
+          },
+          {
+            "start": 7.68,
+            "end": 7.94,
+            "word": " meeting"
+          },
+          {
+            "start": 7.94,
+            "end": 8.42,
+            "word": " begins"
+          },
+          {
+            "start": 8.42,
+            "end": 8.62,
+            "word": " at"
+          },
+          {
+            "start": 8.62,
+            "end": 8.86,
+            "word": " 9"
+          },
+          {
+            "start": 8.86,
+            "end": 9.32,
+            "word": ".30."
+          },
+          {
+            "start": 9.8,
+            "end": 10.04,
+            "word": " Please"
+          },
+          {
+            "start": 10.04,
+            "end": 10.3,
+            "word": " keep"
+          },
+          {
+            "start": 10.3,
+            "end": 10.52,
+            "word": " the"
+          },
+          {
+            "start": 10.52,
+            "end": 10.86,
+            "word": " original"
+          },
+          {
+            "start": 10.86,
+            "end": 11.4,
+            "word": " recording"
+          },
+          {
+            "start": 11.4,
+            "end": 11.64,
+            "word": " and"
+          },
+          {
+            "start": 11.64,
+            "end": 11.92,
+            "word": " review"
+          },
+          {
+            "start": 11.92,
+            "end": 12.12,
+            "word": " the"
+          },
+          {
+            "start": 12.12,
+            "end": 12.44,
+            "word": " final"
+          },
+          {
+            "start": 12.44,
+            "end": 12.86,
+            "word": " version."
+          }
+        ]
+      }
+    ],
+    "character_errors": 10,
+    "reference_characters": 166,
+    "cer": 0.060240963855421686,
+    "out_of_bounds": 0,
+    "adjacent_duplicates": 0
+  }
+]

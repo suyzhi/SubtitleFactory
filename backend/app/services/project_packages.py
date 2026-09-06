@@ -209,8 +209,8 @@ def import_project_package(path: str) -> dict:
     project.update({
         "id": project_id, "video_path": media_paths.get("video"), "audio_path": media_paths.get("audio"),
         "thumbnail_path": media_paths.get("thumbnail"), "thumbnail_url": None,
-        "media_status": "ready" if media_paths.get("video") or project.get("media_mode") == "web" else "relink_required",
-        "media_mode": project.get("media_mode") if project.get("media_mode") in {"local", "web"} else "local",
+        "media_status": "ready" if media_paths.get("video") else "relink_required",
+        "media_mode": "local",
         "updated_at": now,
     })
     project_columns = [

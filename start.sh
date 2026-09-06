@@ -1,54 +1,42 @@
 #!/bin/bash
-# 字幕工厂 - 一键启动（后端 + 前端开发模式）
-# 需要先安装依赖
-
+# Run the personal local server and browser UI. Ctrl+C stops both services.
+set -euo pipefail
 DIR="$(cd "$(dirname "$0")" && pwd)"
-DEV_TOKEN="subtitle-factory-local-development"
-export SUBTITLE_FACTORY_API_TOKEN="$DEV_TOKEN"
-export VITE_API_TOKEN="$DEV_TOKEN"
-
-echo "🎬 字幕工厂 - 一键启动"
-echo "======================="
-
-# 启动后端
-echo "📦 启动后端服务..."
+if [ ! -x "$DIR/backend/.venv/bin/python" ] || [ ! -d "$DIR/frontend/node_modules" ]; then
+    echo "请先安装 backend/.venv 和 frontend/node_modules 中的项目依赖。"
+    exit 1
+fi
+for port in 8000 5173; do
+    if lsof -nP -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1; then
+        echo "端口 $port 已被占用，请先停止原有服务。"
+        exit 1
+    fi
+done
+BACKEND_PID=""
+FRONTEND_PID=""
+cleanup() {
+    trap - EXIT INT TERM
+    [ -z "$FRONTEND_PID" ] || kill "$FRONTEND_PID" 2>/dev/null || true
+    [ -z "$BACKEND_PID" ] || kill "$BACKEND_PID" 2>/dev/null || true
+    wait 2>/dev/null || true
+}
+trap cleanup EXIT
+trap 'exit 130' INT TERM
 cd "$DIR/backend"
-if [ ! -f ".env" ]; then
-    cp .env.example .env
-    echo "⚠️  请编辑 backend/.env 填入 LLM_API_KEY"
-fi
-
-if [ ! -d ".venv" ]; then
-    echo "📦 创建虚拟环境..."
-    python3 -m venv .venv
-fi
-source .venv/bin/activate
-pip install -q -r requirements.txt 2>/dev/null
-
-# 后台启动后端
-python3 -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload &
+.venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 &
 BACKEND_PID=$!
-echo "✅ 后端已启动 (PID: $BACKEND_PID)"
-echo "📖 API 文档: http://127.0.0.1:8000/docs"
-
-# 等待后端启动
-sleep 2
-
-# 启动前端
-echo ""
-echo "📦 启动前端开发服务器..."
 cd "$DIR/frontend"
-npm install -q 2>/dev/null
-npm run dev &
+VITE_API_BASE_URL=same-origin node node_modules/vite/bin/vite.js --host 127.0.0.1 --port 5173 --strictPort &
 FRONTEND_PID=$!
-echo "✅ 前端已启动 (PID: $FRONTEND_PID)"
-
-echo ""
-echo "======================="
-echo "🌐 前端:   http://localhost:5173"
-echo "📖 API:    http://127.0.0.1:8000/docs"
-echo ""
-echo "按 Ctrl+C 停止所有服务"
-
-# 等待任一进程退出
-wait $BACKEND_PID $FRONTEND_PID
+for attempt in {1..60}; do
+    kill -0 "$BACKEND_PID" 2>/dev/null && kill -0 "$FRONTEND_PID" 2>/dev/null || exit 1
+    if curl -fsS --max-time 2 http://127.0.0.1:8000/openapi.json >/dev/null 2>&1 && curl -fsS --max-time 2 http://127.0.0.1:5173 >/dev/null 2>&1; then
+        echo "字幕工厂已就绪：http://127.0.0.1:5173"
+        echo "按 Ctrl+C 停止前后端。"
+        while kill -0 "$BACKEND_PID" 2>/dev/null && kill -0 "$FRONTEND_PID" 2>/dev/null; do sleep 1; done
+        exit 1
+    fi
+    sleep 1
+done
+echo "服务启动超时，请检查上方日志。"
+exit 1

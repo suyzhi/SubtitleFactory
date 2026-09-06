@@ -31,4 +31,11 @@ describe('loadAppBootstrap', () => {
     const [activeCall, deletedCall] = vi.mocked(api.listProjects).mock.invocationCallOrder;
     expect(activeCall).toBeLessThan(deletedCall);
   });
+  it('lets the paginated library own its reads without duplicate startup requests', async () => {
+    const snapshot = await loadAppBootstrap(false);
+    expect(snapshot.app.settings.startup_behavior).toBe('project_library');
+    expect(api.listProjects).not.toHaveBeenCalled();
+    expect(api.getAISettings).not.toHaveBeenCalled();
+  });
+
 });

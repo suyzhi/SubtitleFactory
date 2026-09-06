@@ -1,0 +1,152 @@
+{
+  "id": "1d498f4c-f150-481c-96bc-955d184cceb6",
+  "project_id": "f63a1bb2-6e13-49d1-8d85-efb17152979b",
+  "type": "workflow",
+  "status": "cancelled",
+  "step": "transcribing",
+  "progress": 30.350322420634917,
+  "message": "任务已终止",
+  "error": null,
+  "error_code": null,
+  "recoverable": false,
+  "available_actions": [],
+  "parent_task_id": null,
+  "attempt": 1,
+  "details": {
+    "resume_policy": "automatic_local_only",
+    "resume_payload": {
+      "project_id": "f63a1bb2-6e13-49d1-8d85-efb17152979b",
+      "model": "small",
+      "language": "auto",
+      "source_url": null,
+      "runtime": "cpu",
+      "options": {
+        "enable_clean": false,
+        "enable_translate": false,
+        "target_language": "zh",
+        "clean_target_length": 42,
+        "text_processing_consent": false
+      }
+    },
+    "stages": {
+      "download": "success",
+      "extract_audio": "success",
+      "transcribe": "running"
+    },
+    "audio_cache_hit": false,
+    "audio_path": "/private/tmp/subtitle-workflow-qa-20260906/audio/f63a1bb2-6e13-49d1-8d85-efb17152979b/audio.wav",
+    "file_size": 4128812,
+    "engine": "PyAV",
+    "preparation_identity": [
+      "/private/tmp/subtitle-workflow-qa-20260906/audio/f63a1bb2-6e13-49d1-8d85-efb17152979b/audio.wav",
+      4128812,
+      1788664757628205715,
+      0,
+      null,
+      null,
+      "small",
+      "auto",
+      "cpu"
+    ],
+    "resolved_model": "small",
+    "model_resolution": {
+      "requested_model": "small",
+      "model_id": "small",
+      "source": "app_download",
+      "fallback_reason": "",
+      "fell_back": false
+    },
+    "model_cache_hit": false,
+    "model_load_seconds": 0.301,
+    "preparation_seconds": 2.416,
+    "mode": "incremental",
+    "model": "faster-whisper small",
+    "model_id": "small",
+    "model_source": "app_download",
+    "device": "cpu",
+    "is_generating_segments": true,
+    "is_postprocessing": false,
+    "generated_segments": 10,
+    "current_time": 38.5,
+    "audio_duration": 129.0,
+    "latest_segment": {
+      "index": 10,
+      "start": 33.94,
+      "end": 38.48,
+      "text": "Import a video, check every sentence, and export the final subtitles."
+    }
+  },
+  "logs": [
+    {
+      "time": "2026-09-06 11:19:17",
+      "level": "info",
+      "step": "extracting_audio",
+      "message": "提取所选范围的 16kHz 单声道音频",
+      "detail": "",
+      "suggestion": ""
+    },
+    {
+      "time": "2026-09-06 11:19:17",
+      "level": "info",
+      "step": "语音转写",
+      "message": "正在准备转写模型...",
+      "detail": "",
+      "suggestion": ""
+    },
+    {
+      "time": "2026-09-06 11:19:17",
+      "level": "info",
+      "step": "语音转写",
+      "message": "加载模型: small",
+      "detail": "",
+      "suggestion": ""
+    },
+    {
+      "time": "2026-09-06 11:19:20",
+      "level": "info",
+      "step": "语音转写",
+      "message": "模型 faster-whisper small 已加载，设备: cpu",
+      "detail": "精度: int8",
+      "suggestion": ""
+    },
+    {
+      "time": "2026-09-06 11:19:20",
+      "level": "info",
+      "step": "语音转写",
+      "message": "检测到语言: en, 音频时长: 129.0秒",
+      "detail": "",
+      "suggestion": ""
+    },
+    {
+      "time": "2026-09-06 11:19:39",
+      "level": "info",
+      "step": "语音转写",
+      "message": "已转写到 00:00:01 / 00:02:09，生成 1 条字幕",
+      "detail": "",
+      "suggestion": ""
+    },
+    {
+      "time": "2026-09-06 11:19:42",
+      "level": "info",
+      "step": "语音转写",
+      "message": "已转写到 00:00:38 / 00:02:09，生成 10 条字幕",
+      "detail": "",
+      "suggestion": ""
+    },
+    {
+      "time": "2026-09-06 11:20:05",
+      "level": "info",
+      "step": "transcribing",
+      "message": "任务已终止",
+      "detail": "已请求在安全检查点停止后台处理",
+      "suggestion": ""
+    }
+  ],
+  "created_at": "2026-09-06 11:19:17",
+  "updated_at": "2026-09-06 11:20:05",
+  "priority": 0,
+  "resource_class": "workflow",
+  "max_attempts": 1,
+  "next_retry_at": null,
+  "suggestion": ""
+}
