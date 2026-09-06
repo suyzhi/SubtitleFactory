@@ -548,7 +548,7 @@ body.is-resizing * { transition: none !important; }
    ────────────────────────────────────────────────────────────────────────── */
 
 .pro-app,
-.settings-backdrop.theme-dark {
+.settings-backdrop {
   --duration-fast: 140ms;
   --duration-normal: 200ms;
   --duration-panel: 260ms;
@@ -1608,7 +1608,7 @@ body.is-resizing * { transition: none !important; }
 .library-runtime-card.connecting strong { color: var(--yellow); }
 .library-runtime-card.error strong { color: var(--red); }
 .app-library .library-switcher {
-  align-self: flex-start; width: max-content; min-height: 42px; margin-bottom: 24px; padding: 4px;
+  align-self: flex-start; width: max-content; min-height: 48px; height: 48px; flex-basis: 48px; margin-bottom: 16px; padding: 7px;
   border: 1px solid var(--border); border-radius: 11px; background: var(--surface);
 }
 .app-library .library-switcher button { min-width: 112px; height: 32px; padding: 0 15px; border-radius: 7px; font-size: 13px; }
@@ -1714,7 +1714,7 @@ body.is-resizing * { transition: none !important; }
 .project-workspace-nav button.active { background: var(--accent-soft); color: var(--accent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 26%, transparent); }
 .project-workspace-nav span { font-size: 14px; font-weight: 650; }
 .project-workspace-nav small { overflow: hidden; font-size: 11px; opacity: .72; text-overflow: ellipsis; white-space: nowrap; }
-.workspace-tools-button { border-left: 1px solid var(--border-soft) !important; }
+.workspace-tools-button { border-left-color: transparent !important; }
 .workspace-page-heading {
   display: flex; align-items: center; justify-content: space-between; gap: 24px;
   padding: 11px clamp(24px, 3.5vw, 52px); border-bottom: 1px solid var(--border-soft); background: var(--window-bg);
@@ -2968,17 +2968,17 @@ body.is-resizing * { transition: none !important; }
 .transcription-setup > label { display:grid; gap:6px; margin:12px 0; }
 .transcription-setup fieldset { border:1px solid var(--border); border-radius:8px; margin:14px 0; padding:12px; min-width:0; }
 .transcription-setup button[aria-pressed=true] { background:var(--accent-soft); color:var(--accent); }
-.library-pagination { display:flex; flex-wrap:wrap; align-items:center; gap:10px; padding:10px clamp(18px,3vw,42px); color:var(--text-2); font-size:12px; }
+.library-pagination { display:flex; flex-wrap:wrap; align-items:center; gap:10px; padding:10px 0; color:var(--text-2); font-size:12px; }
 .library-pagination label { display:flex; align-items:center; gap:8px; }
 .library-pagination select { background:var(--surface); color:var(--text); border:1px solid var(--border); border-radius:6px; padding:8px; }
 .library-pagination .button { padding:6px 10px; min-height:32px; }
 .app-library .library-list-view .project-group-items { display:block; }
-.app-library .library-list-view .project-card-shell { margin:6px 0; }
-.app-library .library-list-view .project-card { display:flex; align-items:center; min-height:76px; }
-.app-library .library-list-view .project-thumb { width:90px; height:58px; min-height:58px; flex:0 0 90px; border-radius:8px; }
-.app-library .library-list-view .project-card-copy { flex:1; padding:8px 16px; min-width:0; }
+.app-library .library-list-view .project-card-shell { min-height:0; margin:0 0 8px; }
+.app-library .library-list-view .project-card { display:flex; align-items:center; min-height:82px; padding:10px 48px 10px 10px; }
+.app-library .library-list-view .project-thumb { width:90px; height:58px; min-height:58px; flex:0 0 90px; align-self:center; border-radius:8px; }
+.app-library .library-list-view .project-card-copy { flex:1; padding:0 14px; min-width:0; background:transparent; }
 .app-library .library-list-view .project-card-copy strong { -webkit-line-clamp:1; }
-.app-library .library-list-view .project-more { top:18px; }
+.app-library .library-list-view .project-more { top:50%; right:12px; transform:translateY(-50%); opacity:1; }
 @media(max-height:760px) { .editor-actions { padding:6px 12px; } .editor-workbench .subtitle-table-header { height:38px; flex-basis:38px; padding:4px 12px; } .editor-workbench .subtitle-find-replace { padding:4px 8px; } }
 
 .export-options { max-width:680px; display:grid; gap:16px; padding-block:24px; }
@@ -3031,7 +3031,7 @@ body.is-resizing * { transition: none !important; }
 .editor-transcript .subtitle-table .virtual-spacer td { padding:0; }
 .editor-transcript .subtitle-table th { font-size:11px; height:32px; color:var(--text-2); }
 .editor-transcript .subtitle-table .col-idx { width:64px; }
-.editor-transcript .subtitle-table .col-time { width:94px; font-size:11px; }
+.editor-transcript .subtitle-table .col-time { width:94px; font-size:11px; vertical-align:middle; }
 .editor-transcript .subtitle-table .col-lock { width:28px; }
 .editor-transcript .text-preview { white-space:pre-wrap; overflow-wrap:anywhere; text-overflow:clip; line-height:1.6; }
 .editor-transcript .subtitle-table-header { flex-wrap:wrap; gap:6px 12px; padding:8px 12px; height:auto; }
@@ -3068,3 +3068,16 @@ body.is-resizing * { transition: none !important; }
   .editor-workspace .style-canvas { padding:10px 12px; gap:8px; }
   .editor-workspace .style-controls-page { border-left:0; border-top:1px solid var(--border); }
 }
+
+/* Library and floating surfaces share the same content edges. */
+.app-library .library-filters { padding-inline:0; }
+.app-library .library-list-view .project-card:hover { transform:none; box-shadow:var(--shadow-card); }
+.editor-workspace > .workspace-tool-panel { top:68px; right:8px; bottom:8px; border:1px solid var(--border); border-radius:16px; animation:workspace-tools-in 220ms var(--ease-standard); }
+@keyframes workspace-tools-in { from { opacity:0; transform:translateX(24px); } to { opacity:1; transform:translateX(0); } }
+.motion-off .workspace-tool-panel { animation:none; }
+@media (prefers-reduced-motion:reduce) { .workspace-tool-panel { animation:none; } }
+.workspace-tool-panel .task-settings-body { padding:16px; }
+.workspace-tool-panel .process-settings-content { padding:0; }
+.workspace-tool-panel .process-diagnostics { margin:0 16px 16px; padding:0; }
+.workspace-tool-panel .process-diagnostics > div { grid-template-columns:minmax(0,1fr); }
+.editor-workspace .style-controls-page { margin:8px; border:1px solid var(--border); border-radius:16px; }
