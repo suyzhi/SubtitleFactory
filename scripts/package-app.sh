@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-VERSION="0.4.1"
+VERSION="0.5.0"
 UI_MARKER="subtitle-factory-ui:professional-v2"
 UI_LAYOUT_MARKER="subtitle-factory-ui:library-workspace-v2"
 OLD_UI_MARKER="ai-settings-dialog"

@@ -213,9 +213,9 @@ function settingsProps(overrides: Partial<ComponentProps<typeof SettingsCenter>>
 describe('SettingsCenter model catalog', () => {
   it('shows the package version before the backend health check is ready', () => {
     render(<SettingsCenter {...settingsProps({ health: null })}/>);
-    expect(screen.getByText('Version 0.4.1')).toBeInTheDocument();
+    expect(screen.getByText(`Version ${__APP_VERSION__}`)).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /快捷键与关于/ }));
-    expect(screen.getByText('字幕工厂 0.4.1')).toBeInTheDocument();
+    expect(screen.getByText(`字幕工厂 ${__APP_VERSION__}`)).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '查看完整隐私政策' }));
     expect(api.openPublicLink).toHaveBeenCalledWith('privacy');
   });

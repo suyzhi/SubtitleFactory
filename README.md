@@ -1,8 +1,8 @@
-# 字幕工厂 0.4.1
+# 字幕工厂 0.5.0
 
 字幕工厂是一款面向搭载 macOS 14 Sonoma 或更高版本的 Apple Silicon Mac 的字幕工作台：导入本地视频或粘贴 YouTube 链接后，下载或导入到本地，选择模型与运行设备后准备音频并转写，再按需进行 AI 整理、翻译与导出。
 
-## v0.4.1 当前能力
+## v0.5.0 当前能力
 
 - 个人本地工作台：`./start.sh` 启动前后端，普通开发模式无需会话令牌，保留本地来源限制及 API 密钥保护；打包模式仍使用会话令牌和媒体签名。
 - 专业编辑器：波形时间轴、时间码编辑、拆分/合并、批量替换、持久化撤销/重做与可恢复草稿。
@@ -28,9 +28,9 @@
 
 打开 http://127.0.0.1:5173/ 使用；后端为 http://127.0.0.1:8000/。启动脚本遇到占用端口会退出，不会杀死既有进程。
 
-本轮交付为源码开发服务，不重新打包。以下 App/DMG 是历史交付，不能代表当前源码：
+v0.5.0「UI 更新」提供 App 与 DMG；也可继续使用上述开发服务。
 
-历史 v0.4.1 App 位于：
+v0.5.0 App 位于：
 
 ```text
 字幕工厂.app
@@ -45,8 +45,8 @@ open "字幕工厂.app"
 DMG 与校验文件位于仓库根目录：
 
 ```text
-字幕工厂_0.4.1_aarch64.dmg
-字幕工厂_0.4.1_aarch64.dmg.sha256
+字幕工厂_0.5.0_aarch64.dmg
+字幕工厂_0.5.0_aarch64.dmg.sha256
 ```
 
 ## 使用流程
@@ -214,4 +214,4 @@ npm run build
 
 ## 发布说明
 
-当前 v0.4.1 根目录 App/DMG 使用本机 ad-hoc 签名，适合本机安装与测试，不代表已经完成 Apple 公证。`字幕工厂-AppStore-QA.app` 只验证沙盒产品路径，同样不可上传。公开直装分发仍需 Developer ID、公证、stapling 与 Gatekeeper 验证；Mac App Store 提交还需要正式 App ID、Mac App Distribution / Installer Distribution 证书、provisioning profile、完整 Xcode 和 App Store Connect 元数据。
+当前 v0.5.0 根目录 App/DMG 使用本机 ad-hoc 签名，适合本机安装与测试，不代表已经完成 Apple 公证。`字幕工厂-AppStore-QA.app` 只验证沙盒产品路径，同样不可上传。公开直装分发仍需 Developer ID、公证、stapling 与 Gatekeeper 验证；Mac App Store 提交还需要正式 App ID、Mac App Distribution / Installer Distribution 证书、provisioning profile、完整 Xcode 和 App Store Connect 元数据。

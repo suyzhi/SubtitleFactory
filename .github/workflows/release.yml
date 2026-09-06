@@ -77,6 +77,6 @@ jobs:
         with:
           name: subtitle-factory-${{ github.ref_name }}-aarch64
           path: |
-            字幕工厂_0.4.1_aarch64.dmg
-            字幕工厂_0.4.1_aarch64.dmg.sha256
+            字幕工厂_*_aarch64.dmg
+            字幕工厂_*_aarch64.dmg.sha256
           if-no-files-found: error

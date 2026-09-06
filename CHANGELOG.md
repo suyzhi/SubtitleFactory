@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.0 UI 更新 — 2026-09-07
+
+- 优化独立项目库的紧凑列表、封面与操作按钮居中、筛选栏对齐和切换控件留白。
+- 编辑工作区支持自动、左右、上下布局与可记忆比例，改善字幕阅读、时间码居中、样式预览和导出操作。
+- 恢复设置中心和侧栏圆角，为任务面板加入滑入动画，统一任务卡片边缘，并补充整理入口。
+- 保留本地播放、CPU 模型与媒体准备缓存；改进候选比较、取消收尾及未完成草稿恢复。
+- 同步桌面 App、前后端及发布元数据为 0.5.0。
+
 ## 0.4.1 UI 修复与美化 — 2026-08-14
 
 - Styled previously-unstyled elements: player empty state, process-timeline empty state / step number / current badge, log level icons and detail blocks, stats labels, task-drawer failure cards, and playlist item errors.
