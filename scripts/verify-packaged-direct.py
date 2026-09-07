@@ -53,12 +53,12 @@ def verify_direct_api(
     common.require(capabilities.get("channel") == "direct", "直装 App 没有运行在 direct 通道")
     for key in (
         "youtube",
-        "browser_cookies",
         "custom_download_directory",
         "filesystem_automation",
         "external_runtime_paths",
     ):
         common.require(capabilities.get(key) is True, f"直装能力 {key} 没有开启")
+    common.require(capabilities.get("browser_cookies") is False, "直装 App 不应读取浏览器凭据")
     common.require(
         runtime.get("data_directory") == str(data_directory),
         "sidecar 没有使用验收器指定的隔离数据目录",
@@ -208,7 +208,7 @@ def verify_app(
             )
             print(
                 f"{label} API 通过：401 鉴权、{EXPECTED_MODEL_COUNT} 个模型、"
-                "5 项直装能力、真实 Deno/FFmpeg、本地导入与精确清理"
+                "4 项直装能力、禁用浏览器凭据、真实 Deno/FFmpeg、本地导入与精确清理"
             )
             common.verify_lifecycle(
                 executable,
