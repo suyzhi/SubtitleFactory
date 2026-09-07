@@ -288,8 +288,10 @@ describe('SettingsCenter model catalog', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /AI 服务/ }));
     const providerSection = (await screen.findByText('模型供应商')).closest('section');
-    const card = providerSection?.querySelector('article.provider-card') || null;
+    const card = providerSection?.querySelector('details.provider-card') || null;
     expect(card).not.toBeNull();
+    expect(card).not.toHaveAttribute("open");
+    fireEvent.click((card as HTMLElement).querySelector("summary")!);
     fireEvent.click(within(card as HTMLElement).getByRole('button', { name: '保存' }));
 
     await waitFor(() => expect(onAIProvidersChange).toHaveBeenLastCalledWith({
@@ -415,8 +417,10 @@ describe('SettingsCenter model catalog', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /AI 服务/ }));
     const providerSection = (await screen.findByText('模型供应商')).closest('section');
-    const card = providerSection?.querySelector('article.provider-card') || null;
+    const card = providerSection?.querySelector('details.provider-card') || null;
     expect(card).not.toBeNull();
+    expect(card).not.toHaveAttribute("open");
+    fireEvent.click((card as HTMLElement).querySelector("summary")!);
     const modelInput = within(card as HTMLElement).getByLabelText('模型');
     modelInput.focus();
     fireEvent.change(modelInput, { target: { value: 'deepseek-v4-f' } });

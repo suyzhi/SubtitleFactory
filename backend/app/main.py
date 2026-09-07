@@ -53,7 +53,6 @@ from .services.distribution import (
     require_project_distribution,
 )
 from .services.playlist_batches import recover_playlist_batches
-from .services.secret_store import migrate_database_secrets
 from .services.watch_runtime import resume_interrupted_workflows, watch_loop
 from .utils.task_manager import TaskCreationBlocked, task_manager
 from .version import VERSION
@@ -84,14 +83,6 @@ try:
     scheduled_backup()
 except Exception:
     logger.exception("自动数据库备份失败")
-try:
-    migrated_secrets = migrate_database_secrets()
-    if migrated_secrets:
-        logger.info("已将 %s 个 AI 密钥迁移到 macOS Keychain", migrated_secrets)
-except Exception:
-    logger.exception("AI 密钥迁移到 macOS Keychain 失败")
-    if is_frozen_app():
-        raise
 
 # ── 运行期服务 ──
 @asynccontextmanager

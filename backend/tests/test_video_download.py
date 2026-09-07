@@ -72,7 +72,7 @@ class DownloadQualityTests(unittest.TestCase):
             "OUTPUT_PERMISSION_DENIED",
         )
 
-    def test_members_only_metadata_retries_once_with_chrome_and_then_succeeds(self):
+    def test_members_only_metadata_fails_without_reading_browser_credentials(self):
         captured_options = []
 
         class FakeYoutubeDL:
@@ -104,17 +104,13 @@ class DownloadQualityTests(unittest.TestCase):
             patch.object(downloader.task_manager, "checkpoint"),
             patch.object(downloader.task_manager, "update_task"),
         ):
-            info, details = downloader.extract_youtube_info(
-                "https://www.youtube.com/watch?v=LWq_LwsKLTI",
-                task_id="membership-test",
-            )
-
-        self.assertEqual(info["id"], "LWq_LwsKLTI")
-        self.assertTrue(details["authenticated_attempted"])
-        self.assertEqual([item["mode"] for item in details["attempts"]], ["anonymous", "chrome"])
-        self.assertEqual(len(captured_options), 2)
+            with self.assertRaises(downloader.DownloadServiceError) as raised:
+                downloader.extract_youtube_info(
+                    "https://www.youtube.com/watch?v=LWq_LwsKLTI", task_id="membership-test",
+                )
+        self.assertEqual(len(captured_options), 1)
         self.assertNotIn("cookiesfrombrowser", captured_options[0])
-        self.assertEqual(captured_options[1]["cookiesfrombrowser"], ("chrome",))
+        self.assertEqual(raised.exception.details["attempts"], [{"mode": "anonymous", "authenticated": False}])
 
     def test_public_metadata_never_reads_chrome_cookies(self):
         captured_options = []
@@ -221,7 +217,7 @@ class DownloadQualityTests(unittest.TestCase):
             {"deno": {"path": "/app/bin/deno"}},
         )
 
-    def test_media_stream_403_retries_once_with_chrome_cookies(self):
+    def test_media_stream_403_does_not_read_browser_credentials(self):
         captured_options = []
 
         class FakeYoutubeDL:
@@ -267,18 +263,14 @@ class DownloadQualityTests(unittest.TestCase):
                     "video_codec": "av1", "audio_codec": "opus", "file_size": 19,
                 }),
             ):
-                result = downloader.download_video(
-                    "task-id",
-                    "https://www.youtube.com/watch?v=video-id",
-                    "project-id",
-                    download_dir=folder,
-                )
-
-        self.assertTrue(Path(result).name.startswith("video-video-id-"))
+                with self.assertRaises(downloader.DownloadServiceError):
+                    downloader.download_video(
+                        "task-id", "https://www.youtube.com/watch?v=video-id",
+                        "project-id", download_dir=folder,
+                    )
         self.assertFalse((Path(folder) / "project-id" / ".download-task-id").exists())
-        self.assertEqual(len(captured_options), 2)
+        self.assertEqual(len(captured_options), 1)
         self.assertNotIn("cookiesfrombrowser", captured_options[0])
-        self.assertEqual(captured_options[1]["cookiesfrombrowser"], ("chrome",))
 
     def test_quality_limit_and_container_settings_change_yt_dlp_options(self):
         limited = downloader._download_options(

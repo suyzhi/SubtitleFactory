@@ -9,7 +9,7 @@
 - `pkg:cargo/android_logger@0.15.1` — MIT OR Apache-2.0
 - `pkg:cargo/android_system_properties@0.1.5` — MIT/Apache-2.0
 - `pkg:cargo/anyhow@1.0.103` — MIT OR Apache-2.0
-- `pkg:cargo/app@0.5.0` — See upstream package metadata
+- `pkg:cargo/app@5.0.1` — See upstream package metadata
 - `pkg:cargo/arrayvec@0.7.8` — MIT OR Apache-2.0
 - `pkg:cargo/async-broadcast@0.7.2` — MIT OR Apache-2.0
 - `pkg:cargo/async-channel@2.5.0` — Apache-2.0 OR MIT

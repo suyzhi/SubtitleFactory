@@ -53,7 +53,7 @@ def distribution_capabilities() -> DistributionCapabilities:
     return DistributionCapabilities(
         channel=APP_STORE_CHANNEL if app_store else DIRECT_CHANNEL,
         youtube=not app_store,
-        browser_cookies=not app_store,
+        browser_cookies=False,
         custom_download_directory=not app_store,
         filesystem_automation=not app_store,
         external_runtime_paths=not app_store,

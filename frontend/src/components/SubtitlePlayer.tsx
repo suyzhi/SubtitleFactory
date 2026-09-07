@@ -377,7 +377,7 @@ const SubtitlePlayer = forwardRef<SubtitlePlayerHandle, Props>(function Subtitle
               }} />
             <span className="player-time">{timecode(time)} / {timecode(duration)}</span>
             <span className="control-spacer" />
-            <AppSelect className="rate-select" label="播放速度" popoverMinWidth={112} value={String(rate)} onChange={value=>{
+            <AppSelect className="rate-select" label="播放速度" value={String(rate)} onChange={value=>{
               const next=Number(value);
               setRate(next);
               if(videoRef.current) videoRef.current.playbackRate=next;

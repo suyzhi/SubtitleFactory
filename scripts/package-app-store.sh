@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-VERSION="0.5.0"
+VERSION="5.0.1"
 BUNDLE_ID="com.subtitlefactory.desktop"
 TAURI_DIR="$ROOT/frontend/src-tauri"
 MODE="${1:-release}"

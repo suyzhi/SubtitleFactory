@@ -1,4 +1,4 @@
-VERSION = "0.5.0"
+VERSION = "5.0.1"
 PRODUCT_HTTP_NAME = "SubtitleFactory"
 
 

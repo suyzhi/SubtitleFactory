@@ -1419,13 +1419,13 @@ body.is-resizing * { transition: none !important; }
   box-shadow: var(--shadow-menu);
   isolation: isolate;
 }
-.app-select-popover.theme-dark {
+.app-select-popover.theme-dark, .app-select-shell.theme-dark {
   --elevated: #38322a; --surface-2: #332e27; --surface-3: #3d372f;
   --text: rgba(250,243,233,.94); --text-2: rgba(240,228,212,.68); --text-3: rgba(230,215,195,.46);
   --border: rgba(255,235,210,.12); --accent: #d97b56; --accent-soft: rgba(217,123,86,.16);
   --shadow-menu: 0 18px 60px rgba(0,0,0,.48), 0 2px 12px rgba(0,0,0,.3);
 }
-.app-select-popover.theme-light {
+.app-select-popover.theme-light, .app-select-shell.theme-light {
   --elevated: #fffefb; --surface-2: #f7f4ec; --surface-3: #efe9dd;
   --text: rgba(45,40,34,.9); --text-2: rgba(80,72,60,.74); --text-3: rgba(100,90,75,.52);
   --border: rgba(90,80,65,.2); --accent: #c96442; --accent-soft: rgba(201,100,66,.12);
@@ -3081,3 +3081,41 @@ body.is-resizing * { transition: none !important; }
 .workspace-tool-panel .process-diagnostics { margin:0 16px 16px; padding:0; }
 .workspace-tool-panel .process-diagnostics > div { grid-template-columns:minmax(0,1fr); }
 .editor-workspace .style-controls-page { margin:8px; border:1px solid var(--border); border-radius:16px; }
+
+/* Connected selects and aligned settings controls. */
+.app-select.open-below > :is(input,button) { border-bottom-left-radius:0; border-bottom-right-radius:0; }
+.app-select.open-above > :is(input,button) { border-top-left-radius:0; border-top-right-radius:0; }
+.app-select-popover { border-radius:0 0 10px 10px; animation:none; }
+.app-select-popover.above { border-radius:10px 10px 0 0; }
+.model-catalog-filters { align-items:end; }
+.model-catalog-filters :is(input,.app-select-trigger,.button) { height:36px; min-height:36px; }
+.model-catalog-row:has(.model-runtime-select) { grid-template-columns:10px minmax(0,1fr) minmax(150px,auto) !important; }
+.model-catalog-row:has(.model-runtime-select) > .model-runtime-select { width:100%; }
+.model-catalog-row > em { justify-self:end; max-width:100%; }
+.model-row-actions { align-items:center; }
+.provider-assignments { grid-template-columns:repeat(3,minmax(0,1fr)); padding-bottom:16px; }
+.provider-card-grid { align-items:start; padding-block:10px 16px; }
+.provider-card { display:block; }
+.provider-card > summary { cursor:pointer; display:flex; align-items:center; gap:8px; min-height:28px; list-style:none; }
+.provider-card > summary::-webkit-details-marker { display:none; }
+.provider-card > summary::before { content:'›'; font-size:18px; }
+.provider-card[open] > summary::before { transform:rotate(90deg); }
+.provider-card > summary span { margin-left:auto; color:var(--text-3); font-size:11px; }
+.provider-card > summary span.ready { color:var(--green); }
+.provider-card-body { display:grid; gap:10px; padding-top:14px; }
+.library-home .brand-block { align-self:start; align-items:flex-start; margin-top:14px; }
+.library-home .brand-block > strong { font-size:18px; line-height:24px; }
+.library-home .active-project-title { align-self:start; margin-top:14px; }
+@media (max-width:700px) { .provider-assignments { grid-template-columns:1fr; } }
+
+/* The expanded control is one portaled surface, including its trigger. */
+.app-select-shell { width:100%; }
+.app-select-shell.expanded { z-index:10000; display:flex; flex-direction:column; border:1px solid var(--border); border-radius:10px; background:var(--elevated); box-shadow:var(--shadow-menu); transform-origin:center 18px; transition:transform var(--duration-fast) var(--ease-standard); }
+.app-select-shell.expanded.above { flex-direction:column-reverse; transform-origin:center calc(100% - 18px); }
+.app-select-shell.expanded.pressed { transform:scale(.985); }
+.app-select-shell.expanded > :is(.app-select-trigger,input) { border:0; border-radius:9px 9px 0 0; flex:none; }
+.app-select-shell.expanded.above > :is(.app-select-trigger,input) { border-radius:0 0 9px 9px; }
+.app-select-shell > .app-select-popover { position:static; width:100%; border:0; border-top:1px solid var(--border); border-radius:0 0 9px 9px; box-shadow:none; transform:none; }
+.app-select-shell.above > .app-select-popover { border-top:0; border-bottom:1px solid var(--border); border-radius:9px 9px 0 0; }
+.app-select-shell .app-select-trigger:not(:disabled):active,
+.app-select-shell .app-select-options > button:not(:disabled):active { transform:none; }

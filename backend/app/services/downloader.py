@@ -8,7 +8,6 @@ import re
 import shutil
 import socket
 import subprocess
-import threading
 import uuid
 from collections.abc import Callable
 from importlib import import_module
@@ -64,7 +63,6 @@ _COOKIE_ACCESS_MARKERS = (
     "cookie database",
     "cookies database",
 )
-_COOKIE_READ_LOCK = threading.Lock()
 _T = TypeVar("_T")
 
 
@@ -197,7 +195,7 @@ def _classify_download_error(
         return DownloadServiceError(
             "无法读取 Google Chrome 登录状态",
             "COOKIE_ACCESS_FAILED", actions=["retry", "open_settings"],
-            suggestion="请退出可能锁定 Cookie 数据库的 Chrome 辅助进程，确认 macOS 钥匙串授权后重试",
+            suggestion="此链接可能需要登录或额外权限；请使用可公开下载的链接，或在浏览器中获取有权使用的媒体后本地导入",
             details=diagnostic,
         )
 
@@ -212,7 +210,7 @@ def _classify_download_error(
             "MEMBERSHIP_REQUIRED",
             auth_retry_eligible=not authenticated,
             actions=["retry"],
-            suggestion="请在 Google Chrome 中切换到有权限的 YouTube 账号并确认视频可播放，再重试",
+            suggestion="此链接可能需要登录或额外权限；请使用可公开下载的链接，或在浏览器中获取有权使用的媒体后本地导入",
             details=diagnostic,
         )
 
@@ -223,7 +221,7 @@ def _classify_download_error(
             "PRIVATE_VIDEO",
             auth_retry_eligible=not authenticated,
             actions=["retry"],
-            suggestion="请在 Google Chrome 中登录获授权账号并确认视频可播放，再重试",
+            suggestion="此链接可能需要登录或额外权限；请使用可公开下载的链接，或在浏览器中获取有权使用的媒体后本地导入",
             details=diagnostic,
         )
 
@@ -237,7 +235,7 @@ def _classify_download_error(
             "AGE_RESTRICTED",
             auth_retry_eligible=not authenticated,
             actions=["retry"],
-            suggestion="请在 Google Chrome 中使用已完成年龄验证的账号播放一次该视频，再重试",
+            suggestion="此链接可能需要登录或额外权限；请使用可公开下载的链接，或在浏览器中获取有权使用的媒体后本地导入",
             details=diagnostic,
         )
 
@@ -247,7 +245,7 @@ def _classify_download_error(
             "AUTH_REQUIRED",
             auth_retry_eligible=not authenticated,
             actions=["retry"],
-            suggestion="请先在 Google Chrome 中登录 YouTube 并确认该视频可播放，再回到 App 重试",
+            suggestion="此链接可能需要登录或额外权限；请使用可公开下载的链接，或在浏览器中获取有权使用的媒体后本地导入",
             details=diagnostic,
         )
 
@@ -265,7 +263,7 @@ def _classify_download_error(
             "MEDIA_ACCESS_DENIED",
             auth_retry_eligible=not authenticated,
             actions=["retry"],
-            suggestion="请先在 Google Chrome 中确认视频可播放；若仍失败，稍后等待 YouTube 媒体授权刷新",
+            suggestion="此链接可能需要登录或额外权限；请使用可公开下载的链接，或在浏览器中获取有权使用的媒体后本地导入",
             details=diagnostic,
         )
 
@@ -276,7 +274,7 @@ def _classify_download_error(
         return DownloadServiceError(
             "YouTube 暂时限制了请求频率",
             "RATE_LIMITED", actions=["retry"],
-            suggestion="请停止立即重试，在 Google Chrome 完成验证或等待一段时间后再试",
+            suggestion="此链接可能需要登录或额外权限；请使用可公开下载的链接，或在浏览器中获取有权使用的媒体后本地导入",
             details=diagnostic,
         )
 
@@ -364,7 +362,7 @@ def _classify_download_error(
         return DownloadServiceError(
             "YouTube 返回视频不可用",
             "DOWNLOAD_FAILED", actions=["retry"],
-            suggestion="请在 Google Chrome 中确认视频当前仍可播放，再重试",
+            suggestion="此链接可能需要登录或额外权限；请使用可公开下载的链接，或在浏览器中获取有权使用的媒体后本地导入",
             details=diagnostic,
         )
 
@@ -379,12 +377,6 @@ def _classify_download_error(
 
 def _needs_browser_auth(exc: BaseException) -> bool:
     return _classify_download_error(exc).auth_retry_eligible
-
-
-def _with_chrome_cookies(options: dict) -> dict:
-    authenticated = dict(options)
-    authenticated["cookiesfrombrowser"] = ("chrome",)
-    return authenticated
 
 
 def _resolve_deno_path() -> Optional[Path]:
@@ -402,79 +394,24 @@ def _execute_youtube_operation(
     resolve_result: Callable[[dict, yt_dlp.YoutubeDL], _T],
     auth_if_result: Callable[[dict], bool] | None = None,
 ) -> tuple[dict, _T, dict[str, Any]]:
-    """Run one anonymous attempt and, only when eligible, one Chrome attempt."""
+    """Download without reading browser credentials or prompting for passwords."""
     require_youtube_feature()
     normalized_url = normalize_youtube_url(url)
-    attempts: list[dict[str, Any]] = []
-
-    def run(attempt_options: dict, authenticated: bool) -> tuple[dict, _T]:
-        attempts.append({
-            "mode": "chrome" if authenticated else "anonymous",
-            "authenticated": authenticated,
-        })
-        if authenticated:
-            # Force the Chrome/Keychain read while serialized, then release the
-            # process lock before network transfer. The cookie jar stays only
-            # in this yt-dlp instance's memory.
-            with _COOKIE_READ_LOCK:
-                ydl = yt_dlp.YoutubeDL(attempt_options)
-                _ = getattr(ydl, "cookiejar", None)
-        else:
-            ydl = yt_dlp.YoutubeDL(attempt_options)
-        with ydl:
+    attempts = [{"mode": "anonymous", "authenticated": False}]
+    anonymous_options = {key: value for key, value in options.items() if key != "cookiesfrombrowser"}
+    try:
+        with yt_dlp.YoutubeDL(anonymous_options) as ydl:
             info = ydl.extract_info(normalized_url, download=download)
             task_manager.checkpoint(task_id)
-            return info, resolve_result(info, ydl)
-
-    try:
-        info, result = run(options, False)
+            result = resolve_result(info, ydl)
     except TaskCancelled:
         raise
-    except Exception as anonymous_exc:
-        classified = _classify_download_error(
-            anonymous_exc, authenticated=False, stage=stage,
-        )
-        if not classified.auth_retry_eligible:
-            classified.details["attempts"] = attempts
-            raise classified from anonymous_exc
-        task_manager.update_task(
-            task_id, step=stage, progress=4,
-            message="YouTube 要求权限验证，正在使用 Google Chrome 登录状态重试一次...",
-            details={"download": {
-                "authenticated_attempted": True,
-                "attempts": attempts,
-                "failure_stage": stage,
-            }},
-        )
-        try:
-            info, result = run(_with_chrome_cookies(options), True)
-        except TaskCancelled:
-            raise
-        except Exception as authenticated_exc:
-            final = _classify_download_error(
-                authenticated_exc, authenticated=True, stage=stage,
-            )
-            final.details["attempts"] = attempts
-            raise final from authenticated_exc
-    else:
-        if auth_if_result and auth_if_result(info):
-            task_manager.update_task(
-                task_id, step=stage, progress=4,
-                message="播放列表包含权限条目，正在使用 Google Chrome 登录状态重新解析一次...",
-            )
-            try:
-                info, result = run(_with_chrome_cookies(options), True)
-            except TaskCancelled:
-                raise
-            except Exception as authenticated_exc:
-                final = _classify_download_error(
-                    authenticated_exc, authenticated=True, stage=stage,
-                )
-                final.details["attempts"] = attempts
-                raise final from authenticated_exc
-
+    except Exception as exc:
+        classified = _classify_download_error(exc, authenticated=False, stage=stage)
+        classified.details["attempts"] = attempts
+        raise classified from exc
     return info, result, {
-        "authenticated_attempted": len(attempts) > 1,
+        "authenticated_attempted": False,
         "attempts": attempts,
         "failure_stage": "",
     }
