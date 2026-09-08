@@ -1,0 +1,35 @@
+{
+  "version": "5.0.1",
+  "build_source_commit": "0c9889d483907007340ff604e5c1d6ab6bf8ed42",
+  "source_tag": "v5.0.1",
+  "source_tag_commit": "c43d95f8a093f2d4910fae6271a1921c48fa676a",
+  "source_note": "Build commit additionally corrects the packaged verifier to require browser credential access to be disabled; application sources are unchanged from the version tag.",
+  "architecture": "arm64",
+  "minimum_macos": "14.0",
+  "signing": "ad-hoc; not notarized",
+  "assets": [
+    {
+      "name": "SubtitleFactory_5.0.1_aarch64.app.zip",
+      "size": 276462970,
+      "sha256": "f967d541379f0e11a48302df53cfa840fb0c71a1e5a3ea4ff4a2046e0e2dc2cd"
+    },
+    {
+      "name": "SubtitleFactory_5.0.1_aarch64.dmg",
+      "size": 275795355,
+      "sha256": "3d592e51aa6094c496723e456b7a8ed7481e4c62c96b230abe8f4d1cf5add6bb"
+    }
+  ],
+  "verification": {
+    "root_and_mounted_dmg": "API authentication, model catalog, bundled runtime tools, isolated local media import, normal and forced shutdown passed",
+    "model_catalog_count": 29,
+    "compatible_macho_count": 315,
+    "dmg_app_parity": {
+      "files": 2398,
+      "symlinks": 45,
+      "bytes": 795852013
+    },
+    "zip": "CRC and extracted App strict deep codesign passed",
+    "native_ui": "App launch, version 5.0.1, unified dropdown, label blank-area behavior and outside-click dismissal checked"
+  },
+  "scope": "Packaging and focused UI regression verification; no claim that every ASR model or cloud provider was exercised."
+}

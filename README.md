@@ -28,9 +28,9 @@
 
 打开 http://127.0.0.1:5173/ 使用；后端为 http://127.0.0.1:8000/。启动脚本遇到占用端口会退出，不会杀死既有进程。
 
-v5.0.1 本次更新提交源码与版本标签；已有 v0.5.0「UI 更新」App/DMG 不会自动更新，请使用上述开发服务查看新界面，或从新版本源码重新打包。
+v5.0.1 已提供 Apple Silicon App、DMG、App ZIP 与 SHA-256 校验文件，最低支持 macOS 14.0。下载见 [GitHub 发布页](https://github.com/suyzhi/SubtitleFactory/releases/tag/v5.0.1)。
 
-此前 v0.5.0 App 位于：
+v5.0.1 App 位于：
 
 ```text
 字幕工厂.app
@@ -45,8 +45,8 @@ open "字幕工厂.app"
 DMG 与校验文件位于仓库根目录：
 
 ```text
-字幕工厂_0.5.0_aarch64.dmg
-字幕工厂_0.5.0_aarch64.dmg.sha256
+字幕工厂_5.0.1_aarch64.dmg
+字幕工厂_5.0.1_aarch64.dmg.sha256
 ```
 
 ## 使用流程
@@ -214,4 +214,4 @@ npm run build
 
 ## 发布说明
 
-此前 v0.5.0 根目录 App/DMG 使用本机 ad-hoc 签名，适合本机安装与测试，不代表已经完成 Apple 公证。`字幕工厂-AppStore-QA.app` 只验证沙盒产品路径，同样不可上传。公开直装分发仍需 Developer ID、公证、stapling 与 Gatekeeper 验证；Mac App Store 提交还需要正式 App ID、Mac App Distribution / Installer Distribution 证书、provisioning profile、完整 Xcode 和 App Store Connect 元数据。
+当前 v5.0.1 根目录 App/DMG 使用本机 ad-hoc 签名，适合本机安装与测试，不代表已经完成 Apple 公证。`字幕工厂-AppStore-QA.app` 只验证沙盒产品路径，同样不可上传。公开直装分发仍需 Developer ID、公证、stapling 与 Gatekeeper 验证；Mac App Store 提交还需要正式 App ID、Mac App Distribution / Installer Distribution 证书、provisioning profile、完整 Xcode 和 App Store Connect 元数据。
