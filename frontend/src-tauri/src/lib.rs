@@ -142,13 +142,36 @@ fn restart_app(app: tauri::AppHandle) {
 #[tauri::command]
 fn reveal_path(path: String, managed_files: State<'_, ManagedFiles>) -> Result<(), String> {
     let candidate = validate_managed_path(&managed_files.root, Path::new(&path), false)?;
-    Command::new("/usr/bin/open")
-        .arg(&candidate)
-        .status()
-        .map_err(|error| error.to_string())?
-        .success()
-        .then_some(())
-        .ok_or_else(|| "无法在 Finder 中打开路径".into())
+    #[cfg(target_os = "macos")]
+    {
+        Command::new("/usr/bin/open")
+            .arg(&candidate)
+            .status()
+            .map_err(|error| error.to_string())?
+            .success()
+            .then_some(())
+            .ok_or_else(|| "无法在 Finder 中打开路径".into())
+    }
+    #[cfg(target_os = "windows")]
+    {
+        Command::new("explorer")
+            .arg(&candidate)
+            .status()
+            .map_err(|error| error.to_string())?
+            .success()
+            .then_some(())
+            .ok_or_else(|| "无法在资源管理器中打开路径".into())
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        Command::new("xdg-open")
+            .arg(&candidate)
+            .status()
+            .map_err(|error| error.to_string())?
+            .success()
+            .then_some(())
+            .ok_or_else(|| "无法打开路径".into())
+    }
 }
 
 fn backend_data_dir(app_data: &Path, session: &BackendSession) -> PathBuf {
@@ -450,7 +473,12 @@ fn start_backend(
     let mut command = if cfg!(debug_assertions) {
         let backend_dir = development_backend_dir();
         let configured = std::env::var_os("SUBTITLE_FACTORY_PYTHON").map(PathBuf::from);
-        let venv_python = backend_dir.join(".venv/bin/python");
+        let venv_rel = if cfg!(windows) {
+            ".venv/Scripts/python.exe"
+        } else {
+            ".venv/bin/python"
+        };
+        let venv_python = backend_dir.join(venv_rel);
         let python = configured
             .filter(|path| path.exists())
             .unwrap_or(venv_python);
@@ -481,9 +509,14 @@ fn start_backend(
     };
 
     if let Some(runtime_dir) = packaged_runtime.as_ref() {
-        let ffmpeg = runtime_dir.join("bin/ffmpeg");
-        let ffprobe = runtime_dir.join("bin/ffprobe");
-        let deno = runtime_dir.join("bin/deno");
+        let (ffmpeg_rel, ffprobe_rel, deno_rel) = if cfg!(target_os = "windows") {
+            ("bin/ffmpeg.exe", "bin/ffprobe.exe", "bin/deno.exe")
+        } else {
+            ("bin/ffmpeg", "bin/ffprobe", "bin/deno")
+        };
+        let ffmpeg = runtime_dir.join(ffmpeg_rel);
+        let ffprobe = runtime_dir.join(ffprobe_rel);
+        let deno = runtime_dir.join(deno_rel);
         if !ffmpeg.is_file() || !ffprobe.is_file() || (session.youtube_enabled && !deno.is_file()) {
             return Err(if session.youtube_enabled {
                 "App 内置 FFmpeg/FFprobe/Deno 缺失，发布包不完整".into()

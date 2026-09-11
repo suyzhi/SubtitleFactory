@@ -25,9 +25,6 @@ def _verify_runtime_dependencies() -> None:
     import av
     import ctranslate2
     import faster_whisper
-    import mlx.core as mx
-    import mlx_qwen3_asr
-    import mlx_whisper
     import numpy as np
     import onnxruntime
     import pysubs2
@@ -36,17 +33,36 @@ def _verify_runtime_dependencies() -> None:
     import tiktoken
     from PIL import Image
 
-    if not mx.is_available(mx.gpu):
-        raise RuntimeError("MLX Metal GPU is unavailable")
-    previous_device = mx.default_device()
-    mx.set_default_device(mx.gpu)
-    try:
-        array = mx.array([1, 2, 3]) + 1
-        mx.eval(array)
-        if array.tolist() != [2, 3, 4]:
-            raise RuntimeError("MLX runtime returned an unexpected result")
-    finally:
-        mx.set_default_device(previous_device)
+    versions = {
+        "av": av.__version__,
+        "faster_whisper": faster_whisper.__version__,
+        "sherpa_onnx": sherpa_onnx.__version__,
+    }
+
+    if sys.platform == "darwin":
+        import mlx.core as mx
+        import mlx_qwen3_asr
+        import mlx_whisper
+
+        if not mx.is_available(mx.gpu):
+            raise RuntimeError("MLX Metal GPU is unavailable")
+        previous_device = mx.default_device()
+        mx.set_default_device(mx.gpu)
+        try:
+            array = mx.array([1, 2, 3]) + 1
+            mx.eval(array)
+            if array.tolist() != [2, 3, 4]:
+                raise RuntimeError("MLX runtime returned an unexpected result")
+        finally:
+            mx.set_default_device(previous_device)
+
+        if "CoreMLExecutionProvider" not in onnxruntime.get_available_providers():
+            raise RuntimeError("ONNX Runtime does not expose Core ML")
+        if ctranslate2.get_cuda_device_count() != 0:
+            raise RuntimeError("macOS release unexpectedly reported a CUDA device")
+
+        versions["mlx_qwen3_asr"] = mlx_qwen3_asr.__version__
+        versions["mlx_whisper"] = mlx_whisper.__version__
 
     image = Image.new("RGB", (2, 2), color="black")
     image_buffer = io.BytesIO()
@@ -67,20 +83,7 @@ def _verify_runtime_dependencies() -> None:
         raise RuntimeError("tiktoken runtime failed to encode text")
     if not isinstance(pysubs2.SSAFile(), pysubs2.SSAFile):
         raise RuntimeError("pysubs2 runtime failed to create a subtitle file")
-    if "CoreMLExecutionProvider" not in onnxruntime.get_available_providers():
-        raise RuntimeError("ONNX Runtime does not expose Core ML")
-    if ctranslate2.get_cuda_device_count() != 0:
-        raise RuntimeError("macOS release unexpectedly reported a CUDA device")
 
-    # Keep explicit references so static analyzers and PyInstaller cannot treat
-    # an otherwise import-only dependency as unused.
-    versions = {
-        "av": av.__version__,
-        "faster_whisper": faster_whisper.__version__,
-        "mlx_qwen3_asr": mlx_qwen3_asr.__version__,
-        "mlx_whisper": mlx_whisper.__version__,
-        "sherpa_onnx": sherpa_onnx.__version__,
-    }
     print("冻结运行时自检通过：" + "、".join(f"{key} {value}" for key, value in versions.items()))
 
 
@@ -95,7 +98,10 @@ def _terminate_managed_process_group() -> None:
             return
         except OSError:
             pass
-    os.kill(os.getpid(), signal.SIGTERM)
+    try:
+        os.kill(os.getpid(), signal.SIGTERM)
+    except (OSError, AttributeError):
+        sys.exit(0)
 
 
 def _watch_parent_pipe(

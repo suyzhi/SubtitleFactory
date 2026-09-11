@@ -34,12 +34,14 @@ def _bundled_helper_candidates() -> list[Path]:
 
     candidates: list[Path] = []
     seen: set[Path] = set()
+    names = ("vision-ocr", "vision-ocr.exe", "vision-ocr.cmd") if sys.platform == "win32" else ("vision-ocr",)
     for root in roots:
-        for candidate in (root / "bin" / "vision-ocr", root / "vision-ocr"):
-            resolved = candidate.resolve()
-            if resolved not in seen:
-                seen.add(resolved)
-                candidates.append(resolved)
+        for name in names:
+            for candidate in (root / "bin" / name, root / name):
+                resolved = candidate.resolve()
+                if resolved not in seen:
+                    seen.add(resolved)
+                    candidates.append(resolved)
     return candidates
 
 

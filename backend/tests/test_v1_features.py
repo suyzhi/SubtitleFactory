@@ -127,9 +127,10 @@ class V1FeatureTests(unittest.TestCase):
         checksum_path = backup_path.with_name(f"{backup_path.name}.sha256")
         self.assertTrue(checksum_path.is_file())
         self.assertTrue(checksum_path.read_text().startswith(backup["hash"]))
-        self.assertEqual(stat.S_IMODE(backup_path.stat().st_mode), 0o600)
-        self.assertEqual(stat.S_IMODE(checksum_path.stat().st_mode), 0o600)
-        self.assertEqual(stat.S_IMODE(backup_path.parent.stat().st_mode), 0o700)
+        if sys.platform != "win32":
+            self.assertEqual(stat.S_IMODE(backup_path.stat().st_mode), 0o600)
+            self.assertEqual(stat.S_IMODE(checksum_path.stat().st_mode), 0o600)
+            self.assertEqual(stat.S_IMODE(backup_path.parent.stat().st_mode), 0o700)
 
         db = database.get_db()
         db.execute("UPDATE projects SET title='After backup' WHERE id=?", (self.project_id,))
@@ -142,15 +143,16 @@ class V1FeatureTests(unittest.TestCase):
         marker = pending_restore()
         self.assertEqual(marker["source_name"], backup_path.name)
         recovery = Path(database.DB_PATH).parent / "recovery"
-        self.assertEqual(stat.S_IMODE(recovery.stat().st_mode), 0o700)
-        self.assertEqual(
-            stat.S_IMODE((recovery / "pending-restore.json").stat().st_mode),
-            0o600,
-        )
-        self.assertEqual(
-            stat.S_IMODE((recovery / marker["staging_name"]).stat().st_mode),
-            0o600,
-        )
+        if sys.platform != "win32":
+            self.assertEqual(stat.S_IMODE(recovery.stat().st_mode), 0o700)
+            self.assertEqual(
+                stat.S_IMODE((recovery / "pending-restore.json").stat().st_mode),
+                0o600,
+            )
+            self.assertEqual(
+                stat.S_IMODE((recovery / marker["staging_name"]).stat().st_mode),
+                0o600,
+            )
         self.assertTrue(Path(staged["safety_backup"]).is_file())
         with self.assertRaisesRegex(RuntimeError, "等待重启"):
             restore_backup(backup_path.name)

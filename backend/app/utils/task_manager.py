@@ -193,6 +193,7 @@ class TaskManager:
                 if not future.done()
                 and self._tasks.get(task_id, {}).get("project_id") == project_id
             )
+        db = None
         try:
             from ..models.database import get_db
             db = get_db()
@@ -201,10 +202,15 @@ class TaskManager:
                    WHERE project_id=? AND status IN ('pending','running','paused')""",
                 (project_id,),
             ).fetchall()
-            db.close()
             task_ids.update(row["id"] for row in rows)
         except Exception:
             logger.debug("Unable to inspect persisted project tasks", exc_info=True)
+        finally:
+            if db is not None:
+                try:
+                    db.close()
+                except Exception:
+                    pass
         return sorted(task_ids)
 
     def active_tasks(self) -> list[dict]:
@@ -287,6 +293,7 @@ class TaskManager:
     @staticmethod
     def _persist(task: dict) -> None:
         """Persist task state without making the task manager depend on DB import order."""
+        db = None
         try:
             from ..models.database import get_db
             # The authoritative live state is in memory.  Do not hold
@@ -312,17 +319,22 @@ class TaskManager:
                 ),
             )
             db.commit()
-            db.close()
         except Exception:
             logger.debug("Task persistence unavailable", exc_info=True)
+        finally:
+            if db is not None:
+                try:
+                    db.close()
+                except Exception:
+                    pass
 
     @staticmethod
     def _load(task_id: str) -> Optional[dict]:
+        db = None
         try:
             from ..models.database import get_db
             db = get_db()
             row = db.execute("SELECT * FROM tasks WHERE id=?", (task_id,)).fetchone()
-            db.close()
             if not row:
                 return None
             result = dict(row)
@@ -334,6 +346,12 @@ class TaskManager:
         except Exception:
             logger.debug("Task restore unavailable", exc_info=True)
             return None
+        finally:
+            if db is not None:
+                try:
+                    db.close()
+                except Exception:
+                    pass
 
     def pause_task(self, task_id: str) -> bool:
         """Request a cooperative pause for a pending/running task."""

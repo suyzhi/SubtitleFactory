@@ -547,7 +547,7 @@ def _download_options(
     if ffmpeg_location:
         # yt-dlp requires ffmpeg to combine bestvideo+bestaudio. Passing the
         # exact resolved binary makes packaged builds independent of PATH.
-        options["ffmpeg_location"] = ffmpeg_location
+        options["ffmpeg_location"] = Path(ffmpeg_location).as_posix()
     deno = _resolve_deno_path()
     if not deno:
         raise DownloadServiceError(
@@ -571,7 +571,7 @@ def _download_options(
                 "runtime_component": "ejs",
             },
         ) from exc
-    options["js_runtimes"] = {"deno": {"path": str(deno)}}
+    options["js_runtimes"] = {"deno": {"path": Path(deno).as_posix()}}
     return options
 
 
@@ -814,7 +814,7 @@ def download_video(
             actions=["open_settings", "retry"],
             suggestion="请重新安装完整 App，或在下载与存储设置中选择可执行的 FFmpeg",
         )
-    sibling_ffprobe = ffmpeg.path.with_name("ffprobe")
+    sibling_ffprobe = ffmpeg.path.with_name(f"ffprobe{ffmpeg.path.suffix}")
     ffprobe = resolve_ffprobe_path(sibling_ffprobe if sibling_ffprobe.is_file() else None)
     if ffprobe is None:
         raise DownloadServiceError(

@@ -56,6 +56,9 @@ def _candidate_path(value: str | os.PathLike[str] | None, executable_name: str) 
     raw = Path(value).expanduser()
     if raw.is_dir():
         raw = raw / executable_name
+    if sys.platform == "win32" and not raw.is_file() and not raw.suffix:
+        if raw.with_suffix(".exe").is_file():
+            raw = raw.with_suffix(".exe")
     if not raw.is_absolute() and len(raw.parts) == 1:
         found = shutil.which(str(raw))
         if found:
@@ -113,6 +116,9 @@ def validate_runtime_executable(
 ) -> RuntimeExecutable:
     """Validate existence, executable permission, architecture and startup."""
     candidate = _candidate_path(path, name) or Path(path)
+    if sys.platform == "win32" and not candidate.is_file() and not candidate.suffix:
+        if candidate.with_suffix(".exe").is_file():
+            candidate = candidate.with_suffix(".exe")
     if not candidate.is_file():
         return RuntimeExecutable(name, candidate, source, False, error="文件不存在")
     if not os.access(candidate, os.X_OK):
@@ -127,12 +133,14 @@ def validate_runtime_executable(
         )
 
     try:
+        use_shell = sys.platform == "win32" and candidate.suffix.lower() in {".bat", ".cmd"}
         result = subprocess.run(
             [str(candidate), *version_args],
             capture_output=True,
             text=True,
             timeout=5,
             check=False,
+            shell=use_shell,
         )
     except (OSError, subprocess.SubprocessError) as exc:
         return RuntimeExecutable(
@@ -180,12 +188,14 @@ def _bundled_candidates(name: str) -> Iterable[tuple[Path, str]]:
             BASE_DIR.parent / "frontend" / "src-tauri" / "backend-runtime",
         ])
     seen: set[Path] = set()
+    exe_names = (name, f"{name}.exe") if sys.platform == "win32" else (name,)
     for root in roots:
-        for candidate in (root / "bin" / name, root / name, root / "tools" / name):
-            resolved = candidate.resolve()
-            if resolved not in seen:
-                seen.add(resolved)
-                yield resolved, "bundled"
+        for exe_name in exe_names:
+            for candidate in (root / "bin" / exe_name, root / exe_name, root / "tools" / exe_name):
+                resolved = candidate.resolve()
+                if resolved not in seen:
+                    seen.add(resolved)
+                    yield resolved, "bundled"
 
 
 def _resolve_executable(

@@ -131,7 +131,7 @@ def burn_subtitles(task_id: str, video_path: str, subtitle_path: str,
     # 构建 ffmpeg 命令
     # 优先硬字幕；若用户机器上的 ffmpeg 未编译 libass，则自动回退为
     # 默认开启的内嵌字幕轨。这样 MP4/MKV 导出不会因为环境差异完全失效。
-    escaped_path = subtitle_path.replace(":", "\\:").replace("'", "'\\''")
+    escaped_path = Path(subtitle_path).resolve().as_posix().replace(":", "\\:").replace("'", "'\\''")
 
     video_codec_args, video_codec_name = select_h264_encoder_args(ffmpeg.path)
     cmd = [

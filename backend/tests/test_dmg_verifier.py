@@ -18,7 +18,11 @@ def test_manifest_records_files_directories_and_relative_links(tmp_path: Path):
     resources.mkdir(parents=True)
     payload = resources / "payload.bin"
     payload.write_bytes(b"subtitle-factory")
-    os.symlink("payload.bin", resources / "payload-current.bin")
+    try:
+        os.symlink("payload.bin", resources / "payload-current.bin")
+    except OSError:
+        import pytest
+        pytest.skip("Symlinks require administrator privileges or Developer Mode on Windows")
 
     manifest = dmg_verifier.build_manifest(root)
 
