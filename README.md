@@ -28,7 +28,30 @@
 
 打开 http://127.0.0.1:5173/ 使用；后端为 http://127.0.0.1:8000/。启动脚本遇到占用端口会退出，不会杀死既有进程。
 
-v0.6.1 已提供 Apple Silicon App、DMG、App ZIP 与 SHA-256 校验文件，最低支持 macOS 14.0。下载见 [GitHub 发布页](https://github.com/suyzhi/SubtitleFactory/releases/tag/v0.6.1)。
+### Windows 运行方式
+
+Windows 系统下原生支持一键运行（已自动管理 Python 虚拟环境与前后端依赖）：
+
+- **浏览器模式一键启动**：
+  双击根目录下的 `start.bat`，或在 PowerShell 中执行：
+  ```powershell
+  .\start.ps1
+  ```
+  该命令将自动启动后端服务（:8000）和 Vite 前端（:5173），并自动打开默认浏览器访问。按下 `Ctrl+C` 即可优雅关闭所有进程。
+
+- **单独启动后端**：
+  双击 `backend/run.bat` 或在 PowerShell 中执行：
+  ```powershell
+  .\backend\run.ps1
+  ```
+
+- **Tauri 桌面模式**（需安装 Rust 环境）：
+  ```powershell
+  .\start-desktop.ps1
+  ```
+
+
+v0.6.1 已提供 Apple Silicon App、DMG、App ZIP 与 SHA-256 校验文件，最低支持 macOS 14.0；同时提供 Windows 10/11 一键启动脚本。下载见 [GitHub 发布页](https://github.com/suyzhi/SubtitleFactory/releases/tag/v0.6.1)。
 
 v0.6.1 App 位于：
 

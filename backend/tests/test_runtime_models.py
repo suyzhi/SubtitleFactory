@@ -23,9 +23,13 @@ from app.services.transcriber import resolve_transcription_model
 
 
 def _executable(folder: Path, name: str, output: str = "tool version 1") -> Path:
-    path = folder / name
-    path.write_text(f"#!/bin/sh\nprintf '%s\\n' '{output}'\n", encoding="utf-8")
-    path.chmod(0o755)
+    if sys.platform == "win32":
+        path = folder / f"{name}.cmd"
+        path.write_text(f"@echo off\necho {output}\n", encoding="utf-8")
+    else:
+        path = folder / name
+        path.write_text(f"#!/bin/sh\nprintf '%s\\n' '{output}'\n", encoding="utf-8")
+        path.chmod(0o755)
     return path
 
 

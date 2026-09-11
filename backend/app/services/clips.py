@@ -503,8 +503,13 @@ def _subtitle_rows(
 def _font_path(font_family: str, needs_cjk: bool) -> str:
     # Match actual font families, never a substring (Inter used to match SignPainter).
     from PIL import ImageFont
-    roots = [Path.home() / "Library/Fonts", Path("/Library/Fonts"),
-             Path("/System/Library/Fonts"), Path("/System/Library/Fonts/Supplemental")]
+    roots = [
+        Path.home() / "Library/Fonts", Path("/Library/Fonts"),
+        Path("/System/Library/Fonts"), Path("/System/Library/Fonts/Supplemental"),
+        Path(os.environ.get("WINDIR", "C:\\Windows")) / "Fonts",
+        Path.home() / "AppData/Local/Microsoft/Windows/Fonts",
+        Path("/usr/share/fonts"), Path("/usr/local/share/fonts"), Path.home() / ".fonts",
+    ]
     def normalize(value):
         return "".join(c for c in value.lower() if c.isalnum())
     requested = [normalize(value.strip().strip("\"'")) for value in font_family.split(",")]
@@ -512,7 +517,11 @@ def _font_path(font_family: str, needs_cjk: bool) -> str:
     for root in roots:
         if not root.is_dir():
             continue
-        for path in sorted(root.iterdir()):
+        try:
+            entries = sorted(root.iterdir())
+        except OSError:
+            continue
+        for path in entries:
             if path.suffix.lower() not in {".ttf", ".ttc", ".otf"}:
                 continue
             try:
@@ -522,11 +531,17 @@ def _font_path(font_family: str, needs_cjk: bool) -> str:
                     fonts[token] = str(path)
             except (OSError, ValueError):
                 continue
-    candidates = requested + (["pingfangsc", "hiraginosansgb", "arialunicode"] if needs_cjk else [])
-    candidates += ["helveticaneue", "arial", "helvetica"]
+    candidates = requested + (
+        ["microsoftyahei", "msyahei", "simhei", "simsun", "dengxian", "pingfangsc", "hiraginosansgb", "arialunicode"]
+        if needs_cjk else []
+    )
+    candidates += ["helveticaneue", "arial", "helvetica", "segoeui", "calibri", "tahoma"]
     for token in candidates:
         if token in fonts:
             return fonts[token]
+    # If no preferred font matched, return any available font found in system roots
+    if fonts:
+        return next(iter(fonts.values()))
     raise RuntimeError("找不到可用的字幕字体，请安装 Arial 或系统黑体")
 
 

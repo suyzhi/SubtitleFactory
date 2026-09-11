@@ -4,6 +4,7 @@ import os
 import platform
 import shutil
 import subprocess
+import sys
 import time
 from importlib import import_module
 from pathlib import Path
@@ -73,8 +74,9 @@ def _redact_local_paths(value: Any) -> Any:
     home = str(Path.home().resolve())
     if value == home:
         return "~"
-    if value.startswith(f"{home}{os.sep}"):
-        return f"~{value[len(home):]}"
+    if value.startswith(f"{home}{os.sep}") or value.startswith(f"{home}/"):
+        tail = value[len(home):].replace("\\", "/")
+        return f"~{tail}"
     return value
 
 
@@ -84,7 +86,11 @@ def _resolved_candidate(value: str) -> Path:
         discovered = shutil.which(expanded)
         if discovered:
             expanded = discovered
-    return Path(expanded).resolve(strict=False)
+    path = Path(expanded).resolve(strict=False)
+    if sys.platform == "win32" and not path.is_file() and not path.suffix:
+        if path.with_suffix(".exe").is_file():
+            return path.with_suffix(".exe")
+    return path
 
 
 def _executable_architecture(path: Path) -> tuple[bool, dict[str, Any]]:
@@ -123,7 +129,7 @@ def _validate_executable(kind: str, value: str) -> dict[str, Any]:
     if not compatible:
         return _path_result(
             kind, value, path, False, "architecture_mismatch",
-            "可执行文件与当前 Mac 架构不兼容", details,
+            "可执行文件与当前系统架构不兼容", details,
         )
     return _path_result(kind, value, path, True, "ready", "可执行文件可用", details)
 

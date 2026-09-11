@@ -118,6 +118,7 @@ class ParakeetModelCacheTests(unittest.TestCase):
 
 
 class ParakeetInferenceAdapterTests(unittest.TestCase):
+    @unittest.skipUnless(sys.platform == "darwin", "Core ML runtime is macOS only")
     def test_coreml_runtime_discovery_honors_environment_overrides(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
@@ -172,8 +173,8 @@ class ParakeetInferenceAdapterTests(unittest.TestCase):
         command = parakeet._build_coreml_command(
             runtime, "/tmp/input audio.wav", "/tmp/output dir", "result"
         )
-        self.assertEqual(command[0], "/tmp/parakeet cli")
-        self.assertEqual(command[1:3], ["--model", "/tmp/Memo model"])
+        self.assertEqual(command[0], str(Path("/tmp/parakeet cli")))
+        self.assertEqual(command[1:3], ["--model", str(Path("/tmp/Memo model"))])
         self.assertEqual(command[4], str(Path("/tmp/input audio.wav").resolve()))
         self.assertEqual(command[-2:], ["--output-filename", "result"])
         self.assertEqual(
@@ -295,8 +296,9 @@ class ParakeetInferenceAdapterTests(unittest.TestCase):
         init_db()
         project_id = str(uuid.uuid4())
         now = time.strftime("%Y-%m-%d %H:%M:%S")
-        with tempfile.NamedTemporaryFile(suffix=".wav") as audio:
-            with wave.open(audio.name, "wb") as output:
+        with tempfile.TemporaryDirectory() as folder:
+            audio_path = Path(folder) / "audio.wav"
+            with wave.open(str(audio_path), "wb") as output:
                 output.setnchannels(1)
                 output.setsampwidth(2)
                 output.setframerate(16000)
@@ -306,7 +308,7 @@ class ParakeetInferenceAdapterTests(unittest.TestCase):
                 "INSERT INTO projects "
                 "(id,title,source_type,audio_path,language,target_language,created_at,updated_at) "
                 "VALUES (?,?,?,?,?,?,?,?)",
-                (project_id, "API Parakeet", "local", audio.name, "auto", "zh", now, now),
+                (project_id, "API Parakeet", "local", str(audio_path), "auto", "zh", now, now),
             )
             db.commit()
             db.close()

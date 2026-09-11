@@ -16,9 +16,28 @@ def memory_is_tight() -> bool:
             result = subprocess.run(["/usr/bin/memory_pressure", "-Q"], capture_output=True, text=True, timeout=2)
             match = re.search(r"System-wide memory free percentage:\s*(\d+)%", result.stdout)
             return bool(match and int(match.group(1)) < 10)
+        if sys.platform == "win32":
+            import ctypes
+            class MEMORYSTATUSEX(ctypes.Structure):
+                _fields_ = [
+                    ("dwLength", ctypes.c_ulong),
+                    ("dwMemoryLoad", ctypes.c_ulong),
+                    ("ullTotalPhys", ctypes.c_ulonglong),
+                    ("ullAvailPhys", ctypes.c_ulonglong),
+                    ("ullTotalPageFile", ctypes.c_ulonglong),
+                    ("ullAvailPageFile", ctypes.c_ulonglong),
+                    ("ullTotalVirtual", ctypes.c_ulonglong),
+                    ("ullAvailVirtual", ctypes.c_ulonglong),
+                    ("sullAvailExtendedVirtual", ctypes.c_ulonglong),
+                ]
+            stat = MEMORYSTATUSEX()
+            stat.dwLength = ctypes.sizeof(MEMORYSTATUSEX)
+            if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(stat)):
+                return (stat.ullAvailPhys / stat.ullTotalPhys) < 0.1
+            return False
         values = dict(line.split(":", 1) for line in Path('/proc/meminfo').read_text().splitlines())
         return int(values['MemAvailable'].split()[0]) / int(values['MemTotal'].split()[0]) < .1
-    except (OSError, ValueError, KeyError, subprocess.SubprocessError):
+    except (OSError, ValueError, KeyError, subprocess.SubprocessError, AttributeError):
         return False
 
 
