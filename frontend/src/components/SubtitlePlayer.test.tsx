@@ -1,4 +1,4 @@
-import {createRef} from 'react';
+import {act,createRef} from 'react';
 import type {SubtitlePlayerHandle} from './SubtitlePlayer';
 // @vitest-environment jsdom
 
@@ -56,6 +56,20 @@ describe('SubtitlePlayer frame controls', () => {
       configurable: true,
       value: vi.fn(),
     });
+  });
+
+  it('lets an explicit subtitle seek leave a looping preview range', async () => {
+    const ref=createRef<SubtitlePlayerHandle>();
+    const {container}=render(<SubtitlePlayer {...baseProps} ref={ref}/>);
+    const video=container.querySelector('video')!;
+    Object.defineProperty(video,'readyState',{configurable:true,value:1});
+    Object.defineProperty(video,'duration',{configurable:true,value:100});
+    await act(async()=>{ref.current!.previewRange(2,4);});
+    expect(screen.getByRole('button',{name:'停止循环短片范围'})).toHaveAttribute('aria-pressed','true');
+    act(()=>ref.current!.seekTo(20));
+    fireEvent.timeUpdate(video);
+    expect(video.currentTime).toBe(20);
+    expect(screen.getByRole('button',{name:'循环当前字幕'})).toHaveAttribute('aria-pressed','false');
   });
 
   it('replays and clamps previous/next frame at video boundaries', async () => {

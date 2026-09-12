@@ -1,7 +1,7 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
-import AppSelect from './AppSelect';
+import AppSelect, {AppSelectThemeContext} from './AppSelect';
 
 const OPTIONS = [
   { value: 'zh', label: '中文', description: 'Chinese' },
@@ -100,4 +100,17 @@ describe('AppSelect', () => {
     expect(screen.queryByRole('listbox')).not.toBeInTheDocument();
   });
 
+});
+
+it('updates closed and open controls in the same render as a theme change',async()=>{
+ const user=userEvent.setup();
+ const control=(theme:'light'|'dark')=><AppSelectThemeContext.Provider value={theme}><AppSelect value="zh" onChange={()=>{}} options={OPTIONS} label="界面密度"/></AppSelectThemeContext.Provider>;
+ const {rerender}=render(control('dark'));
+ expect(screen.getByRole('combobox').parentElement).toHaveClass('theme-dark');
+ rerender(control('light'));
+ expect(screen.getByRole('combobox').parentElement).toHaveClass('theme-light');
+ await user.click(screen.getByRole('combobox'));
+ rerender(control('dark'));
+ expect(screen.getByRole('listbox')).toHaveClass('theme-dark');
+ expect(screen.getByRole('combobox').parentElement).toHaveClass('theme-dark');
 });

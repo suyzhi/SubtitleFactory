@@ -40,7 +40,7 @@ interface Props {
   onAppSettingsChange: (settings: AppSettings) => void;
   onAIProvidersChange: (state: api.AIProvidersResponse) => void;
   theme: 'light' | 'dark';
-  onThemeChange: (theme: 'light' | 'dark') => void;
+  onThemeChange: (theme: 'light' | 'dark', origin?: HTMLElement) => void;
   motionEnabled: boolean;
   onMotionEnabledChange: (enabled: boolean) => void;
   density: 'comfortable' | 'compact';
@@ -443,7 +443,7 @@ export default function SettingsCenter(props: Props) {
   };
 
   return createPortal(
-    <div className={`modal-backdrop settings-backdrop theme-${theme}`} role="presentation" onMouseDown={onClose}>
+    <div className={`modal-backdrop settings-backdrop theme-${theme} ${motionEnabled?'':'motion-off'}`} role="presentation" onMouseDown={onClose}>
       <section ref={dialogRef} tabIndex={-1} className="settings-center" role="dialog" aria-modal="true" aria-label="设置中心" onMouseDown={event => event.stopPropagation()}>
         <aside className="settings-navigation">
           <div className="settings-title"><strong>设置</strong><small>字幕工厂</small></div>
@@ -524,8 +524,8 @@ export default function SettingsCenter(props: Props) {
                   {[...(modelStatus?.category_order || ['lightweight','balanced','performance','english','parakeet']), ...((modelStatus?.models || []).some(model => model.category_id === 'local') ? ['local'] : [])].map(categoryId => {
                     const models = filteredModels.filter(model => model.category_id === categoryId);
                     if (!models.length) return null;
-                    return <section className="model-category" key={categoryId}>
-                      <header><strong>{models[0].category_name || categoryId}</strong><span>{models.length} 个模型</span></header>
+                    return <details className="model-category" key={categoryId}>
+                      <summary><strong>{models[0].category_name || categoryId}</strong><span>{models.length} 个模型</span></summary>
                       <div className="model-list">{models.map(model => {
                         const selectedRuntime = String((draft.transcription_runtime_by_model as Record<string, string> | undefined)?.[model.id] || model.selected_runtime || '');
                         const selectedVariant = model.runtimes?.find(runtime => runtime.id === selectedRuntime);
@@ -594,7 +594,7 @@ export default function SettingsCenter(props: Props) {
                           </span>
                         </article>;
                       })}</div>
-                    </section>;
+                    </details>;
                   })}
                 </div>
                 {externalPathsEnabled&&!!scannedModels.length&&<div className="scanned-models">{scannedModels.map(model=><div className="model-row" key={model.path}><span className={`status-orb ${model.supported?'ok':'warning'}`}/><div><strong>{model.display_name}</strong><small>{model.format} · {model.version||'未标版本'} · {model.supported?(model.reason||'可原地引用'):model.reason}</small></div>{model.supported&&<button className="button secondary model-action" disabled={busy||Boolean(model.reason)} onClick={()=>void api.importLocalModel(model.path,model.cli_path).then(()=>{setMessage(`${model.display_name} 已登记`);onRefreshModels();}).catch(reason=>setError(reason.message))}>登记</button>}</div>)}</div>}
@@ -662,7 +662,7 @@ export default function SettingsCenter(props: Props) {
 
             {category === 'appearance' && <>
               <SettingsSection title="外观" description="主题同时作用于 Web 界面和 macOS 原生标题栏。">
-                <Segmented value={theme} onChange={value => onThemeChange(value as 'light' | 'dark')} options={[['light', '浅色'], ['dark', '深色']]}/>
+                <Segmented value={theme} onChange={(value, origin) => onThemeChange(value as 'light' | 'dark', origin)} options={[['light', '浅色'], ['dark', '深色']]}/>
                 <label className="settings-field horizontal"><span><strong>界面密度</strong><small>紧凑模式适合小屏幕</small></span><AppSelect value={density} onChange={value=>onDensityChange(value as 'comfortable'|'compact')} label="界面密度" options={[{value:'comfortable',label:'舒适'},{value:'compact',label:'紧凑'}]}/></label>
               </SettingsSection>
               <SettingsSection title="动画" description="系统“减少动态效果”始终具有最高优先级。">
@@ -676,7 +676,7 @@ export default function SettingsCenter(props: Props) {
               </SettingsSection>
               <SettingsSection title="关于字幕工厂" description="本地优先的专业字幕工作台。">
                 <div className="about-card"><strong>字幕工厂 {health?.version || APP_VERSION}</strong><span>Apple Silicon · {distributionChannel === 'app_store' ? 'Mac App Store 版' : '直装版'}</span><small>服务状态：{health?.status || '正在连接'}</small></div>
-                <div className="about-data-row"><span><strong>数据目录</strong><small>{health?.runtime?.data_directory || 'App 本地数据目录'}</small></span></div>
+                <div className="about-data-row about-directory-row"><span><strong>数据目录</strong><small>{health?.runtime?.data_directory || 'App 本地数据目录'}</small></span></div>
                 <div className="inline-actions"><button className="button secondary" onClick={() => void copyDiagnostics()}>复制诊断信息</button><button className="button secondary" onClick={() => void exportDiagnostics()}>导出脱敏诊断包</button><button className="button secondary" onClick={() => { onClose(); onOpenLogs(); }}>查看处理日志</button></div>
                 <p className="settings-help">复制的诊断信息不包含本机路径或 API Key。自定义路径和密钥不会进入 Git、默认配置、日志或 Release。</p>
               </SettingsSection>
@@ -712,8 +712,8 @@ function Toggle({ label, detail, checked, onChange }: { label: string; detail?: 
   return <label className="settings-field horizontal toggle-row"><span><strong>{label}</strong>{detail && <small>{detail}</small>}</span><input type="checkbox" checked={checked} onChange={event => onChange(event.target.checked)}/></label>;
 }
 
-function Segmented({ value, onChange, options }: { value: string; onChange: (value: string) => void; options: string[][] }) {
-  return <div className="segmented-control">{options.map(([id, label]) => <button className={value === id ? 'active' : ''} key={id} onClick={() => onChange(id)}>{label}</button>)}</div>;
+function Segmented({ value, onChange, options }: { value: string; onChange: (value: string, origin: HTMLElement) => void; options: string[][] }) {
+  return <div className="segmented-control">{options.map(([id, label]) => <button className={value === id ? 'active' : ''} key={id} onClick={event => onChange(id,event.currentTarget)}>{label}</button>)}</div>;
 }
 
 function RuntimeRow({ label, value }: { label: string; value: { ok: boolean; title: string; detail: string } }) {

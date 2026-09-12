@@ -177,7 +177,7 @@ const SubtitlePlayer = forwardRef<SubtitlePlayerHandle, Props>(function Subtitle
 
   useImperativeHandle(
     ref,
-    () => ({ seekTo, previewRange: (start, end) => { void previewRange(start, end); }, clearPreviewRange }),
+    () => ({ seekTo: (next: number) => { setLoopCurrent(false); setPreviewRangeState(null); seekTo(next); }, previewRange: (start, end) => { void previewRange(start, end); }, clearPreviewRange }),
     [clearPreviewRange, previewRange, seekTo],
   );
 
@@ -377,7 +377,7 @@ const SubtitlePlayer = forwardRef<SubtitlePlayerHandle, Props>(function Subtitle
               }} />
             <span className="player-time">{timecode(time)} / {timecode(duration)}</span>
             <span className="control-spacer" />
-            <AppSelect className="rate-select" label="播放速度" value={String(rate)} onChange={value=>{
+            <AppSelect tone="player" className="rate-select" label="播放速度" value={String(rate)} onChange={value=>{
               const next=Number(value);
               setRate(next);
               if(videoRef.current) videoRef.current.playbackRate=next;
@@ -398,10 +398,10 @@ const SubtitlePlayer = forwardRef<SubtitlePlayerHandle, Props>(function Subtitle
       {showSubtitleMenu && <div className="player-subtitle-menu" role="dialog" aria-label="字幕显示设置">
         <div className="player-menu-title"><strong>字幕显示</strong><button aria-label="关闭字幕设置" onClick={() => setShowSubtitleMenu(false)}>✕</button></div>
         <label>显示内容
-          <AppSelect value={style.mode} onChange={mode=>updateStyle({mode:mode as SubtitleDisplayMode})} label="显示内容" options={MODE_OPTIONS}/>
+          <AppSelect tone="player" value={style.mode} onChange={mode=>updateStyle({mode:mode as SubtitleDisplayMode})} label="显示内容" options={MODE_OPTIONS}/>
         </label>
         <label>字幕字体
-          <AppSelect value={style.fontFamily} onChange={fontFamily=>updateStyle({fontFamily})} label="字幕字体" searchable options={SUBTITLE_FONT_OPTIONS}/>
+          <AppSelect tone="player" value={style.fontFamily} onChange={fontFamily=>updateStyle({fontFamily})} label="字幕字体" searchable options={SUBTITLE_FONT_OPTIONS}/>
         </label>
         <div className="player-color-grid">
           <label className="player-color-field">原文颜色 <span>{style.originalTextColor.toUpperCase()}</span>
@@ -414,11 +414,11 @@ const SubtitlePlayer = forwardRef<SubtitlePlayerHandle, Props>(function Subtitle
           </label>
         </div>
         <label>原文字号 <span>{style.originalFontSize}px</span>
-          <input type="range" min={14} max={58} value={style.originalFontSize}
+          <input type="range" min={1} max={58} value={style.originalFontSize}
             onChange={event => updateStyle({ originalFontSize: Number(event.target.value) })} />
         </label>
         <label>译文字号 <span>{style.translatedFontSize}px</span>
-          <input type="range" min={14} max={58} value={style.translatedFontSize}
+          <input type="range" min={1} max={58} value={style.translatedFontSize}
             onChange={event => updateStyle({ translatedFontSize: Number(event.target.value) })} />
         </label>
         <label>字幕位置 <span>{style.verticalPosition}%</span>
@@ -426,7 +426,7 @@ const SubtitlePlayer = forwardRef<SubtitlePlayerHandle, Props>(function Subtitle
             onChange={event => updateStyle({ verticalPosition: Number(event.target.value) })} />
         </label>
         <label>背景
-          <AppSelect value={style.backgroundMode} onChange={backgroundMode=>updateStyle({backgroundMode:backgroundMode as SubtitleStyleSettings['backgroundMode']})} label="字幕背景" options={[{value:'black',label:'半透明黑底'},{value:'none',label:'无背景'},{value:'white',label:'浅色背景'}]}/>
+          <AppSelect tone="player" value={style.backgroundMode} onChange={backgroundMode=>updateStyle({backgroundMode:backgroundMode as SubtitleStyleSettings['backgroundMode']})} label="字幕背景" options={[{value:'black',label:'半透明黑底'},{value:'none',label:'无背景'},{value:'white',label:'浅色背景'}]}/>
         </label>
       </div>}
     </div>

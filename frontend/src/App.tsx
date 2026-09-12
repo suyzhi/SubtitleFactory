@@ -1,3 +1,8 @@
+import SettingsCenter from './components/SettingsCenter';
+import {AppSelectThemeContext} from './components/AppSelect';
+import {revealTheme} from './themeTransition';
+import OverlayDialog from './components/OverlayDialog';
+import {flushSync} from 'react-dom';
 import TaskWorkspace from './components/TaskWorkspace';
 import {useSelectedTask,useActiveTaskCount} from './taskStore';
 import ExportWorkspace from './components/ExportWorkspace';
@@ -69,7 +74,7 @@ import settingsIcon from './assets/player-icons/settings.png';
 const SubtitlePlayer = lazy(() => import('./components/SubtitlePlayer'));
 const ProductionCenter = lazy(() => import('./components/ProductionCenter'));
 const PlaylistBatchDialog = lazy(() => import('./components/PlaylistBatchDialog'));
-const SettingsCenter = lazy(() => import('./components/SettingsCenter'));
+
 const ContentCenter = lazy(() => import('./components/ContentCenter'));
 
 const DEFAULT_CONFIG: ProcessingConfig = {
@@ -252,6 +257,17 @@ function App() {
       return next;
     });
   }, []);
+
+  const themeTransitionBusy=useRef(false);
+  const changeTheme=(next: 'light'|'dark', origin?:HTMLElement)=>{
+    if(themeTransitionBusy.current||next===theme)return;
+    const apply=()=>flushSync(()=>setTheme(next));
+    if(!motionEnabled||window.matchMedia('(prefers-reduced-motion: reduce)').matches||!document.startViewTransition){apply();return;}
+    const trigger=origin||document.querySelector<HTMLElement>('.icon-action[aria-label="切换深色模式"],.icon-action[aria-label="切换浅色模式"]');
+    if(!trigger){apply();return;}
+    themeTransitionBusy.current=true;
+    void revealTheme(apply,trigger).finally(()=>{themeTransitionBusy.current=false;});
+  };
 
   useEffect(() => {
     localStorage.setItem('subtitle_factory_theme', theme);
@@ -2201,7 +2217,7 @@ function App() {
   </div>;
 
   return (
-    <div data-ui-build={PROFESSIONAL_UI_MARKER} data-ui-layout={LIBRARY_WORKSPACE_UI_MARKER} className={`app pro-app theme-${theme} density-${density} ${motionEnabled ? '' : 'motion-off'} presentation-${presentationMode} ${showProjectWorkspace && activeProject ? 'workspace-active' : 'library-home'}`}
+    <AppSelectThemeContext.Provider value={theme}><div data-ui-build={PROFESSIONAL_UI_MARKER} data-ui-layout={LIBRARY_WORKSPACE_UI_MARKER} className={`app pro-app theme-${theme} density-${density} ${motionEnabled ? '' : 'motion-off'} presentation-${presentationMode} ${showProjectWorkspace && activeProject ? 'workspace-active' : 'library-home'}`}
       onDragEnter={event => { event.preventDefault(); setDragActive(true); }}
       onDragOver={event => { event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; }}
       onDragLeave={event => { if (!event.currentTarget.contains(event.relatedTarget as Node)) setDragActive(false); }}
@@ -2221,10 +2237,10 @@ function App() {
           <button className={`task-status-pill ${backendStatus}`} onClick={() => setShowTaskDrawer(value => !value)} aria-expanded={showTaskDrawer}>
             <i className={`backend-dot ${backendStatus}`}/><span>{isProcessing ? (currentTask ? taskProgressLabel(currentTask) : '正在处理') : backendStatus === 'connected' ? (activeTaskCount ? `${activeTaskCount} 项后台任务` : '引擎就绪') : backendStatus === 'connecting' ? '正在启动' : '引擎异常'}</span>
           </button>
-          <button className="icon-action" aria-label={theme === 'dark' ? '切换浅色模式' : '切换深色模式'} onClick={() => setTheme(value => value === 'dark' ? 'light' : 'dark')}>{theme === 'dark' ? '☀︎' : '◐'}</button>
+          <button className="icon-action" aria-label={theme === 'dark' ? '切换浅色模式' : '切换深色模式'} onClick={event => changeTheme(theme === 'dark' ? 'light' : 'dark',event.currentTarget)}>{theme === 'dark' ? '☀︎' : '◐'}</button>
           <button ref={settingsButtonRef} className="icon-action" aria-label="打开设置" onClick={() => setShowAISettings(true)}><img className="topbar-control-icon" src={settingsIcon} alt=""/></button>
         </div>
-        {youtubeEnabled && showLinkPopover && <div className="link-popover">
+        {youtubeEnabled && showLinkPopover && <OverlayDialog label="从 YouTube 链接创建" onClose={()=>setShowLinkPopover(false)}><div className="link-popover">
           <div><strong>从 YouTube 链接创建</strong><button aria-label="关闭" onClick={() => setShowLinkPopover(false)}>×</button></div>
           <input autoFocus type="url" value={youtubeUrl} placeholder="https://www.youtube.com/watch?v=…" onChange={event => setYoutubeUrl(event.target.value)}/>
           <p>{isPlaylistUrl(youtubeUrl) ? '将先读取播放列表，确认批量转写与 AI 流水线后创建归组。' : '播放定位参数会自动移除并下载完整视频。'}</p>
@@ -2232,7 +2248,7 @@ function App() {
             setShowLinkPopover(false);
             if (isPlaylistUrl(youtubeUrl)) setPlaylistDialogUrl(youtubeUrl); else prepareImport({kind:'link',url:youtubeUrl});
           }}>{isPlaylistUrl(youtubeUrl) ? '解析播放列表' : '下载并生成字幕'}</button>
-        </div>}
+        </div></OverlayDialog>}
       </header>
       {pendingImport && <ImportFlow source={pendingImport} setup={<>{renderTranscriptionSetup()}{renderFlowOptions()}</>} busy={importBusy} canStart={!!runtimeForModel(inspectorModelId)} onClose={() => setPendingImport(null)} onStart={(generate,remember) => executeImport(pendingImport,generate,remember)}/>}
       <GlobalTaskDrawer open={showTaskDrawer} onClose={() => setShowTaskDrawer(false)} onOpenProject={projectId => {
@@ -2434,10 +2450,10 @@ function App() {
       {renameProjectState && <div className="modal-backdrop" onMouseDown={() => setRenameProjectState(null)}><form className="rename-dialog" onMouseDown={event => event.stopPropagation()} onSubmit={event => { event.preventDefault(); void saveRename(); }}><header><div><h2>重命名项目</h2><p>媒体与字幕文件不会移动。</p></div><button type="button" aria-label="关闭" onClick={() => setRenameProjectState(null)}>×</button></header><input autoFocus maxLength={120} value={renameDraft} onChange={event => setRenameDraft(event.target.value)} onKeyDown={event => { if (event.key === 'Escape') setRenameProjectState(null); }}/><footer><button type="button" className="button secondary" onClick={() => setRenameProjectState(null)}>取消</button><button className="button primary" disabled={!renameDraft.trim()}>保存</button></footer></form></div>}
       {dragActive && <div className="drop-overlay"><div><span>⇩</span><strong>松开以导入视频</strong><small>支持 MP4、MKV、MOV、WebM 和 AVI</small></div></div>}
       {toast && <div className="studio-toast" role="status" aria-live="polite"><span>✓</span>{toast}</div>}
-      {showAISettings && <Suspense fallback={<DeferredPanel kind="settings" theme={theme} label="正在打开设置中心…"/>}>
-        <SettingsCenter open onClose={() => setShowAISettings(false)} returnFocusRef={settingsButtonRef} config={config} onConfigChange={setConfig} appSettings={appSettings} onAppSettingsChange={applyAppSettings} onAIProvidersChange={setAIProviderState} theme={theme} onThemeChange={setTheme} motionEnabled={motionEnabled} onMotionEnabledChange={setMotionEnabled} density={density} onDensityChange={setDensity} health={health} onRefreshHealth={refreshHealth} modelStatus={modelStatus} onRefreshModels={refreshModels} onOpenLogs={() => { setToolsTab('process'); setToolsOpen(true); setShowProjectWorkspace(!!activeProject); setInspectorMode(null); }}/>
-      </Suspense>}
-    </div>
+      {showAISettings && <>
+        <SettingsCenter open onClose={() => setShowAISettings(false)} returnFocusRef={settingsButtonRef} config={config} onConfigChange={setConfig} appSettings={appSettings} onAppSettingsChange={applyAppSettings} onAIProvidersChange={setAIProviderState} theme={theme} onThemeChange={changeTheme} motionEnabled={motionEnabled} onMotionEnabledChange={setMotionEnabled} density={density} onDensityChange={setDensity} health={health} onRefreshHealth={refreshHealth} modelStatus={modelStatus} onRefreshModels={refreshModels} onOpenLogs={() => { setToolsTab('process'); setToolsOpen(true); setShowProjectWorkspace(!!activeProject); setInspectorMode(null); }}/>
+      </>}
+    </div></AppSelectThemeContext.Provider>
   );
 }
 

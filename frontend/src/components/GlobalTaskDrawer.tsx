@@ -1,3 +1,4 @@
+import OverlayDialog from './OverlayDialog';
 import {useTaskSnapshot} from '../taskStore';
 import {taskProgressLabel} from '../projectState';
 import {useState} from 'react';
@@ -49,7 +50,7 @@ export default function GlobalTaskDrawer({ open, onClose, onOpenProject, onOpenS
   };
   if (!open) return null;
   const tasks = query.data?.tasks || [];
-  return <aside className="global-task-drawer" aria-label="全局任务中心">
+  return <OverlayDialog label="全局任务中心" onClose={onClose}><aside className="global-task-drawer" aria-label="全局任务中心">
     <header><div><small>所有项目</small><h2>任务中心</h2></div><button aria-label="关闭任务中心" onClick={onClose}>×</button></header>
     <div className="global-task-list">
       {(error || query.error) && <p role="alert">{error || String(query.error)}<button onClick={() => void query.refetch()}>重新加载</button></p>}
@@ -57,7 +58,7 @@ export default function GlobalTaskDrawer({ open, onClose, onOpenProject, onOpenS
       {!tasks.length && !query.isLoading && <div className="global-task-empty">暂无任务</div>}
       {tasks.map(task => <TaskCard key={task.id} initial={task} act={act} onOpenProject={onOpenProject} onOpenSettings={onOpenSettings}/>)}
     </div>
-  </aside>;
+  </aside></OverlayDialog>;
 }
 
 function TaskCard({initial,act,onOpenProject,onOpenSettings}:{initial:TaskStatus;act:(id:string,action:'pause'|'resume'|'cancel')=>Promise<void>;onOpenProject:(id:string)=>void;onOpenSettings?:()=>void}) {

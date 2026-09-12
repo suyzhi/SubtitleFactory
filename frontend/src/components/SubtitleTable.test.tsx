@@ -199,3 +199,17 @@ describe('subtitle table layout and positioning', () => {
     expect(scrollTo).toHaveBeenCalled();
   });
 });
+
+it('seeks on primary press before automatic following can move the time button',()=>{
+  const props=tableProps([makeSegment(1,{start:5.28,end:18.239})]);
+  const {container}=render(<SubtitleTable {...props}/>);
+  const [start,end]=container.querySelectorAll('.time-seek');
+  fireEvent.mouseDown(start,{button:0});
+  expect(props.onSeek).toHaveBeenLastCalledWith(5.28);
+  fireEvent.click(start,{detail:1});
+  expect(props.onSeek).toHaveBeenCalledTimes(1);
+  fireEvent.click(end,{detail:0});
+  expect(props.onSeek).toHaveBeenLastCalledWith(18.239);
+  fireEvent.mouseDown(start,{button:2});
+  expect(props.onSeek).toHaveBeenCalledTimes(2);
+});

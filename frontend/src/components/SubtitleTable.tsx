@@ -356,11 +356,11 @@ function SubtitleTable({
                   <td className="col-idx"><span className="subtitle-row-identity"><input type="checkbox" aria-label={`选择第 ${seg.index} 条字幕`} checked={selectedIndices.has(seg.index)} onChange={() => toggleSelected(seg.index)}/><span>{seg.index}</span><button className="btn btn-ghost btn-xs" aria-label={`第 ${seg.index} 条字幕属性`} onClick={() => onInspect?.(seg.index)}>⋯</button></span></td>
                   <td className="col-time">
                     {isEditing && editField === 'start' ? <input className="time-edit-input" type="number" min="0" step="0.001" autoFocus value={editValue} onChange={event => setEditValue(event.target.value)} onBlur={saveEdit} onKeyDown={event => event.key === 'Enter' ? saveEdit() : event.key === 'Escape' ? cancelEdit() : undefined}/>
-                      : <><button className="time-seek" onMouseDown={event => event.preventDefault()} onClick={() => onSeek(seg.start)}>{fmtTime(seg.start)}</button><button className="time-edit" aria-label={`编辑第 ${seg.index} 条开始时间`} onClick={() => startEdit(seg, 'start')}>✎</button></>}
+                      : <><button className="time-seek" onMouseDown={event => { if(event.button===0){event.preventDefault();onSeek(seg.start);} }} onClick={event => { if(event.detail===0)onSeek(seg.start); }}>{fmtTime(seg.start)}</button><button className="time-edit" aria-label={`编辑第 ${seg.index} 条开始时间`} onClick={() => startEdit(seg, 'start')}>✎</button></>}
                   </td>
                   <td className="col-time">
                     {isEditing && editField === 'end' ? <input className="time-edit-input" type="number" min="0" step="0.001" autoFocus value={editValue} onChange={event => setEditValue(event.target.value)} onBlur={saveEdit} onKeyDown={event => event.key === 'Enter' ? saveEdit() : event.key === 'Escape' ? cancelEdit() : undefined}/>
-                      : <><button className="time-seek" onMouseDown={event => event.preventDefault()} onClick={() => onSeek(seg.end)}>{fmtTime(seg.end)}</button><button className="time-edit" aria-label={`编辑第 ${seg.index} 条结束时间`} onClick={() => startEdit(seg, 'end')}>✎</button></>}
+                      : <><button className="time-seek" onMouseDown={event => { if(event.button===0){event.preventDefault();onSeek(seg.end);} }} onClick={event => { if(event.detail===0)onSeek(seg.end); }}>{fmtTime(seg.end)}</button><button className="time-edit" aria-label={`编辑第 ${seg.index} 条结束时间`} onClick={() => startEdit(seg, 'end')}>✎</button></>}
                   </td>
                   <td className="col-text editable"
                     onClick={() => !isEditing && startEdit(seg, 'clean_text')}>

@@ -70,7 +70,7 @@ export default function SubtitleStylePanel({ style, onChange, collapsed, onToggl
             </label>
             <label className="style-label">
               统一字号 <span className="style-value">{style.originalFontSize}px</span>
-              <input type="range" min={12} max={48} value={style.originalFontSize}
+              <input type="range" min={1} max={58} value={style.originalFontSize}
                 onChange={e => {
                   const size = Number(e.target.value);
                   update({ fontSize: size, originalFontSize: size, translatedFontSize: size });
