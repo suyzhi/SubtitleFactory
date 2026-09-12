@@ -1,0 +1,1261 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>字幕工厂 V2 - 极致设计</title>
+  <style>
+    /* ══════════════════════════════════════════════════════════════════════════
+       字幕工厂 V2 - 极致设计版本
+       设计理念：灵动的微交互 + 简约的视觉 + 丰富的功能
+       ══════════════════════════════════════════════════════════════════════════ */
+
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    :root {
+      /* 精致的暖色系统 */
+      --bg-primary: #f8f6f0;
+      --bg-secondary: #fffefb;
+      --surface-1: #ffffff;
+      --surface-2: #faf8f3;
+      --surface-3: #f2efe7;
+
+      /* 渐变色 */
+      --gradient-warm: linear-gradient(135deg, #d97b56 0%, #c96442 100%);
+      --gradient-glow: linear-gradient(135deg, rgba(217, 123, 86, 0.1) 0%, rgba(201, 100, 66, 0.05) 100%);
+
+      /* 文本色 */
+      --text-primary: #1a1612;
+      --text-secondary: #6b635a;
+      --text-tertiary: #a39a8f;
+
+      /* 功能色 */
+      --accent: #d97b56;
+      --accent-hover: #e8936d;
+      --accent-light: rgba(217, 123, 86, 0.1);
+      --success: #5b7a6e;
+      --warning: #d4a94f;
+      --error: #e06a55;
+
+      /* 阴影系统 */
+      --shadow-xs: 0 1px 2px rgba(26, 22, 18, 0.04);
+      --shadow-sm: 0 2px 4px rgba(26, 22, 18, 0.04), 0 4px 8px rgba(26, 22, 18, 0.02);
+      --shadow-md: 0 4px 8px rgba(26, 22, 18, 0.06), 0 8px 16px rgba(26, 22, 18, 0.04);
+      --shadow-lg: 0 8px 16px rgba(26, 22, 18, 0.08), 0 16px 32px rgba(26, 22, 18, 0.06);
+      --shadow-xl: 0 16px 32px rgba(26, 22, 18, 0.12), 0 32px 64px rgba(26, 22, 18, 0.08);
+
+      /* 边框 */
+      --border: rgba(26, 22, 18, 0.08);
+      --border-hover: rgba(26, 22, 18, 0.12);
+
+      /* 圆角 */
+      --radius-sm: 8px;
+      --radius-md: 12px;
+      --radius-lg: 16px;
+      --radius-xl: 20px;
+      --radius-2xl: 24px;
+
+      /* 间距 */
+      --space-xs: 4px;
+      --space-sm: 8px;
+      --space-md: 16px;
+      --space-lg: 24px;
+      --space-xl: 32px;
+      --space-2xl: 48px;
+
+      /* 动画曲线 */
+      --ease-smooth: cubic-bezier(0.4, 0.0, 0.2, 1);
+      --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+      --ease-bounce: cubic-bezier(0.68, -0.55, 0.265, 1.55);
+
+      /* 动画时长 */
+      --duration-fast: 150ms;
+      --duration-normal: 250ms;
+      --duration-slow: 400ms;
+    }
+
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", sans-serif;
+      background: var(--bg-primary);
+      color: var(--text-primary);
+      overflow: hidden;
+      line-height: 1.5;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+
+    /* ══════════════════════════════════════════════════════════════════════════
+       全局动画
+       ══════════════════════════════════════════════════════════════════════════ */
+
+    @keyframes fadeInUp {
+      from {
+        opacity: 0;
+        transform: translateY(20px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    @keyframes fadeInDown {
+      from {
+        opacity: 0;
+        transform: translateY(-20px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    @keyframes fadeInScale {
+      from {
+        opacity: 0;
+        transform: scale(0.9);
+      }
+      to {
+        opacity: 1;
+        transform: scale(1);
+      }
+    }
+
+    @keyframes slideInRight {
+      from {
+        opacity: 0;
+        transform: translateX(-20px);
+      }
+      to {
+        opacity: 1;
+        transform: translateX(0);
+      }
+    }
+
+    @keyframes shimmer {
+      0% {
+        background-position: -1000px 0;
+      }
+      100% {
+        background-position: 1000px 0;
+      }
+    }
+
+    @keyframes pulse {
+      0%, 100% {
+        opacity: 1;
+      }
+      50% {
+        opacity: 0.5;
+      }
+    }
+
+    @keyframes ripple {
+      0% {
+        transform: scale(0);
+        opacity: 1;
+      }
+      100% {
+        transform: scale(4);
+        opacity: 0;
+      }
+    }
+
+    @keyframes float {
+      0%, 100% {
+        transform: translateY(0px);
+      }
+      50% {
+        transform: translateY(-10px);
+      }
+    }
+
+    /* ══════════════════════════════════════════════════════════════════════════
+       布局容器
+       ══════════════════════════════════════════════════════════════════════════ */
+
+    .app {
+      width: 100vw;
+      height: 100vh;
+      display: grid;
+      grid-template-rows: auto 1fr;
+      animation: fadeInScale var(--duration-slow) var(--ease-smooth);
+    }
+
+    /* ══════════════════════════════════════════════════════════════════════════
+       顶部导航栏 - 极简且灵动
+       ══════════════════════════════════════════════════════════════════════════ */
+
+    .navbar {
+      height: 64px;
+      display: flex;
+      align-items: center;
+      gap: var(--space-lg);
+      padding: 0 var(--space-2xl);
+      background: var(--surface-1);
+      border-bottom: 1px solid var(--border);
+      backdrop-filter: blur(20px);
+      position: relative;
+      z-index: 100;
+      animation: fadeInDown var(--duration-normal) var(--ease-smooth);
+    }
+
+    /* Logo 品牌区 */
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: var(--space-md);
+      cursor: pointer;
+      transition: transform var(--duration-fast) var(--ease-smooth);
+    }
+
+    .brand:hover {
+      transform: scale(1.02);
+    }
+
+    .brand-logo {
+      width: 40px;
+      height: 40px;
+      border-radius: var(--radius-md);
+      background: var(--gradient-warm);
+      display: grid;
+      place-items: center;
+      font-size: 20px;
+      box-shadow: var(--shadow-md);
+      position: relative;
+      overflow: hidden;
+      transition: all var(--duration-normal) var(--ease-spring);
+    }
+
+    .brand-logo::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(135deg, transparent 0%, rgba(255, 255, 255, 0.2) 50%, transparent 100%);
+      transform: translateX(-100%);
+      transition: transform var(--duration-slow) var(--ease-smooth);
+    }
+
+    .brand:hover .brand-logo {
+      transform: rotate(-5deg) scale(1.1);
+      box-shadow: var(--shadow-lg);
+    }
+
+    .brand:hover .brand-logo::before {
+      transform: translateX(100%);
+    }
+
+    .brand-text {
+      font-size: 18px;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      background: var(--gradient-warm);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    /* 搜索栏 - 智能展开 */
+    .search-container {
+      flex: 1;
+      max-width: 480px;
+      position: relative;
+    }
+
+    .search-input {
+      width: 100%;
+      height: 42px;
+      padding: 0 var(--space-lg) 0 var(--space-2xl);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-xl);
+      background: var(--surface-2);
+      font-size: 14px;
+      outline: none;
+      transition: all var(--duration-normal) var(--ease-smooth);
+    }
+
+    .search-icon {
+      position: absolute;
+      left: var(--space-md);
+      top: 50%;
+      transform: translateY(-50%);
+      color: var(--text-tertiary);
+      pointer-events: none;
+      transition: all var(--duration-normal) var(--ease-smooth);
+    }
+
+    .search-input:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px var(--accent-light), var(--shadow-md);
+      background: var(--surface-1);
+    }
+
+    .search-input:focus + .search-icon {
+      color: var(--accent);
+      transform: translateY(-50%) scale(1.1);
+    }
+
+    /* 动作按钮组 */
+    .actions {
+      display: flex;
+      align-items: center;
+      gap: var(--space-sm);
+    }
+
+    .btn {
+      height: 42px;
+      padding: 0 var(--space-lg);
+      border: none;
+      border-radius: var(--radius-md);
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: var(--space-sm);
+      position: relative;
+      overflow: hidden;
+      transition: all var(--duration-normal) var(--ease-smooth);
+    }
+
+    .btn::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: radial-gradient(circle at center, rgba(255, 255, 255, 0.3) 0%, transparent 70%);
+      transform: scale(0);
+      transition: transform var(--duration-slow) var(--ease-smooth);
+    }
+
+    .btn:active::before {
+      transform: scale(1);
+      transition: transform 0s;
+    }
+
+    .btn-primary {
+      background: var(--gradient-warm);
+      color: white;
+      box-shadow: var(--shadow-sm);
+    }
+
+    .btn-primary:hover {
+      box-shadow: var(--shadow-md);
+      transform: translateY(-2px);
+    }
+
+    .btn-primary:active {
+      transform: translateY(0);
+    }
+
+    .btn-secondary {
+      background: var(--surface-2);
+      color: var(--text-secondary);
+      border: 1px solid var(--border);
+    }
+
+    .btn-secondary:hover {
+      background: var(--surface-1);
+      border-color: var(--border-hover);
+      box-shadow: var(--shadow-sm);
+      transform: translateY(-1px);
+    }
+
+    .btn-icon {
+      width: 42px;
+      height: 42px;
+      padding: 0;
+      border-radius: var(--radius-md);
+      justify-content: center;
+    }
+
+    /* ══════════════════════════════════════════════════════════════════════════
+       主内容区
+       ══════════════════════════════════════════════════════════════════════════ */
+
+    .content {
+      display: grid;
+      grid-template-columns: 300px 1fr;
+      height: 100%;
+      overflow: hidden;
+      gap: 1px;
+      background: var(--border);
+    }
+
+    /* ══════════════════════════════════════════════════════════════════════════
+       侧边栏 - 流畅的项目切换
+       ══════════════════════════════════════════════════════════════════════════ */
+
+    .sidebar {
+      background: var(--surface-1);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      animation: slideInRight var(--duration-normal) var(--ease-smooth);
+    }
+
+    .sidebar-header {
+      padding: var(--space-lg);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .sidebar-title {
+      font-size: 12px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: var(--text-tertiary);
+      margin-bottom: var(--space-sm);
+    }
+
+    .filter-tabs {
+      display: flex;
+      gap: var(--space-xs);
+      background: var(--surface-2);
+      border-radius: var(--radius-md);
+      padding: var(--space-xs);
+    }
+
+    .filter-tab {
+      flex: 1;
+      height: 32px;
+      border: none;
+      border-radius: var(--radius-sm);
+      background: transparent;
+      color: var(--text-secondary);
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all var(--duration-fast) var(--ease-smooth);
+    }
+
+    .filter-tab.active {
+      background: var(--surface-1);
+      color: var(--text-primary);
+      box-shadow: var(--shadow-xs);
+    }
+
+    .filter-tab:hover:not(.active) {
+      background: rgba(0, 0, 0, 0.02);
+    }
+
+    .projects-list {
+      flex: 1;
+      overflow-y: auto;
+      padding: var(--space-md);
+    }
+
+    /* 项目卡片 - 悬停效果丰富 */
+    .project-card {
+      margin-bottom: var(--space-md);
+      padding: var(--space-md);
+      border-radius: var(--radius-lg);
+      background: var(--surface-2);
+      border: 1px solid transparent;
+      cursor: pointer;
+      position: relative;
+      overflow: hidden;
+      transition: all var(--duration-normal) var(--ease-smooth);
+      animation: fadeInUp var(--duration-normal) var(--ease-smooth);
+      animation-fill-mode: both;
+    }
+
+    .project-card::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: var(--gradient-glow);
+      opacity: 0;
+      transition: opacity var(--duration-normal) var(--ease-smooth);
+    }
+
+    .project-card:hover {
+      transform: translateX(4px);
+      box-shadow: var(--shadow-md);
+      border-color: var(--border);
+    }
+
+    .project-card:hover::before {
+      opacity: 1;
+    }
+
+    .project-card.active {
+      background: var(--accent-light);
+      border-color: var(--accent);
+      box-shadow: var(--shadow-sm);
+    }
+
+    .project-card.active::before {
+      opacity: 1;
+    }
+
+    .project-thumbnail {
+      width: 100%;
+      aspect-ratio: 16 / 9;
+      border-radius: var(--radius-md);
+      background: linear-gradient(135deg, #f0f0f0 0%, #e0e0e0 100%);
+      margin-bottom: var(--space-md);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 32px;
+      overflow: hidden;
+      position: relative;
+      transition: transform var(--duration-normal) var(--ease-smooth);
+    }
+
+    .project-card:hover .project-thumbnail {
+      transform: scale(1.03);
+    }
+
+    .project-info {
+      position: relative;
+      z-index: 1;
+    }
+
+    .project-title {
+      font-size: 14px;
+      font-weight: 600;
+      margin-bottom: var(--space-xs);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .project-meta {
+      display: flex;
+      align-items: center;
+      gap: var(--space-sm);
+      font-size: 12px;
+      color: var(--text-secondary);
+    }
+
+    .status-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 4px 8px;
+      border-radius: var(--radius-sm);
+      font-size: 11px;
+      font-weight: 500;
+    }
+
+    .status-badge.completed {
+      background: rgba(91, 122, 110, 0.1);
+      color: var(--success);
+    }
+
+    .status-badge.processing {
+      background: var(--accent-light);
+      color: var(--accent);
+      animation: pulse 2s infinite;
+    }
+
+    .status-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: currentColor;
+    }
+
+    /* 延迟动画 */
+    .project-card:nth-child(1) { animation-delay: 0ms; }
+    .project-card:nth-child(2) { animation-delay: 50ms; }
+    .project-card:nth-child(3) { animation-delay: 100ms; }
+    .project-card:nth-child(4) { animation-delay: 150ms; }
+    .project-card:nth-child(5) { animation-delay: 200ms; }
+
+    /* ══════════════════════════════════════════════════════════════════════════
+       工作区 - 沉浸式编辑体验
+       ══════════════════════════════════════════════════════════════════════════ */
+
+    .workspace {
+      background: var(--bg-secondary);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      animation: fadeInScale var(--duration-slow) var(--ease-smooth) 200ms both;
+    }
+
+    /* 视频播放器区域 */
+    .player-section {
+      flex: 0 0 calc(100vh - 400px);
+      min-height: 400px;
+      max-height: 70vh;
+      background: #0a0a0a;
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: rgba(255, 255, 255, 0.5);
+      font-size: 64px;
+      overflow: hidden;
+    }
+
+    .player-section::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: radial-gradient(circle at center, rgba(217, 123, 86, 0.1) 0%, transparent 70%);
+      animation: float 6s ease-in-out infinite;
+    }
+
+    /* 快速操作栏 - 悬浮在视频上方 */
+    .quick-actions {
+      position: absolute;
+      top: var(--space-lg);
+      right: var(--space-lg);
+      display: flex;
+      gap: var(--space-sm);
+      z-index: 10;
+      animation: fadeInDown var(--duration-normal) var(--ease-smooth) 400ms both;
+    }
+
+    .quick-action-btn {
+      width: 44px;
+      height: 44px;
+      border: none;
+      border-radius: var(--radius-md);
+      background: rgba(255, 255, 255, 0.1);
+      backdrop-filter: blur(20px);
+      color: white;
+      cursor: pointer;
+      display: grid;
+      place-items: center;
+      font-size: 18px;
+      transition: all var(--duration-normal) var(--ease-spring);
+    }
+
+    .quick-action-btn:hover {
+      background: rgba(255, 255, 255, 0.2);
+      transform: scale(1.1);
+    }
+
+    /* 编辑器区域 */
+    .editor-section {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      background: var(--surface-1);
+      border-top: 1px solid var(--border);
+      overflow: hidden;
+    }
+
+    .editor-toolbar {
+      height: 60px;
+      display: flex;
+      align-items: center;
+      gap: var(--space-lg);
+      padding: 0 var(--space-xl);
+      border-bottom: 1px solid var(--border);
+      background: var(--surface-2);
+    }
+
+    .editor-info {
+      display: flex;
+      align-items: center;
+      gap: var(--space-md);
+      flex: 1;
+    }
+
+    .info-item {
+      display: flex;
+      align-items: center;
+      gap: var(--space-sm);
+      font-size: 13px;
+      color: var(--text-secondary);
+    }
+
+    .info-value {
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+
+    .editor-actions {
+      display: flex;
+      gap: var(--space-sm);
+    }
+
+    .editor-content {
+      flex: 1;
+      overflow-y: auto;
+      padding: var(--space-xl);
+    }
+
+    /* 字幕条目 - 精致的卡片设计 */
+    .subtitle-item {
+      margin-bottom: var(--space-lg);
+      padding: var(--space-lg);
+      border-radius: var(--radius-lg);
+      background: var(--surface-2);
+      border: 1px solid transparent;
+      position: relative;
+      transition: all var(--duration-normal) var(--ease-smooth);
+      animation: fadeInUp var(--duration-normal) var(--ease-smooth);
+      animation-fill-mode: both;
+    }
+
+    .subtitle-item::before {
+      content: '';
+      position: absolute;
+      left: 0;
+      top: 0;
+      bottom: 0;
+      width: 3px;
+      background: var(--accent);
+      border-radius: var(--radius-sm) 0 0 var(--radius-sm);
+      opacity: 0;
+      transition: opacity var(--duration-fast) var(--ease-smooth);
+    }
+
+    .subtitle-item:hover {
+      background: var(--surface-1);
+      border-color: var(--border);
+      box-shadow: var(--shadow-sm);
+      transform: translateX(4px);
+    }
+
+    .subtitle-item:hover::before {
+      opacity: 1;
+    }
+
+    .subtitle-time {
+      font-size: 12px;
+      color: var(--text-tertiary);
+      font-family: 'SF Mono', 'Menlo', monospace;
+      margin-bottom: var(--space-sm);
+      display: flex;
+      align-items: center;
+      gap: var(--space-sm);
+    }
+
+    .subtitle-text {
+      font-size: 15px;
+      line-height: 1.6;
+      color: var(--text-primary);
+      margin-bottom: var(--space-sm);
+    }
+
+    .subtitle-translation {
+      font-size: 14px;
+      line-height: 1.6;
+      color: var(--text-secondary);
+      padding-top: var(--space-sm);
+      border-top: 1px solid var(--border);
+    }
+
+    /* 延迟动画 */
+    .subtitle-item:nth-child(1) { animation-delay: 0ms; }
+    .subtitle-item:nth-child(2) { animation-delay: 30ms; }
+    .subtitle-item:nth-child(3) { animation-delay: 60ms; }
+    .subtitle-item:nth-child(4) { animation-delay: 90ms; }
+    .subtitle-item:nth-child(5) { animation-delay: 120ms; }
+
+    /* ══════════════════════════════════════════════════════════════════════════
+       浮动进度卡片 - 优雅的动画
+       ══════════════════════════════════════════════════════════════════════════ */
+
+    .progress-float {
+      position: fixed;
+      right: var(--space-xl);
+      bottom: var(--space-xl);
+      width: 380px;
+      padding: var(--space-xl);
+      border-radius: var(--radius-2xl);
+      background: var(--surface-1);
+      box-shadow: var(--shadow-xl);
+      backdrop-filter: blur(20px);
+      border: 1px solid var(--border);
+      z-index: 200;
+      animation: fadeInUp var(--duration-slow) var(--ease-spring);
+    }
+
+    .progress-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: var(--space-lg);
+    }
+
+    .progress-title {
+      font-size: 16px;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: var(--space-sm);
+    }
+
+    .progress-spinner {
+      width: 16px;
+      height: 16px;
+      border: 2px solid var(--accent-light);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    .progress-close {
+      width: 32px;
+      height: 32px;
+      border: none;
+      border-radius: var(--radius-sm);
+      background: transparent;
+      color: var(--text-tertiary);
+      cursor: pointer;
+      display: grid;
+      place-items: center;
+      font-size: 18px;
+      transition: all var(--duration-fast) var(--ease-smooth);
+    }
+
+    .progress-close:hover {
+      background: var(--surface-2);
+      color: var(--text-primary);
+      transform: rotate(90deg);
+    }
+
+    .progress-steps {
+      display: flex;
+      flex-direction: column;
+      gap: var(--space-md);
+    }
+
+    .progress-step {
+      display: flex;
+      align-items: center;
+      gap: var(--space-md);
+      padding: var(--space-md);
+      border-radius: var(--radius-md);
+      background: var(--surface-2);
+      position: relative;
+      overflow: hidden;
+      transition: all var(--duration-normal) var(--ease-smooth);
+    }
+
+    .progress-step::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(90deg, transparent 0%, rgba(217, 123, 86, 0.1) 50%, transparent 100%);
+      transform: translateX(-100%);
+    }
+
+    .progress-step.active {
+      background: var(--accent-light);
+      border: 1px solid rgba(217, 123, 86, 0.2);
+    }
+
+    .progress-step.active::before {
+      animation: shimmer 2s infinite;
+    }
+
+    .progress-step.completed {
+      opacity: 0.6;
+    }
+
+    .progress-icon {
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      background: var(--surface-1);
+      display: grid;
+      place-items: center;
+      font-size: 18px;
+      flex-shrink: 0;
+      position: relative;
+      transition: all var(--duration-normal) var(--ease-spring);
+    }
+
+    .progress-step.active .progress-icon {
+      background: var(--accent);
+      color: white;
+      animation: pulse 2s infinite;
+    }
+
+    .progress-step.completed .progress-icon {
+      background: var(--success);
+      color: white;
+    }
+
+    .progress-text {
+      flex: 1;
+    }
+
+    .progress-label {
+      font-size: 14px;
+      font-weight: 600;
+      margin-bottom: 2px;
+    }
+
+    .progress-detail {
+      font-size: 12px;
+      color: var(--text-secondary);
+    }
+
+    .progress-bar {
+      height: 4px;
+      background: var(--surface-3);
+      border-radius: var(--radius-sm);
+      overflow: hidden;
+      margin-top: var(--space-sm);
+    }
+
+    .progress-bar-fill {
+      height: 100%;
+      background: var(--gradient-warm);
+      border-radius: var(--radius-sm);
+      transition: width var(--duration-normal) var(--ease-smooth);
+    }
+
+    /* ══════════════════════════════════════════════════════════════════════════
+       滚动条美化
+       ══════════════════════════════════════════════════════════════════════════ */
+
+    ::-webkit-scrollbar {
+      width: 8px;
+      height: 8px;
+    }
+
+    ::-webkit-scrollbar-track {
+      background: transparent;
+    }
+
+    ::-webkit-scrollbar-thumb {
+      background: var(--border);
+      border-radius: var(--radius-sm);
+      transition: background var(--duration-fast) var(--ease-smooth);
+    }
+
+    ::-webkit-scrollbar-thumb:hover {
+      background: var(--border-hover);
+    }
+
+    /* ══════════════════════════════════════════════════════════════════════════
+       响应式适配
+       ══════════════════════════════════════════════════════════════════════════ */
+
+    @media (max-width: 1200px) {
+      .content {
+        grid-template-columns: 280px 1fr;
+      }
+
+      .progress-float {
+        width: 340px;
+      }
+    }
+
+    @media (max-width: 900px) {
+      .content {
+        grid-template-columns: 1fr;
+      }
+
+      .sidebar {
+        display: none;
+      }
+
+      .navbar {
+        padding: 0 var(--space-lg);
+      }
+
+      .search-container {
+        max-width: none;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <!-- 顶部导航栏 -->
+    <nav class="navbar">
+      <div class="brand">
+        <div class="brand-logo">🎬</div>
+        <span class="brand-text">字幕工厂</span>
+      </div>
+
+      <div class="search-container">
+        <span class="search-icon">🔍</span>
+        <input type="search" class="search-input" placeholder="搜索项目、字幕内容...">
+      </div>
+
+      <div class="actions">
+        <button class="btn btn-primary">
+          <span>📁</span>
+          <span>导入视频</span>
+        </button>
+        <button class="btn btn-secondary">
+          <span>🔗</span>
+          <span>导入链接</span>
+        </button>
+        <button class="btn btn-icon btn-secondary">
+          <span>⚙️</span>
+        </button>
+      </div>
+    </nav>
+
+    <!-- 主内容区 -->
+    <main class="content">
+      <!-- 侧边栏 -->
+      <aside class="sidebar">
+        <div class="sidebar-header">
+          <div class="sidebar-title">项目</div>
+          <div class="filter-tabs">
+            <button class="filter-tab active">全部</button>
+            <button class="filter-tab">最近</button>
+            <button class="filter-tab">收藏</button>
+          </div>
+        </div>
+
+        <div class="projects-list">
+          <div class="project-card active">
+            <div class="project-thumbnail">🎬</div>
+            <div class="project-info">
+              <div class="project-title">产品介绍视频 2024</div>
+              <div class="project-meta">
+                <span class="status-badge completed">
+                  <span class="status-dot"></span>
+                  已完成
+                </span>
+                <span>5 分钟前</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="project-card">
+            <div class="project-thumbnail">🎥</div>
+            <div class="project-info">
+              <div class="project-title">团队会议记录</div>
+              <div class="project-meta">
+                <span class="status-badge processing">
+                  <span class="status-dot"></span>
+                  转写中
+                </span>
+                <span>2 小时前</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="project-card">
+            <div class="project-thumbnail">📹</div>
+            <div class="project-info">
+              <div class="project-title">教学视频 - 第三章</div>
+              <div class="project-meta">
+                <span class="status-badge completed">
+                  <span class="status-dot"></span>
+                  已完成
+                </span>
+                <span>昨天</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="project-card">
+            <div class="project-thumbnail">🎞️</div>
+            <div class="project-info">
+              <div class="project-title">客户访谈视频</div>
+              <div class="project-meta">
+                <span class="status-badge completed">
+                  <span class="status-dot"></span>
+                  已完成
+                </span>
+                <span>3 天前</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </aside>
+
+      <!-- 工作区 -->
+      <section class="workspace">
+        <!-- 视频播放器 -->
+        <div class="player-section">
+          🎬
+          <div class="quick-actions">
+            <button class="quick-action-btn" title="全屏">⛶</button>
+            <button class="quick-action-btn" title="剧院模式">▭</button>
+            <button class="quick-action-btn" title="画中画">◱</button>
+          </div>
+        </div>
+
+        <!-- 编辑器 -->
+        <div class="editor-section">
+          <div class="editor-toolbar">
+            <div class="editor-info">
+              <div class="info-item">
+                <span>📝</span>
+                <span class="info-value">128</span>
+                <span>条字幕</span>
+              </div>
+              <div class="info-item">
+                <span>⏱️</span>
+                <span class="info-value">12:35</span>
+                <span>时长</span>
+              </div>
+            </div>
+
+            <div class="editor-actions">
+              <button class="btn btn-primary">
+                <span>✨</span>
+                <span>AI 整理</span>
+              </button>
+              <button class="btn btn-secondary">
+                <span>🌐</span>
+                <span>AI 翻译</span>
+              </button>
+              <button class="btn btn-secondary">
+                <span>📤</span>
+                <span>导出</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="editor-content">
+            <div class="subtitle-item">
+              <div class="subtitle-time">
+                <span>00:00:05</span>
+                <span>→</span>
+                <span>00:00:08</span>
+              </div>
+              <div class="subtitle-text">
+                欢迎来到字幕工厂的全新设计版本，这里有丰富的动效和流畅的交互体验。
+              </div>
+              <div class="subtitle-translation">
+                Welcome to the new design version of Subtitle Factory, with rich animations and smooth interactions.
+              </div>
+            </div>
+
+            <div class="subtitle-item">
+              <div class="subtitle-time">
+                <span>00:00:09</span>
+                <span>→</span>
+                <span>00:00:12</span>
+              </div>
+              <div class="subtitle-text">
+                每一个细节都经过精心设计，让你的工作更加高效。
+              </div>
+              <div class="subtitle-translation">
+                Every detail has been carefully designed to make your work more efficient.
+              </div>
+            </div>
+
+            <div class="subtitle-item">
+              <div class="subtitle-time">
+                <span>00:00:13</span>
+                <span>→</span>
+                <span>00:00:16</span>
+              </div>
+              <div class="subtitle-text">
+                导入视频后，系统会自动完成转写，你只需要专注于内容本身。
+              </div>
+            </div>
+
+            <div class="subtitle-item">
+              <div class="subtitle-time">
+                <span>00:00:17</span>
+                <span>→</span>
+                <span>00:00:20</span>
+              </div>
+              <div class="subtitle-text">
+                AI 整理和翻译功能随时待命，一键即可完成。
+              </div>
+            </div>
+
+            <div class="subtitle-item">
+              <div class="subtitle-time">
+                <span>00:00:21</span>
+                <span>→</span>
+                <span>00:00:24</span>
+              </div>
+              <div class="subtitle-text">
+                简约而不简单，功能丰富而不复杂。
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <!-- 浮动进度卡片 -->
+    <div class="progress-float">
+      <div class="progress-header">
+        <div class="progress-title">
+          <div class="progress-spinner"></div>
+          <span>正在处理中...</span>
+        </div>
+        <button class="progress-close">✕</button>
+      </div>
+
+      <div class="progress-steps">
+        <div class="progress-step completed">
+          <div class="progress-icon">✓</div>
+          <div class="progress-text">
+            <div class="progress-label">下载视频</div>
+            <div class="progress-detail">已完成</div>
+          </div>
+        </div>
+
+        <div class="progress-step completed">
+          <div class="progress-icon">✓</div>
+          <div class="progress-text">
+            <div class="progress-label">提取音频</div>
+            <div class="progress-detail">已完成</div>
+          </div>
+        </div>
+
+        <div class="progress-step active">
+          <div class="progress-icon">⟳</div>
+          <div class="progress-text">
+            <div class="progress-label">转写中</div>
+            <div class="progress-detail">正在识别语音内容...</div>
+            <div class="progress-bar">
+              <div class="progress-bar-fill" style="width: 65%"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="progress-step">
+          <div class="progress-icon">○</div>
+          <div class="progress-text">
+            <div class="progress-label">等待 AI 整理</div>
+            <div class="progress-detail">转写完成后可手动触发</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // 简单的交互演示
+    document.querySelectorAll('.project-card').forEach(card => {
+      card.addEventListener('click', function() {
+        document.querySelectorAll('.project-card').forEach(c => c.classList.remove('active'));
+        this.classList.add('active');
+      });
+    });
+
+    document.querySelectorAll('.filter-tab').forEach(tab => {
+      tab.addEventListener('click', function() {
+        document.querySelectorAll('.filter-tab').forEach(t => t.classList.remove('active'));
+        this.classList.add('active');
+      });
+    });
+
+    // 搜索框动效
+    const searchInput = document.querySelector('.search-input');
+    searchInput.addEventListener('focus', function() {
+      this.parentElement.style.transform = 'scale(1.02)';
+    });
+    searchInput.addEventListener('blur', function() {
+      this.parentElement.style.transform = 'scale(1)';
+    });
+  </script>
+</body>
+</html>

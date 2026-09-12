@@ -1,0 +1,658 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>字幕工厂 - 重新设计演示</title>
+  <style>
+    /* ══════════════════════════════════════════════════════════════════════════
+       字幕工厂 - 重新设计演示
+       ══════════════════════════════════════════════════════════════════════════ */
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    :root {
+      /* 保持原有暖色调 */
+      --bg: #f5f4ed;
+      --surface: #fffdf8;
+      --surface-2: #f7f4ec;
+      --surface-3: #efe9dd;
+      --border: #e0dacb;
+      --border-soft: #eae4d6;
+      --text: #2d2822;
+      --text-2: #6b635a;
+      --text-3: #8a8175;
+      --accent: #c96442;
+      --accent-2: #d97b56;
+      --accent-soft: rgba(201, 100, 66, .13);
+      --green: #5b7a6e;
+      --yellow: #b98a2f;
+
+      --radius-sm: 10px;
+      --radius-md: 14px;
+      --radius-lg: 18px;
+      --spacing-xs: 8px;
+      --spacing-sm: 12px;
+      --spacing-md: 20px;
+      --spacing-lg: 32px;
+
+      --shadow-subtle: 0 1px 3px rgba(80, 60, 40, .06), 0 4px 12px rgba(80, 60, 40, .04);
+      --shadow-medium: 0 4px 16px rgba(80, 60, 40, .08), 0 8px 32px rgba(80, 60, 40, .06);
+      --shadow-large: 0 12px 48px rgba(80, 60, 40, .12), 0 24px 80px rgba(80, 60, 40, .08);
+
+      --duration: 240ms;
+      --ease-out: cubic-bezier(0.2, 0.8, 0.3, 1);
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Helvetica Neue", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      overflow: hidden;
+    }
+
+    .app {
+      width: 100vw;
+      height: 100vh;
+      display: grid;
+      grid-template-rows: auto 1fr;
+    }
+
+    /* ═══ 顶栏 ═══ */
+    .topbar {
+      height: 72px;
+      display: flex;
+      align-items: center;
+      gap: var(--spacing-md);
+      padding: 0 var(--spacing-lg);
+      border-bottom: 1px solid var(--border);
+      background: rgba(255, 253, 248, .94);
+      backdrop-filter: blur(32px);
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-right: auto;
+    }
+
+    .brand-icon {
+      width: 36px;
+      height: 36px;
+      border-radius: 10px;
+      background: linear-gradient(135deg, #d97b56, #c96442);
+      display: grid;
+      place-items: center;
+      font-size: 20px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, .16);
+    }
+
+    .brand-text {
+      font-size: 16px;
+      font-weight: 650;
+      letter-spacing: -.02em;
+    }
+
+    .primary-btn {
+      height: 48px;
+      padding: 0 32px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      border: 0;
+      border-radius: var(--radius-md);
+      background: linear-gradient(135deg, var(--accent-2), var(--accent));
+      color: white;
+      font-size: 15px;
+      font-weight: 630;
+      letter-spacing: -.01em;
+      box-shadow: 0 6px 20px rgba(201, 100, 66, .28);
+      cursor: pointer;
+      transition: all var(--duration) var(--ease-out);
+    }
+
+    .primary-btn:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 10px 32px rgba(201, 100, 66, .36);
+    }
+
+    .secondary-btn {
+      height: 44px;
+      padding: 0 24px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      background: var(--surface);
+      color: var(--text-2);
+      font-size: 14px;
+      font-weight: 580;
+      cursor: pointer;
+      transition: all var(--duration) var(--ease-out);
+    }
+
+    .secondary-btn:hover {
+      border-color: var(--accent);
+      background: var(--surface-2);
+      color: var(--text);
+      transform: translateY(-1px);
+      box-shadow: var(--shadow-subtle);
+    }
+
+    /* ═══ 主体布局 ═══ */
+    .main {
+      display: grid;
+      grid-template-columns: 320px 1fr;
+      height: 100%;
+      overflow: hidden;
+    }
+
+    /* ═══ 项目列表 ═══ */
+    .projects {
+      background: linear-gradient(180deg, #faf8f0, #f4f0e5);
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    .projects-header {
+      padding: var(--spacing-md) var(--spacing-md) var(--spacing-sm);
+      border-bottom: 1px solid var(--border-soft);
+    }
+
+    .search-input {
+      width: 100%;
+      height: 44px;
+      padding: 0 16px;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      background: var(--surface);
+      font-size: 14px;
+      outline: none;
+      transition: all var(--duration) var(--ease-out);
+    }
+
+    .search-input:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgba(201, 100, 66, .12);
+    }
+
+    .projects-list {
+      flex: 1;
+      overflow-y: auto;
+      padding: var(--spacing-sm);
+    }
+
+    .project-card {
+      margin-bottom: var(--spacing-sm);
+      padding: var(--spacing-md);
+      border: 1px solid transparent;
+      border-radius: var(--radius-lg);
+      background: var(--surface);
+      cursor: pointer;
+      transition: all var(--duration) var(--ease-out);
+    }
+
+    .project-card:hover {
+      border-color: var(--border);
+      box-shadow: var(--shadow-subtle);
+      transform: translateX(4px);
+    }
+
+    .project-card.active {
+      border-color: var(--accent);
+      background: var(--accent-soft);
+      box-shadow: 0 0 0 3px rgba(201, 100, 66, .08), var(--shadow-subtle);
+    }
+
+    .project-thumb {
+      width: 100%;
+      aspect-ratio: 16 / 9;
+      border-radius: var(--radius-sm);
+      background: var(--surface-3);
+      overflow: hidden;
+      margin-bottom: var(--spacing-sm);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 32px;
+      color: var(--text-3);
+    }
+
+    .project-title {
+      font-size: 15px;
+      font-weight: 620;
+      margin-bottom: 6px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .project-meta {
+      display: flex;
+      align-items: center;
+      gap: var(--spacing-xs);
+      font-size: 12px;
+      color: var(--text-3);
+    }
+
+    .status-badge {
+      padding: 4px 10px;
+      border-radius: 12px;
+      background: var(--surface-2);
+      font-size: 11px;
+      font-weight: 560;
+    }
+
+    .status-badge.ready {
+      background: rgba(91, 122, 110, .12);
+      color: var(--green);
+    }
+
+    .status-badge.processing {
+      background: rgba(201, 100, 66, .12);
+      color: var(--accent);
+    }
+
+    /* ═══ 工作区 ═══ */
+    .workspace {
+      display: flex;
+      flex-direction: column;
+      background: var(--bg);
+      overflow: hidden;
+    }
+
+    .player {
+      flex: 0 0 55vh;
+      min-height: 400px;
+      background: linear-gradient(135deg, #1a1a1a, #0a0a0a);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: rgba(255, 255, 255, .5);
+      font-size: 48px;
+    }
+
+    .editor {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      background: var(--surface);
+      border-top: 1px solid var(--border);
+      overflow: hidden;
+    }
+
+    .editor-toolbar {
+      height: 64px;
+      display: flex;
+      align-items: center;
+      gap: var(--spacing-sm);
+      padding: 0 var(--spacing-md);
+      border-bottom: 1px solid var(--border-soft);
+      background: var(--surface-2);
+    }
+
+    .editor-info {
+      font-size: 14px;
+      color: var(--text-2);
+      margin-right: auto;
+    }
+
+    .editor-content {
+      flex: 1;
+      overflow-y: auto;
+      padding: var(--spacing-md);
+    }
+
+    .subtitle-item {
+      padding: var(--spacing-md);
+      margin-bottom: var(--spacing-sm);
+      border-radius: var(--radius-sm);
+      background: var(--surface);
+      border: 1px solid var(--border-soft);
+      transition: all var(--duration) var(--ease-out);
+    }
+
+    .subtitle-item:hover {
+      border-color: var(--border);
+      box-shadow: var(--shadow-subtle);
+    }
+
+    .subtitle-time {
+      font-size: 12px;
+      color: var(--text-3);
+      font-family: var(--mono, monospace);
+      margin-bottom: 6px;
+    }
+
+    .subtitle-text {
+      font-size: 15px;
+      line-height: 1.6;
+      color: var(--text);
+    }
+
+    .subtitle-translation {
+      font-size: 14px;
+      line-height: 1.6;
+      color: var(--text-2);
+      margin-top: 8px;
+      padding-top: 8px;
+      border-top: 1px solid var(--border-soft);
+    }
+
+    /* ═══ 浮动进度卡片 ═══ */
+    .progress-float {
+      position: fixed;
+      right: var(--spacing-lg);
+      bottom: var(--spacing-lg);
+      width: 360px;
+      padding: var(--spacing-md);
+      border-radius: var(--radius-lg);
+      background: var(--surface);
+      border: 1px solid var(--border);
+      box-shadow: var(--shadow-large);
+      z-index: 1000;
+      animation: slideInUp var(--duration) var(--ease-out);
+    }
+
+    @keyframes slideInUp {
+      from {
+        opacity: 0;
+        transform: translateY(20px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    .progress-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: var(--spacing-sm);
+    }
+
+    .progress-title {
+      font-size: 15px;
+      font-weight: 620;
+    }
+
+    .progress-close {
+      width: 28px;
+      height: 28px;
+      border: 0;
+      border-radius: 8px;
+      background: transparent;
+      color: var(--text-3);
+      cursor: pointer;
+      transition: all var(--duration) var(--ease-out);
+      font-size: 18px;
+      display: grid;
+      place-items: center;
+    }
+
+    .progress-close:hover {
+      background: var(--surface-3);
+      color: var(--text);
+    }
+
+    .progress-steps {
+      display: flex;
+      flex-direction: column;
+      gap: var(--spacing-xs);
+    }
+
+    .progress-step {
+      display: flex;
+      align-items: center;
+      gap: var(--spacing-sm);
+      padding: var(--spacing-sm);
+      border-radius: var(--radius-sm);
+      background: var(--surface-2);
+      transition: all var(--duration) var(--ease-out);
+    }
+
+    .progress-step.active {
+      background: var(--accent-soft);
+      border: 1px solid rgba(201, 100, 66, .2);
+    }
+
+    .progress-step.done {
+      opacity: 0.6;
+    }
+
+    .progress-icon {
+      width: 32px;
+      height: 32px;
+      display: grid;
+      place-items: center;
+      border-radius: 50%;
+      background: var(--surface-3);
+      font-size: 14px;
+    }
+
+    .progress-step.active .progress-icon {
+      background: var(--accent);
+      color: white;
+      animation: pulse 1.5s infinite;
+    }
+
+    .progress-step.done .progress-icon {
+      background: var(--green);
+      color: white;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.7; }
+    }
+
+    .progress-text {
+      flex: 1;
+    }
+
+    .progress-label {
+      font-size: 13px;
+      font-weight: 580;
+      margin-bottom: 2px;
+    }
+
+    .progress-detail {
+      font-size: 11px;
+      color: var(--text-3);
+    }
+
+    /* ═══ 滚动条 ═══ */
+    ::-webkit-scrollbar {
+      width: 8px;
+    }
+
+    ::-webkit-scrollbar-track {
+      background: transparent;
+    }
+
+    ::-webkit-scrollbar-thumb {
+      background: var(--border);
+      border-radius: 4px;
+    }
+
+    ::-webkit-scrollbar-thumb:hover {
+      background: var(--text-3);
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <!-- 顶栏 -->
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand-icon">🎬</div>
+        <span class="brand-text">字幕工厂</span>
+      </div>
+
+      <button class="primary-btn">
+        <span>📁</span>
+        导入本地视频
+      </button>
+
+      <button class="secondary-btn">
+        <span>🔗</span>
+        导入链接
+      </button>
+
+      <button class="secondary-btn">
+        <span>⚙️</span>
+        设置
+      </button>
+    </header>
+
+    <!-- 主体区域 -->
+    <main class="main">
+      <!-- 左侧：项目列表 -->
+      <aside class="projects">
+        <div class="projects-header">
+          <input type="search" class="search-input" placeholder="搜索项目...">
+        </div>
+
+        <div class="projects-list">
+          <div class="project-card active">
+            <div class="project-thumb">🎬</div>
+            <h3 class="project-title">我的第一个视频项目</h3>
+            <div class="project-meta">
+              <span class="status-badge ready">已完成</span>
+              <span>5 分钟前</span>
+            </div>
+          </div>
+
+          <div class="project-card">
+            <div class="project-thumb">🎥</div>
+            <h3 class="project-title">产品介绍视频</h3>
+            <div class="project-meta">
+              <span class="status-badge processing">转写中</span>
+              <span>2 小时前</span>
+            </div>
+          </div>
+
+          <div class="project-card">
+            <div class="project-thumb">📹</div>
+            <h3 class="project-title">会议记录 2024-01-15</h3>
+            <div class="project-meta">
+              <span class="status-badge ready">已完成</span>
+              <span>昨天</span>
+            </div>
+          </div>
+        </div>
+      </aside>
+
+      <!-- 右侧：工作区 -->
+      <section class="workspace">
+        <!-- 视频播放器 -->
+        <div class="player">
+          🎬
+        </div>
+
+        <!-- 字幕编辑区 -->
+        <div class="editor">
+          <div class="editor-toolbar">
+            <span class="editor-info">128 条字幕</span>
+
+            <button class="primary-btn">
+              <span>✨</span>
+              AI 整理
+            </button>
+
+            <button class="secondary-btn">
+              <span>🌐</span>
+              AI 翻译
+            </button>
+
+            <button class="secondary-btn">
+              <span>📤</span>
+              导出
+            </button>
+          </div>
+
+          <div class="editor-content">
+            <div class="subtitle-item">
+              <div class="subtitle-time">0:00:05 → 0:00:08</div>
+              <div class="subtitle-text">大家好，欢迎来到字幕工厂的演示。</div>
+              <div class="subtitle-translation">Hello everyone, welcome to the Subtitle Factory demo.</div>
+            </div>
+
+            <div class="subtitle-item">
+              <div class="subtitle-time">0:00:09 → 0:00:12</div>
+              <div class="subtitle-text">这是一个全新设计的界面，操作更加简单。</div>
+              <div class="subtitle-translation">This is a newly designed interface with simpler operation.</div>
+            </div>
+
+            <div class="subtitle-item">
+              <div class="subtitle-time">0:00:13 → 0:00:16</div>
+              <div class="subtitle-text">导入视频后，系统会自动转写。</div>
+              <div class="subtitle-translation">After importing the video, the system will automatically transcribe.</div>
+            </div>
+
+            <div class="subtitle-item">
+              <div class="subtitle-time">0:00:17 → 0:00:20</div>
+              <div class="subtitle-text">然后你可以手动触发 AI 整理和翻译。</div>
+            </div>
+
+            <div class="subtitle-item">
+              <div class="subtitle-time">0:00:21 → 0:00:24</div>
+              <div class="subtitle-text">不再需要在多个界面之间来回切换了。</div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <!-- 浮动进度卡片 -->
+    <div class="progress-float">
+      <div class="progress-header">
+        <span class="progress-title">正在处理...</span>
+        <button class="progress-close">✕</button>
+      </div>
+
+      <div class="progress-steps">
+        <div class="progress-step done">
+          <div class="progress-icon">✓</div>
+          <div class="progress-text">
+            <div class="progress-label">下载视频</div>
+            <div class="progress-detail">已完成</div>
+          </div>
+        </div>
+
+        <div class="progress-step done">
+          <div class="progress-icon">✓</div>
+          <div class="progress-text">
+            <div class="progress-label">提取音频</div>
+            <div class="progress-detail">已完成</div>
+          </div>
+        </div>
+
+        <div class="progress-step active">
+          <div class="progress-icon">⟳</div>
+          <div class="progress-text">
+            <div class="progress-label">转写</div>
+            <div class="progress-detail">42%</div>
+          </div>
+        </div>
+
+        <div class="progress-step">
+          <div class="progress-icon">○</div>
+          <div class="progress-text">
+            <div class="progress-label">等待 AI 整理</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

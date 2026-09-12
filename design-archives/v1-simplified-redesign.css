@@ -1,0 +1,556 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   字幕工厂 - 重新设计版本
+   核心理念：简化操作流程，减少点击次数，统一界面体验
+   ══════════════════════════════════════════════════════════════════════════ */
+
+:root {
+  /* 保持原有暖色调 */
+  --bg: #f5f4ed;
+  --surface: #fffdf8;
+  --surface-2: #f7f4ec;
+  --surface-3: #efe9dd;
+  --border: #e0dacb;
+  --border-soft: #eae4d6;
+  --text: #2d2822;
+  --text-2: #6b635a;
+  --text-3: #8a8175;
+  --accent: #c96442;
+  --accent-2: #d97b56;
+  --accent-soft: rgba(201, 100, 66, .13);
+  --blue: #5b7a9e;
+  --green: #5b7a6e;
+  --yellow: #b98a2f;
+  --red: #c0452e;
+
+  /* 新的设计系统 */
+  --radius-sm: 10px;
+  --radius-md: 14px;
+  --radius-lg: 18px;
+  --radius-xl: 24px;
+  --spacing-xs: 8px;
+  --spacing-sm: 12px;
+  --spacing-md: 20px;
+  --spacing-lg: 32px;
+  --spacing-xl: 48px;
+
+  --shadow-subtle: 0 1px 3px rgba(80, 60, 40, .06), 0 4px 12px rgba(80, 60, 40, .04);
+  --shadow-medium: 0 4px 16px rgba(80, 60, 40, .08), 0 8px 32px rgba(80, 60, 40, .06);
+  --shadow-large: 0 12px 48px rgba(80, 60, 40, .12), 0 24px 80px rgba(80, 60, 40, .08);
+
+  --ease-out: cubic-bezier(0.2, 0.8, 0.3, 1);
+  --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+  --duration: 240ms;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   1. 全局布局 - 取消三栏式，改为两栏式（项目列表 + 工作区）
+   ══════════════════════════════════════════════════════════════════════════ */
+
+.redesign-app {
+  width: 100%;
+  height: 100vh;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  background: var(--bg);
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", sans-serif;
+  color: var(--text);
+  overflow: hidden;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   2. 顶栏 - 极简设计，只保留核心功能
+   ══════════════════════════════════════════════════════════════════════════ */
+
+.redesign-topbar {
+  height: 72px;
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-md);
+  padding: 0 var(--spacing-lg);
+  border-bottom: 1px solid var(--border);
+  background: rgba(255, 253, 248, .94);
+  backdrop-filter: blur(32px);
+}
+
+.redesign-brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-right: auto;
+}
+
+.redesign-brand-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  object-fit: cover;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, .16);
+}
+
+.redesign-brand-text {
+  font-size: 16px;
+  font-weight: 650;
+  letter-spacing: -.02em;
+}
+
+/* 主操作按钮 - 大而明显 */
+.redesign-primary-action {
+  height: 48px;
+  padding: 0 32px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: linear-gradient(135deg, var(--accent-2), var(--accent));
+  color: white;
+  font-size: 15px;
+  font-weight: 630;
+  letter-spacing: -.01em;
+  box-shadow: 0 6px 20px rgba(201, 100, 66, .28);
+  cursor: pointer;
+  transition: all var(--duration) var(--ease-out);
+}
+
+.redesign-primary-action:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 32px rgba(201, 100, 66, .36);
+}
+
+.redesign-primary-action:active {
+  transform: translateY(0);
+}
+
+/* 次要按钮 */
+.redesign-secondary-action {
+  height: 44px;
+  padding: 0 24px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  color: var(--text-2);
+  font-size: 14px;
+  font-weight: 580;
+  cursor: pointer;
+  transition: all var(--duration) var(--ease-out);
+}
+
+.redesign-secondary-action:hover {
+  border-color: var(--accent);
+  background: var(--surface-2);
+  color: var(--text);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-subtle);
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   3. 主体布局 - 左侧项目列表 + 右侧工作区
+   ══════════════════════════════════════════════════════════════════════════ */
+
+.redesign-main {
+  display: grid;
+  grid-template-columns: 320px 1fr;
+  height: 100%;
+  overflow: hidden;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   4. 项目列表 - 大卡片设计，一目了然
+   ══════════════════════════════════════════════════════════════════════════ */
+
+.redesign-projects {
+  background: linear-gradient(180deg, #faf8f0, #f4f0e5);
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.redesign-projects-header {
+  padding: var(--spacing-md) var(--spacing-md) var(--spacing-sm);
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.redesign-projects-search {
+  width: 100%;
+  height: 44px;
+  padding: 0 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  font-size: 14px;
+  outline: none;
+  transition: all var(--duration) var(--ease-out);
+}
+
+.redesign-projects-search:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(201, 100, 66, .12);
+}
+
+.redesign-projects-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--spacing-sm);
+}
+
+/* 项目卡片 - 更大、更清晰 */
+.redesign-project-card {
+  margin-bottom: var(--spacing-sm);
+  padding: var(--spacing-md);
+  border: 1px solid transparent;
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  cursor: pointer;
+  transition: all var(--duration) var(--ease-out);
+}
+
+.redesign-project-card:hover {
+  border-color: var(--border);
+  box-shadow: var(--shadow-subtle);
+  transform: translateX(4px);
+}
+
+.redesign-project-card.active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  box-shadow: 0 0 0 3px rgba(201, 100, 66, .08), var(--shadow-subtle);
+}
+
+.redesign-project-thumb {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border-radius: var(--radius-sm);
+  background: var(--surface-3);
+  overflow: hidden;
+  margin-bottom: var(--spacing-sm);
+}
+
+.redesign-project-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.redesign-project-title {
+  font-size: 15px;
+  font-weight: 620;
+  margin-bottom: 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.redesign-project-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-xs);
+  font-size: 12px;
+  color: var(--text-3);
+}
+
+.redesign-project-status {
+  padding: 4px 10px;
+  border-radius: 12px;
+  background: var(--surface-2);
+  font-size: 11px;
+  font-weight: 560;
+}
+
+.redesign-project-status.ready {
+  background: rgba(91, 122, 110, .12);
+  color: var(--green);
+}
+
+.redesign-project-status.processing {
+  background: rgba(201, 100, 66, .12);
+  color: var(--accent);
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   5. 工作区 - 统一视图，视频+字幕一体化
+   ══════════════════════════════════════════════════════════════════════════ */
+
+.redesign-workspace {
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  overflow: hidden;
+}
+
+/* 欢迎屏 */
+.redesign-welcome {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--spacing-md);
+  color: var(--text-3);
+}
+
+.redesign-welcome-icon {
+  width: 80px;
+  height: 80px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-xl);
+  background: var(--surface-2);
+  font-size: 36px;
+  margin-bottom: var(--spacing-sm);
+}
+
+.redesign-welcome h2 {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 650;
+  color: var(--text);
+}
+
+.redesign-welcome p {
+  margin: 0;
+  font-size: 15px;
+  text-align: center;
+  max-width: 420px;
+  line-height: 1.6;
+}
+
+/* 视频播放器 */
+.redesign-player {
+  flex: 0 0 60vh;
+  min-height: 400px;
+  background: #000;
+  position: relative;
+}
+
+/* 字幕编辑区 */
+.redesign-editor {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  overflow: hidden;
+}
+
+.redesign-editor-toolbar {
+  height: 56px;
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  padding: 0 var(--spacing-md);
+  border-bottom: 1px solid var(--border-soft);
+  background: var(--surface-2);
+}
+
+.redesign-editor-content {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--spacing-md);
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   6. 浮动进度卡片 - 工作流运行时显示
+   ══════════════════════════════════════════════════════════════════════════ */
+
+.redesign-progress-float {
+  position: fixed;
+  right: var(--spacing-lg);
+  bottom: var(--spacing-lg);
+  width: 360px;
+  padding: var(--spacing-md);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-large);
+  z-index: 1000;
+  animation: slideInUp var(--duration) var(--ease-out);
+}
+
+@keyframes slideInUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.redesign-progress-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--spacing-sm);
+}
+
+.redesign-progress-title {
+  font-size: 15px;
+  font-weight: 620;
+}
+
+.redesign-progress-close {
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-3);
+  cursor: pointer;
+  transition: all var(--duration) var(--ease-out);
+}
+
+.redesign-progress-close:hover {
+  background: var(--surface-3);
+  color: var(--text);
+}
+
+.redesign-progress-steps {
+  display: flex;
+  flex-direction: column;
+  gap: var(--spacing-xs);
+}
+
+.redesign-progress-step {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  padding: var(--spacing-sm);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+
+.redesign-progress-step.active {
+  background: var(--accent-soft);
+  border: 1px solid rgba(201, 100, 66, .2);
+}
+
+.redesign-progress-step.done {
+  opacity: 0.6;
+}
+
+.redesign-progress-icon {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--surface-3);
+  font-size: 14px;
+}
+
+.redesign-progress-step.active .redesign-progress-icon {
+  background: var(--accent);
+  color: white;
+  animation: pulse 1.5s infinite;
+}
+
+.redesign-progress-step.done .redesign-progress-icon {
+  background: var(--green);
+  color: white;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.7; }
+}
+
+.redesign-progress-text {
+  flex: 1;
+}
+
+.redesign-progress-label {
+  font-size: 13px;
+  font-weight: 580;
+  margin-bottom: 2px;
+}
+
+.redesign-progress-detail {
+  font-size: 11px;
+  color: var(--text-3);
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   7. 简化的右键菜单
+   ══════════════════════════════════════════════════════════════════════════ */
+
+.redesign-context-menu {
+  min-width: 200px;
+  padding: var(--spacing-xs);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-large);
+  z-index: 2000;
+}
+
+.redesign-context-item {
+  width: 100%;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  gap: var(--spacing-sm);
+  padding: 0 var(--spacing-sm);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  text-align: left;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all var(--duration) var(--ease-out);
+}
+
+.redesign-context-item:hover {
+  background: var(--accent);
+  color: white;
+}
+
+.redesign-context-item-icon {
+  width: 20px;
+  text-align: center;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   8. 响应式优化
+   ══════════════════════════════════════════════════════════════════════════ */
+
+@media (max-width: 1200px) {
+  .redesign-main {
+    grid-template-columns: 280px 1fr;
+  }
+
+  .redesign-progress-float {
+    width: 320px;
+    right: var(--spacing-md);
+    bottom: var(--spacing-md);
+  }
+}
+
+@media (max-width: 900px) {
+  .redesign-main {
+    grid-template-columns: 1fr;
+  }
+
+  .redesign-projects {
+    display: none;
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   9. 暗色模式
+   ══════════════════════════════════════════════════════════════════════════ */
+
+.theme-dark {
+  --bg: #1f1c18;
+  --surface: #2a2620;
+  --surface-2: #332e27;
+  --surface-3: #3d372f;
+  --border: rgba(255, 235, 210, .105);
+  --border-soft: rgba(255, 235, 210, .065);
+  --text: rgba(250, 243, 233, .94);
+  --text-2: rgba(240, 228, 212, .64);
+  --text-3: rgba(230, 215, 195, .4);
+  --accent: #d97b56;
+  --accent-2: #e8936d;
+}
