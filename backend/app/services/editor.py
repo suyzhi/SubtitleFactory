@@ -77,21 +77,29 @@ def _restore_snapshot(conn, project_id: str, snapshot: list[dict]) -> None:
     conn.execute("DELETE FROM segments WHERE project_id=?", (project_id,))
     placeholders = ",".join("?" for _ in SEGMENT_COLUMNS)
     columns = ",".join(SEGMENT_COLUMNS)
+    rows = []
     for item in snapshot:
         values = [item.get(name) for name in SEGMENT_COLUMNS]
         values[1] = project_id
-        conn.execute(
-            f"INSERT INTO segments ({columns}) VALUES ({placeholders})", values
+        rows.append(values)
+    if rows:
+        conn.executemany(
+            f"INSERT INTO segments ({columns}) VALUES ({placeholders})", rows
         )
 
 
 def _renumber(conn, project_id: str) -> None:
-    rows = conn.execute(
-        "SELECT id FROM segments WHERE project_id=? ORDER BY idx, start, id",
-        (project_id,),
-    ).fetchall()
-    for index, row in enumerate(rows, 1):
-        conn.execute("UPDATE segments SET idx=? WHERE id=?", (index, row["id"]))
+    # Single window-function statement instead of one UPDATE per row.
+    conn.execute(
+        """WITH ranked AS (
+               SELECT id, ROW_NUMBER() OVER (ORDER BY idx, start, id) AS rn
+                 FROM segments WHERE project_id=?
+           )
+           UPDATE segments
+              SET idx = (SELECT rn FROM ranked WHERE ranked.id = segments.id)
+            WHERE project_id=?""",
+        (project_id, project_id),
+    )
 
 
 def _validate_timeline(conn, project_id: str) -> None:
@@ -237,18 +245,19 @@ def _apply_replace(conn, project_id: str, request: SegmentOperationRequest) -> t
 
 def _apply_shift(conn, project_id: str, request: SegmentOperationRequest) -> tuple[int, bool]:
     selected = set(request.indices)
-    affected = 0
-    for row in _rows(conn, project_id):
-        if selected and row["idx"] not in selected:
-            continue
-        if row["locked"] and not request.include_locked:
-            continue
-        conn.execute(
-            "UPDATE segments SET start=?,end=? WHERE id=?",
-            (float(row["start"]) + request.delta, float(row["end"]) + request.delta, row["id"]),
-        )
-        affected += 1
-    return affected, True
+    clauses = ["project_id=?"]
+    values: list = [request.delta, request.delta, project_id]
+    if selected:
+        placeholders = ",".join("?" for _ in selected)
+        clauses.append(f"idx IN ({placeholders})")
+        values.extend(sorted(selected))
+    if not request.include_locked:
+        clauses.append("COALESCE(locked,0)=0")
+    cursor = conn.execute(
+        f"UPDATE segments SET start=start+?,end=end+? WHERE {' AND '.join(clauses)}",
+        values,
+    )
+    return cursor.rowcount, True
 
 
 def _apply_split(conn, project_id: str, request: SegmentOperationRequest) -> tuple[int, bool]:
@@ -331,16 +340,16 @@ def _apply_assign_speaker(conn, project_id: str, request: SegmentOperationReques
     selected = set(request.indices)
     if not selected:
         raise EditorServiceError(422, "SEGMENTS_REQUIRED", "请选择要指定说话人的字幕")
-    affected = 0
-    for row in _rows(conn, project_id):
-        if row["idx"] not in selected or (row["locked"] and not request.include_locked):
-            continue
-        conn.execute(
-            "UPDATE segments SET speaker_id=?,speaker=? WHERE id=?",
-            (speaker_id, name, row["id"]),
-        )
-        affected += 1
-    return affected, False
+    placeholders = ",".join("?" for _ in selected)
+    clauses = [f"idx IN ({placeholders})", "project_id=?"]
+    values: list = [speaker_id, name, *sorted(selected), project_id]
+    if not request.include_locked:
+        clauses.append("COALESCE(locked,0)=0")
+    cursor = conn.execute(
+        f"UPDATE segments SET speaker_id=?,speaker=? WHERE {' AND '.join(clauses)}",
+        values,
+    )
+    return cursor.rowcount, False
 
 
 APPLIERS = {

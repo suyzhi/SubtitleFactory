@@ -152,6 +152,7 @@ def translate_subtitles(task_id: str, project_id: str, target_language: str = "z
     db = get_db()
     updated = 0
     memory_records = []
+    rows_by_index = {int(row["idx"]): row for row in rows}
     try:
         db.execute("BEGIN IMMEDIATE")
         current_revision = int(db.execute("SELECT edit_revision FROM projects WHERE id=?", (project_id,)).fetchone()[0] or 0)
@@ -173,7 +174,7 @@ def translate_subtitles(task_id: str, project_id: str, target_language: str = "z
                     (translated, project_id, idx)
                 )
                 updated += 1
-                source_row = next((row for row in rows if int(row["idx"]) == idx), None)
+                source_row = rows_by_index.get(idx)
                 if source_row:
                     memory_records.append((
                         source_row["clean_text"] or source_row["raw_text"] or "",

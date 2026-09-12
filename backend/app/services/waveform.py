@@ -7,7 +7,6 @@ import json
 import os
 import uuid
 import wave
-from array import array
 from functools import lru_cache
 from pathlib import Path
 
@@ -25,41 +24,78 @@ def audio_fingerprint(path: str) -> str:
     return _cached_fingerprint(resolved, stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns)
 
 
+_FINGERPRINT_SAMPLE_BYTES = 1024 * 1024
+
+
 @lru_cache(maxsize=128)
 def _cached_fingerprint(path: str, *identity: int) -> str:
+    # The stat identity in the cache key already detects any in-place change.
+    # Hashing three sampled windows keeps huge WAVs from being read end-to-end
+    # on first request while still content-addressing distinct files.
+    size = int(identity[2]) if len(identity) > 2 else os.path.getsize(path)
     digest = hashlib.sha256()
+    # Fold the stat identity in: ``cache_path`` is derived from this digest, so
+    # any size/mtime/ctime/inode change must yield a new digest even when the
+    # change sits outside the sampled windows below.
+    digest.update(",".join(str(int(value)) for value in identity).encode("ascii"))
+    digest.update(str(size).encode("ascii"))
     with open(path, "rb") as source:
-        for chunk in iter(lambda: source.read(1024 * 1024), b""):
-            digest.update(chunk)
+        if size <= 3 * _FINGERPRINT_SAMPLE_BYTES:
+            for chunk in iter(lambda: source.read(1024 * 1024), b""):
+                digest.update(chunk)
+        else:
+            middle = max(0, size // 2 - _FINGERPRINT_SAMPLE_BYTES // 2)
+            for offset in (0, middle, size - _FINGERPRINT_SAMPLE_BYTES):
+                source.seek(offset)
+                digest.update(source.read(_FINGERPRINT_SAMPLE_BYTES))
     return digest.hexdigest()
 
 
-def _mono_samples(source: wave.Wave_read) -> array:
+def _mono_samples(source: wave.Wave_read) -> np.ndarray:
+    """Read a 16-bit WAV as native int16 mono samples, downmixing in NumPy.
+
+    Frames are consumed in bounded chunks so stereo/multichannel input never
+    requires an int32 or float64 copy of the full file. The previous
+    ``round(sum(frame) / len(frame))`` semantics are preserved exactly by
+    dividing in float64 and using NumPy's round-half-to-even.
+    """
     channels = source.getnchannels()
-    sample_width = source.getsampwidth()
-    if sample_width != 2:
+    if source.getsampwidth() != 2:
         raise ValueError("波形仅支持 16-bit PCM WAV 音频")
-    values = array("h")
-    values.frombytes(source.readframes(source.getnframes()))
-    if os.sys.byteorder != "little":
-        values.byteswap()
-    if channels == 1:
-        return values
-    mono = array("h")
-    for offset in range(0, len(values), channels):
-        frame = values[offset:offset + channels]
-        mono.append(round(sum(frame) / len(frame)))
-    return mono
+    total_frames = source.getnframes()
+    mono = np.empty(total_frames, dtype=np.int16)
+    chunk_frames = 1 << 20
+    written = 0
+    while written < total_frames:
+        raw = source.readframes(min(chunk_frames, total_frames - written))
+        if not raw:
+            break
+        values = np.frombuffer(raw, dtype="<i2")
+        frames = values.size // channels
+        if frames == 0:
+            break
+        if channels == 1:
+            mono[written:written + frames] = values
+        else:
+            block = values.reshape(frames, channels)
+            mixed = np.rint(block.sum(axis=1, dtype=np.int64) / channels)
+            mono[written:written + frames] = mixed.astype(np.int16)
+        written += frames
+    if written == total_frames:
+        return mono
+    return mono[:written]
 
 
-def _peaks(samples: array, count: int) -> list[float]:
-    if not samples:
+def _peaks(samples, count: int) -> list[float]:
+    # Accepts either the native int16 ndarray returned by ``_mono_samples`` or a
+    # legacy ``array('h')`` (kept for callers that build PCM directly).
+    values = samples if isinstance(samples, np.ndarray) else np.frombuffer(samples, dtype=np.int16)
+    if values.size == 0:
         return []
-    count = max(1, min(count, len(samples)))
-    # View PCM without copying it, and reduce each bucket in native code.
-    # Widen only the small result arrays so -32768 cannot overflow on abs().
-    values = np.frombuffer(samples, dtype=np.int16)
-    starts = np.floor(np.arange(count) * (len(samples) / count)).astype(np.intp)
+    count = max(1, min(count, values.size))
+    # Reduce each bucket in native code; widen only the small result arrays so
+    # -32768 cannot overflow on abs().
+    starts = np.floor(np.arange(count) * (values.size / count)).astype(np.intp)
     high = np.maximum.reduceat(values, starts).astype(np.int32)
     low = np.minimum.reduceat(values, starts).astype(np.int32)
     peaks = np.maximum(high, -low) / 32768

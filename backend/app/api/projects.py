@@ -1072,14 +1072,17 @@ def empty_project_trash(confirm: bool = Query(False)):
     db = get_db()
     try:
         project_ids = [row["id"] for row in rows]
-        for project_id in project_ids:
-            db.execute(
-                "DELETE FROM transcription_segments WHERE project_id=?", (project_id,)
-            )
-            db.execute("DELETE FROM transcription_runs WHERE project_id=?", (project_id,))
-            db.execute("DELETE FROM segment_revisions WHERE project_id=?", (project_id,))
-            db.execute("DELETE FROM segments WHERE project_id=?", (project_id,))
-            db.execute("DELETE FROM tasks WHERE project_id=?", (project_id,))
+        # One statement per table/chunk instead of five statements per project.
+        for table in (
+            "transcription_segments", "transcription_runs", "segment_revisions",
+            "segments", "tasks",
+        ):
+            for start in range(0, len(project_ids), 400):
+                chunk = project_ids[start:start + 400]
+                placeholders = ",".join("?" for _ in chunk)
+                db.execute(
+                    f"DELETE FROM {table} WHERE project_id IN ({placeholders})", chunk
+                )
         db.execute(
             "DELETE FROM projects WHERE deleted_at IS NOT NULL" + project_scope
         )

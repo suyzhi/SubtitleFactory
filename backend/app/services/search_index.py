@@ -140,36 +140,45 @@ def search_segments(
 
     db = get_db()
     try:
-        total = int(
-            db.execute(
-                f"SELECT COUNT(*) FROM segment_search {' '.join(joins)} WHERE {predicate}",
-                values,
-            ).fetchone()[0]
-        )
         rows = [
             dict(row)
             for row in db.execute(
-                f"""SELECT s.id segment_id,s.project_id,p.title project_title,
-                           p.group_name,p.source_type,p.language source_language,
-                           p.target_language,p.created_at,p.updated_at,
-                           s.idx segment_index,s.start,s.end,s.speaker_id,
-                           COALESCE(s.speaker,'') speaker_name,
-                           COALESCE(s.raw_text,'') raw_text,
-                           COALESCE(s.clean_text,'') clean_text,
-                           COALESCE(s.translated_text,'') translated_text,
-                           (SELECT b.title FROM batch_items bi
-                              JOIN batches b ON b.id=bi.batch_id
-                             WHERE bi.project_id=p.id AND b.kind='youtube_playlist'
-                             LIMIT 1) playlist_title,
-                           {rank} rank
-                      FROM segment_search {' '.join(joins)}
-                     WHERE {predicate}
-                     ORDER BY rank,p.updated_at DESC,s.idx
+                f"""SELECT *, COUNT(*) OVER() AS _total
+                      FROM (
+                          SELECT s.id segment_id,s.project_id,p.title project_title,
+                                 p.group_name,p.source_type,p.language source_language,
+                                 p.target_language,p.created_at,p.updated_at,
+                                 s.idx segment_index,s.start,s.end,s.speaker_id,
+                                 COALESCE(s.speaker,'') speaker_name,
+                                 COALESCE(s.raw_text,'') raw_text,
+                                 COALESCE(s.clean_text,'') clean_text,
+                                 COALESCE(s.translated_text,'') translated_text,
+                                 (SELECT b.title FROM batch_items bi
+                                    JOIN batches b ON b.id=bi.batch_id
+                                   WHERE bi.project_id=p.id AND b.kind='youtube_playlist'
+                                   LIMIT 1) playlist_title,
+                                 {rank} rank
+                            FROM segment_search {' '.join(joins)}
+                           WHERE {predicate}
+                      ) AS ranked
+                     ORDER BY ranked.rank,ranked.updated_at DESC,ranked.segment_index
                      LIMIT ? OFFSET ?""",
                 [*values, page_size, (page - 1) * page_size],
             ).fetchall()
         ]
+        if rows:
+            total = int(rows[0]["_total"])
+        else:
+            # Window count is absent when the page is past the end; fall back
+            # to a single COUNT for that rare case.
+            total = int(
+                db.execute(
+                    f"SELECT COUNT(*) FROM segment_search {' '.join(joins)} WHERE {predicate}",
+                    values,
+                ).fetchone()[0]
+            )
         for row in rows:
+            row.pop("_total", None)
             row["snippet"], row["match_fields"] = _snippet(row, query)
             row.pop("raw_text", None)
             row.pop("clean_text", None)

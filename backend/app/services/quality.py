@@ -20,6 +20,8 @@ DEFAULT_RULES = {
     "rapid_speaker_gap": 0.15,
 }
 
+_NUMBER_RE = re.compile(r"\d+(?:[.,]\d+)?")
+
 
 def _text(row) -> str:
     return (row["clean_text"] or row["raw_text"] or "").strip()
@@ -54,6 +56,19 @@ def evaluate(project_id: str, configuration: dict | None = None) -> list[dict]:
         ).fetchall()
     finally:
         db.close()
+
+    compiled_terms = []
+    for term in terms:
+        flags = 0 if term["case_sensitive"] else re.IGNORECASE
+        source = term["source_text"]
+        source_pattern = re.compile(
+            rf"\b{re.escape(source)}\b" if term["whole_word"] else re.escape(source),
+            flags,
+        )
+        expected = source if term["do_not_translate"] else term["target_text"]
+        expected_pattern = re.compile(re.escape(expected), flags) if expected else None
+        compiled_terms.append((source, source_pattern, expected, expected_pattern))
+    known_terms = {str(term["source_text"]).casefold() for term in terms}
 
     issues: list[dict] = []
     previous = None
@@ -93,8 +108,8 @@ def evaluate(project_id: str, configuration: dict | None = None) -> list[dict]:
             issues.append(_issue("duplicate", row, "warning", "与上一条字幕完全重复", "确认是否应合并"))
         if text and not translation:
             issues.append(_issue("missing_translation", row, "info", "译文为空", "翻译或确认无需译文"))
-        source_numbers = re.findall(r"\d+(?:[.,]\d+)?", text)
-        target_numbers = re.findall(r"\d+(?:[.,]\d+)?", translation)
+        source_numbers = _NUMBER_RE.findall(text)
+        target_numbers = _NUMBER_RE.findall(translation)
         if translation and source_numbers != target_numbers:
             issues.append(_issue("number_mismatch", row, "warning", "原文与译文数字不一致", "核对数字", {"source": source_numbers, "target": target_numbers}))
         if translation:
@@ -102,18 +117,13 @@ def evaluate(project_id: str, configuration: dict | None = None) -> list[dict]:
             target_has_end = bool(re.search(r"[.!?。！？…][\"'’”）)]?$", translation))
             if source_has_end != target_has_end:
                 issues.append(_issue("punctuation", row, "info", "原文与译文句末标点不一致", "核对句末标点"))
-            known_terms = {str(term["source_text"]).casefold() for term in terms}
             missing_names = [name for name in re.findall(r"(?<![.\w])[A-Z][A-Za-z0-9-]{2,}", text)
                              if name.casefold() not in known_terms and not re.search(rf"\b{re.escape(name)}\b", translation)]
             if missing_names:
                 issues.append(_issue("proper_noun", row, "info", f"专有名词可能未保持一致：{', '.join(missing_names[:3])}", "加入术语表或核对译名", {"names": missing_names}))
-        for term in terms:
-            flags = 0 if term["case_sensitive"] else re.IGNORECASE
-            source = term["source_text"]
-            pattern = rf"\b{re.escape(source)}\b" if term["whole_word"] else re.escape(source)
-            if re.search(pattern, text, flags):
-                expected = source if term["do_not_translate"] else term["target_text"]
-                if expected and not re.search(re.escape(expected), translation, flags):
+        for source, source_pattern, expected, expected_pattern in compiled_terms:
+            if source_pattern.search(text):
+                if expected and expected_pattern is not None and not expected_pattern.search(translation):
                     issues.append(_issue("glossary", row, "warning", f"术语“{source}”未使用“{expected}”", "按术语表修正", {"source": source, "expected": expected}))
         previous, previous_text = row, text
     return issues

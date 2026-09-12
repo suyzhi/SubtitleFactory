@@ -560,6 +560,7 @@ def _validate_grouped_results(batch: list[dict], parsed) -> list[dict]:
         raise ValueError("AI 未返回包含 groups 数组的 JSON 对象")
     expected = [str(row["idx"]) for row in batch]
     row_by_idx = {str(row["idx"]): row for row in batch}
+    position_by_idx = {value: position for position, value in enumerate(expected)}
     consumed = set()
     normalized = []
     for group in parsed:
@@ -571,7 +572,7 @@ def _validate_grouped_results(batch: list[dict], parsed) -> list[dict]:
             continue
         if any(value not in row_by_idx for value in ids):
             continue
-        positions = [expected.index(value) for value in ids]
+        positions = [position_by_idx[value] for value in ids]
         if ids != expected[min(positions):max(positions) + 1]:
             raise ValueError("AI 字幕 ID 顺序变化或分组不连续")
         if consumed.intersection(ids):
@@ -599,7 +600,7 @@ def _validate_grouped_results(batch: list[dict], parsed) -> list[dict]:
         if value not in consumed:
             row = row_by_idx[value]
             normalized.append({"ids": [value], "clean_text": row.get("clean_text") or row.get("raw_text") or ""})
-    normalized.sort(key=lambda group: expected.index(group["ids"][0]))
+    normalized.sort(key=lambda group: position_by_idx[group["ids"][0]])
     return normalized
 
 

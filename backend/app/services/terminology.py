@@ -101,8 +101,20 @@ def fuzzy_memory(text: str, source_language: str, target_language: str, limit: i
     finally:
         db.close()
     matches = []
+    normalized_length = len(normalized)
     for row in rows:
-        score = SequenceMatcher(None, normalized, normalize_source(row["source_text"])).ratio()
+        candidate = normalize_source(row["source_text"])
+        if not candidate:
+            continue
+        # ``quick_ratio`` is a cheap upper bound on ``ratio``; skipping
+        # candidates below the threshold cannot drop a real match.
+        shortest, longest = sorted((normalized_length, len(candidate)))
+        if longest and shortest / longest < 0.45:
+            continue
+        matcher = SequenceMatcher(None, normalized, candidate)
+        if matcher.quick_ratio() < .62:
+            continue
+        score = matcher.ratio()
         if score >= .62:
             matches.append({**dict(row), "score": round(score, 4)})
     return sorted(matches, key=lambda item: (item["confirmed"], item["score"], item["use_count"]), reverse=True)[:max(1, min(limit, 20))]
