@@ -64,6 +64,13 @@ class V1FeatureTests(unittest.TestCase):
         for item in reversed(self.patches): item.stop()
         self.folder.cleanup()
 
+    def test_untranslated_project_does_not_report_missing_translations(self):
+        db = database.get_db()
+        db.execute("UPDATE segments SET translated_text='' WHERE project_id=?", (self.project_id,))
+        db.commit(); db.close()
+        rules = {item["rule_id"] for item in scan(self.project_id)}
+        self.assertNotIn("missing_translation", rules)
+
     def test_schema_quality_glossary_and_import_history(self):
         db = database.get_db()
         version = db.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0]

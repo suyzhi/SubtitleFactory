@@ -277,6 +277,14 @@ function SubtitleTable({
     setEditField(null);
   };
 
+  const handleTextKey = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (event.key === 'Escape') { event.preventDefault(); cancelEdit(); return; }
+    if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
+      event.preventDefault();
+      saveEdit();
+    }
+  };
+
   const selected = [...selectedIndices].sort((a, b) => a - b);
   const selectedSegment = selected.length === 1 ? segments.find(segment => segment.index === selected[0]) : undefined;
   const canSplit = !!selectedSegment && currentTime > selectedSegment.start && currentTime < selectedSegment.end;
@@ -291,24 +299,24 @@ function SubtitleTable({
   return (
     <div className={`subtitle-table-container ${disabled ? 'editing-disabled' : ''}`}>
       <div className="subtitle-table-header">
-        <h3>字幕时间轴与编辑 ({segments.length} 条)</h3>
+        <h3>字幕 <small>{segments.length} 条 · 点击文字编辑，Shift+Enter 换行</small></h3>
         <div className="table-header-right">
           <button className="btn btn-ghost btn-xs" aria-pressed={showTranslation} onClick={() => setTranslationVisible(!showTranslation)}>译文列</button>
-          <button className="btn btn-ghost btn-xs" disabled={disabled} onClick={() => void onUndo()} title="撤销上次编辑">↶ 撤销</button>
-          <button className="btn btn-ghost btn-xs" disabled={disabled} onClick={() => void onRedo()} title="重做上次编辑">↷ 重做</button>
+          <button className="btn btn-ghost btn-xs" disabled={disabled} onClick={() => void onUndo()} title="撤销上次编辑（⌘Z）">撤销</button>
+          <button className="btn btn-ghost btn-xs" disabled={disabled} onClick={() => void onRedo()} title="重做（⇧⌘Z）">重做</button>
           <button className="btn btn-ghost btn-xs" disabled={disabled || !canSplit} onClick={() => {
             if (!selectedSegment) return;
             void onSplit(selectedSegment.index, currentTime)
               .then(() => setSelectedIndices(new Set()))
               .catch(() => undefined);
-          }}>拆分</button>
+          }} title="在播放头处拆分所选字幕（⌘↩ 可直接拆分播放头所在字幕）">拆分</button>
           <button className="btn btn-ghost btn-xs" disabled={disabled || !canMerge} onClick={() => void onMerge(selected).then(() => setSelectedIndices(new Set())).catch(() => undefined)}>合并</button>
           <button className={`btn btn-ghost btn-xs ${autoScroll ? '' : 'inactive'}`}
+            aria-pressed={!!autoScroll}
             onClick={() => onAutoScrollChange?.(!autoScroll)}
-            title={autoScroll ? '自动滚动已开启' : '自动滚动已关闭'}>
-            {autoScroll ? '🔁 自动' : '⏸ 锁定'}
+            title={autoScroll ? '字幕列表会跟随播放位置滚动' : '已停止跟随播放，点击恢复'}>
+            跟随播放
           </button>
-          <span className="current-time">⏱ {fmtTime(currentTime)}</span>
           <span className={`editor-save-state ${saveState}`}>{saveState === 'saving' ? '保存中…' : saveState === 'error' ? '保存失败' : saveState === 'saved' ? '已保存' : ''}</span>
         </div>
       </div>
@@ -334,7 +342,7 @@ function SubtitleTable({
               <th className="col-time">结束</th>
               <th className="col-text">原文/整理</th>
               {showTranslation && <th className="col-text">译文</th>}
-              <th className="col-lock">🔒</th>
+              <th className="col-lock" title="锁定后批量替换与 AI 处理不会修改该条">锁定</th>
             </tr>
           </thead>
           <tbody>
@@ -365,11 +373,12 @@ function SubtitleTable({
                   <td className="col-text editable"
                     onClick={() => !isEditing && startEdit(seg, 'clean_text')}>
                     {isEditing && editField === 'clean_text' ? (
-                      <input className="edit-input" autoFocus
+                      <textarea className="edit-input" autoFocus rows={Math.max(1, editValue.split('\n').length)}
+                        aria-label={`编辑第 ${seg.index} 条原文`}
                         value={editValue}
                         onChange={e => setEditValue(e.target.value)}
                         onBlur={saveEdit}
-                        onKeyDown={e => e.key === 'Enter' ? saveEdit() : e.key === 'Escape' ? cancelEdit() : undefined}
+                        onKeyDown={handleTextKey}
                       />
                     ) : (
                       <span className="text-preview">{displayText || '...'}</span>
@@ -378,11 +387,12 @@ function SubtitleTable({
                   {showTranslation && <td className="col-text editable"
                     onClick={() => !isEditing && startEdit(seg, 'translated_text')}>
                     {isEditing && editField === 'translated_text' ? (
-                      <input className="edit-input" autoFocus
+                      <textarea className="edit-input" autoFocus rows={Math.max(1, editValue.split('\n').length)}
+                        aria-label={`编辑第 ${seg.index} 条译文`}
                         value={editValue}
                         onChange={e => setEditValue(e.target.value)}
                         onBlur={saveEdit}
-                        onKeyDown={e => e.key === 'Enter' ? saveEdit() : e.key === 'Escape' ? cancelEdit() : undefined}
+                        onKeyDown={handleTextKey}
                       />
                     ) : (
                       <span className="text-preview">{seg.translated_text || '...'}</span>
@@ -390,6 +400,7 @@ function SubtitleTable({
                   </td>}
                   <td className="col-lock">
                     <input type="checkbox" checked={seg.locked} disabled={disabled}
+                      aria-label={`锁定第 ${seg.index} 条字幕`}
                       onChange={e => onUpdate(seg.index, { locked: e.target.checked })} />
                   </td>
                 </tr>

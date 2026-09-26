@@ -34,5 +34,6 @@ export const TARGET_LANGUAGES = LANGUAGES.filter(language => language.code !== '
 export function languageLabel(code: string): string {
   if (code === 'none') return '不翻译';
   const language = LANGUAGES.find(item => item.code.toLocaleLowerCase() === code.toLocaleLowerCase());
-  return language ? `${language.name} · ${language.nativeName}` : code;
+  if (!language) return code;
+  return language.name === language.nativeName ? language.name : `${language.name} · ${language.nativeName}`;
 }

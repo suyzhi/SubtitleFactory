@@ -242,6 +242,8 @@ function App() {
   const styleSaveTimer = useRef<number | null>(null);
   const pendingSearchJump = useRef<SegmentSearchHit | null>(null);
   const toastTimer = useRef<number | null>(null);
+  const playheadRef = useRef<{ segments: SubtitleSegment[]; time: number }>({ segments: [], time: 0 });
+  useEffect(() => { playheadRef.current = { segments, time: currentTime }; }, [segments, currentTime]);
   const inProjectView = showProjectWorkspace && !!activeProject;
   const viewEntering = useTransientFlag(inProjectView ? `project:${activeProject?.id}` : `library:${libraryView}:${libraryPage}:${projects.length > 0}`);
   const pageEntering = useTransientFlag(`${activeProject?.id}:${projectWorkspace}`, 700);
@@ -1612,6 +1614,19 @@ function App() {
         }, 0);
         return;
       }
+      if (key === 'enter') {
+        if (showAISettings || !showProjectWorkspace || projectWorkspace !== 'subtitles') return;
+        const target = event.target;
+        if (target instanceof HTMLElement && (
+          target.isContentEditable || target.tagName === 'INPUT' || target.tagName === 'TEXTAREA'
+        )) return;
+        event.preventDefault();
+        const { segments: current, time } = playheadRef.current;
+        const segment = current.find(item => time > item.start + 0.05 && time < item.end - 0.05);
+        if (!segment) { showToast('播放头不在可拆分的字幕内'); return; }
+        void splitSegment(segment.index, time).catch(() => undefined);
+        return;
+      }
       if (key !== 'z') return;
       if (showAISettings || !showProjectWorkspace) return;
       const target = event.target;
@@ -1624,7 +1639,43 @@ function App() {
     };
     window.addEventListener('keydown', handleEditorShortcut);
     return () => window.removeEventListener('keydown', handleEditorShortcut);
-  }, [commitDraft, redoEditor, showAISettings, showProjectWorkspace, undoEditor]);
+  }, [commitDraft, projectWorkspace, redoEditor, showAISettings, showProjectWorkspace, showToast, splitSegment, undoEditor]);
+
+  // Lightweight <details> menus close on outside click or Escape, like native menus.
+  useEffect(() => {
+    const close = (event: Event) => {
+      document.querySelectorAll<HTMLDetailsElement>('details.popover-menu[open]').forEach(menu => {
+        if (event instanceof KeyboardEvent ? event.key === 'Escape' : !menu.contains(event.target as Node)) menu.open = false;
+      });
+    };
+    window.addEventListener('pointerdown', close);
+    window.addEventListener('keydown', close);
+    return () => { window.removeEventListener('pointerdown', close); window.removeEventListener('keydown', close); };
+  }, []);
+
+  // Playback keys work anywhere in the workspace, not only while the player has focus.
+  // Typing, buttons, dialogs and menus keep their native Space/letter behaviour.
+  useEffect(() => {
+    const handlePlaybackShortcut = (event: KeyboardEvent) => {
+      if (event.metaKey || event.ctrlKey || event.altKey || event.defaultPrevented) return;
+      if (showAISettings || !showProjectWorkspace || projectWorkspace === 'export') return;
+      const target = event.target;
+      if (target instanceof HTMLElement && (
+        target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT', 'BUTTON', 'A'].includes(target.tagName)
+        || target.closest('.pro-player, [role="dialog"], [role="menu"], .app-select-shell')
+      )) return;
+      const player = videoPlayerRef.current;
+      if (!player) return;
+      if (event.key === ' ') player.togglePlay();
+      else if (event.key.toLowerCase() === 'r' && !event.repeat) player.replay();
+      else if (event.key === ',') player.stepFrame(-1);
+      else if (event.key === '.') player.stepFrame(1);
+      else return;
+      event.preventDefault();
+    };
+    window.addEventListener('keydown', handlePlaybackShortcut);
+    return () => window.removeEventListener('keydown', handlePlaybackShortcut);
+  }, [projectWorkspace, showAISettings, showProjectWorkspace]);
 
   const importSubtitleFile = useCallback(() => {
     if (!activeProject) return;
@@ -2144,8 +2195,12 @@ function App() {
       const interrupted = values.find(step => ['cancelled','partial'].includes(step.status));
       return failed || running || interrupted || { ...(values.at(-1) || emptyProcess()[0]), status: allDone ? 'success' : 'waiting', progress: allDone ? 100 : 0 };
     };
+    // Audio extraction is an internal step of transcription; media is ready once the video is.
+    const media = combine('download', 'extract_audio');
+    const mediaState = media.status === 'waiting' && find('download')?.status === 'success'
+      ? { ...media, status: 'success' as TaskStepStatus, progress: 100 } : media;
     return [
-      { id: 'download', label: activeProjectIsYoutube ? '下载' : '媒体', icon: '⇩', state: combine('download', 'extract_audio') },
+      { id: 'download', label: activeProjectIsYoutube ? '下载' : '媒体', icon: '⇩', state: mediaState },
       { id: 'transcribe', label: '转写', icon: '⌁', state: combine('transcribe') },
       { id: 'clean', label: '整理', icon: '✦', state: combine('clean') },
       { id: 'translate', label: '翻译', icon: '文', state: combine('translate') },
@@ -2239,11 +2294,11 @@ function App() {
         </div>
         <div className="active-project-title" data-tauri-drag-region>
           <strong data-tauri-drag-region>{showProjectWorkspace && activeProject ? activeProject.title : '项目库'}</strong>
-          <span data-tauri-drag-region>{showProjectWorkspace && activeProject ? `${segments.length} 条字幕 · ${languageLabel(config.language)}` : '本地优先的专业字幕工作台'}</span>
+          <span data-tauri-drag-region>{showProjectWorkspace && activeProject ? [languageLabel(activeProject.language), activeProject.target_language && activeProject.target_language !== 'none' && segments.some(segment => segment.translated_text) ? `译文 ${languageLabel(activeProject.target_language)}` : '', projectReadiness(activeProject)].filter(Boolean).join(' · ') : '本地优先的专业字幕工作台'}</span>
         </div>
         <div className="topbar-actions">
-          <button className="topbar-button" disabled={backendStatus !== 'connected'} onClick={handleImportLocal}><span>＋</span>导入</button>
-          {youtubeEnabled && <button className={`topbar-button ${showLinkPopover ? 'active' : ''}`} disabled={backendStatus !== 'connected'} onClick={() => setShowLinkPopover(value => !value)}><span>⌁</span>链接</button>}
+          {inProjectView && <button className="topbar-button" disabled={backendStatus !== 'connected'} onClick={handleImportLocal}><span>＋</span>导入</button>}
+          {inProjectView && youtubeEnabled && <button className={`topbar-button ${showLinkPopover ? 'active' : ''}`} disabled={backendStatus !== 'connected'} onClick={() => setShowLinkPopover(value => !value)}><span>⌁</span>链接</button>}
           <button className={`task-status-pill ${backendStatus} ${isProcessing ? 'busy' : ''}`} onClick={() => setShowTaskDrawer(value => !value)} aria-expanded={showTaskDrawer}>
             <i className={`backend-dot ${backendStatus}`}/><span>{isProcessing ? (currentTask ? taskProgressLabel(currentTask) : '正在处理') : backendStatus === 'connected' ? (activeTaskCount ? `${activeTaskCount} 项后台任务` : '引擎就绪') : backendStatus === 'connecting' ? '正在启动' : '引擎异常'}</span>
           </button>
@@ -2298,8 +2353,13 @@ function App() {
       } as React.CSSProperties}>
         <aside className={`project-sidebar ${compactLibrary ? "library-list-view" : ""}`}>
           <header className="library-page-header"><div><small>字幕工厂</small><h1>你的项目</h1><p>{youtubeEnabled ? '选择一个项目继续工作，或从视频和链接开始新的字幕任务。' : '选择一个项目继续工作，或导入您有权处理的视频。'}</p></div><div>
-            {filesystemAutomationEnabled && <button className="button secondary" disabled={backendStatus !== 'connected'} onClick={() => setShowProductionCenter(true)}>批量与监听</button>}
-            <button className="button secondary" disabled={backendStatus !== 'connected'} onClick={importProjectPackage}>导入项目包</button>
+            <details className="library-more-actions popover-menu">
+              <summary className="button secondary" aria-label="更多导入方式">更多</summary>
+              <div role="menu" onClick={event => (event.currentTarget.parentElement as HTMLDetailsElement).open = false}>
+                <button role="menuitem" disabled={backendStatus !== 'connected'} onClick={importProjectPackage}><strong>导入项目包</strong><small>打开 .sfproject，继续在另一台电脑上的工作</small></button>
+                {filesystemAutomationEnabled && <button role="menuitem" disabled={backendStatus !== 'connected'} onClick={() => setShowProductionCenter(true)}><strong>批量与监听</strong><small>一次导入多个文件，或监听文件夹自动处理</small></button>}
+              </div>
+            </details>
             {youtubeEnabled && <button className="button secondary" disabled={backendStatus !== 'connected'} onClick={() => setShowLinkPopover(true)}>添加链接</button>}
             <button className="button primary" disabled={backendStatus !== 'connected'} onClick={handleImportLocal}>导入视频</button>
           </div></header>
@@ -2309,7 +2369,7 @@ function App() {
             {youtubeEnabled
               ? <div><span>批量任务</span><strong><AnimatedNumber value={playlistBatches.filter(item => ['running', 'pending', 'paused', 'partial', 'failed'].includes(item.batch.status)).length} animate={motionEnabled}/></strong><small>{playlistBatches.length ? `${playlistBatches.length} 个播放列表` : '暂无进行中的队列'}</small></div>
               : <div><span>隐私模式</span><strong>本地优先</strong><small>第三方媒体读取已关闭</small></div>}
-            <div className={`library-runtime-card ${backendStatus}`}><span>本地引擎</span><strong>{backendStatus === 'connected' ? '就绪' : backendStatus === 'connecting' ? '启动中' : '需检查'}</strong><small>{backendStatus === 'connected' ? '媒体与转写工具可用' : backendStatus === 'connecting' ? '正在载入本机运行时' : '本地功能受限，AI 设置不应影响此状态'}</small></div>
+            {backendStatus !== 'connected' && <div className={`library-runtime-card ${backendStatus}`}><span>本地引擎</span><strong>{backendStatus === 'connecting' ? '启动中' : '需检查'}</strong><small>{backendStatus === 'connecting' ? '正在载入本机运行时' : '本地功能受限，AI 设置不应影响此状态'}</small></div>}
           </section>
           <div ref={libraryTabsRef} className="library-switcher sliding-tabs" role="tablist" aria-label="项目库视图">
             <button role="tab" aria-selected={libraryView === 'projects'} className={libraryView === 'projects' ? 'active' : ''} onClick={() => setLibraryView('projects')}>项目</button>
@@ -2410,7 +2470,7 @@ function App() {
           </header>
           <div className="workbench-split">
           {projectWorkspace === 'subtitles' && <EditorWorkbench
-            toolbar={<><button className="button primary" onClick={() => openWorkflowStep('transcribe')}>{hasSegments ? '重新转写' : '生成字幕'}</button><button className="button secondary" onClick={importSubtitleFile}>导入字幕</button><button className="button secondary" onClick={() => openWorkflowStep('clean')}>整理</button><button className="button secondary" onClick={() => openWorkflowStep('translate')}>翻译</button><span className="editor-save-status" role="status">{segmentsLoading ? '正在加载字幕…' : `${segments.length} 条字幕`}</span></>}
+            toolbar={<><button className="button primary" onClick={() => openWorkflowStep('transcribe')}>{hasSegments ? '重新转写' : '生成字幕'}</button><button className="button secondary" onClick={importSubtitleFile}>导入字幕</button><button className="button secondary" onClick={() => openWorkflowStep('clean')}>整理</button><button className="button secondary" onClick={() => openWorkflowStep('translate')}>翻译</button>{segmentsLoading && <span className="editor-save-status" role="status">正在加载字幕…</span>}</>}
             player={activeProject && canPlayMedia && activeProject.video_url ? <Suspense fallback={<DeferredPanel kind="player" label="正在加载本地播放器…"/>}><SubtitlePlayer initialTime={currentTime} ref={videoPlayerRef} projectId={activeProject.id} videoUrl={api.getBackendMediaUrl(activeProject.video_url) || ''} segments={segments} style={subtitleStyle} activeIdx={activeSegmentIdx} onTimeUpdate={handleTimeUpdate} onDurationChange={setVideoDuration} onStyleChange={handleStyleChange} presentationMode={presentationMode} onPresentationModeChange={setPresentationMode}/></Suspense>
               : <div className="viewer-welcome"><span>▶</span><h2>开始创作字幕</h2><p>{youtubeEnabled ? '导入视频或粘贴 YouTube 链接' : '导入您有权处理的本地视频'}</p><div><button className="button primary" onClick={handleImportLocal}>导入视频</button>{youtubeEnabled && <button className="button secondary" onClick={() => setShowLinkPopover(true)}>添加链接</button>}</div></div>}
             editor={segmentsLoading ? <div className="editor-load-state" role="status">正在载入字幕…</div> : segmentsError ? <div className="editor-load-state" role="alert">{segmentsError}<button onClick={() => activeProject && void refreshSegments(activeProject.id)}>重新加载</button></div> : <SubtitleTable segments={segments} currentTime={currentTime} activeIdx={activeSegmentIndex} entryFocusIdx={subtitleEntryFocusIndex} entryFocusRequest={subtitleFocusRequest} onSeek={handleSeek} onInspect={setSegmentInspector} onUpdate={handleUpdateSegment} onReplaceAll={replaceSegments} onSplit={splitSegment} onMerge={mergeSegments} onUndo={undoEditor} onRedo={redoEditor} saveState={editorSaveState} draftCount={Object.keys(draftItems).length} draftIsStale={draftIsStale} onPreviewDraft={previewDraft} onCommitDraft={commitDraft} onDiscardDraft={discardDraft} onAutoScrollChange={setAutoScrollTable} autoScroll={autoScrollTable} disabled={editorBusy || segmentsLoading}/>}

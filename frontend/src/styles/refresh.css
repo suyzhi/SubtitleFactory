@@ -732,3 +732,78 @@
 .pro-app .preflight-checks > span { border-color: var(--border-soft); border-radius: 14px; background: var(--surface-2); }
 .pro-app .preflight-checks > span.ok i { background: color-mix(in srgb, var(--green) 16%, transparent); color: var(--green); }
 .pro-app .preflight-device { border-radius: 14px; }
+
+/* 字幕表：多行编辑框、精简表头 */
+.pro-app .editor-transcript textarea.edit-input {
+  display: block;
+  min-height: 34px;
+  padding: 7px 9px;
+  border: 1px solid color-mix(in srgb, var(--accent) 60%, var(--border));
+  border-radius: 9px;
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 0 0 4px var(--focus-ring);
+  font: inherit;
+  line-height: 1.6;
+  resize: none;
+  field-sizing: content;
+}
+.pro-app .editor-transcript .subtitle-table-header h3 small { margin-left: 6px; color: var(--text-3); font-size: 11px; font-weight: 500; }
+.pro-app .editor-transcript .table-header-right .btn[aria-pressed="true"] { color: var(--accent); background: var(--accent-soft); border-radius: 7px; }
+.pro-app .editor-transcript .subtitle-table th.col-lock { width: 44px; font-size: 10.5px; }
+
+/* 轻量弹出菜单（<details class="popover-menu">） */
+.pro-app .popover-menu { position: relative; }
+.pro-app .popover-menu > summary { list-style: none; cursor: pointer; }
+.pro-app .popover-menu > summary::-webkit-details-marker { display: none; }
+.pro-app .popover-menu > summary::after { content: ''; width: 6px; height: 6px; margin: -3px 0 0 8px; border: solid currentColor; border-width: 0 1.5px 1.5px 0; transform: rotate(45deg); opacity: .55; transition: transform .3s var(--ease-spring, ease); }
+.pro-app .popover-menu[open] > summary::after { transform: translateY(3px) rotate(-135deg); }
+.pro-app .popover-menu > div {
+  position: absolute; z-index: 60; top: calc(100% + 8px); right: 0;
+  min-width: 260px; display: grid; gap: 4px; padding: 6px;
+  border: 1px solid var(--border-soft); border-radius: 14px;
+  background: var(--elevated); box-shadow: var(--shadow-menu);
+  transform-origin: top right;
+  animation: sf-menu 260ms var(--ease-spring, ease);
+}
+.pro-app .library-more-actions > div > button {
+  display: grid; gap: 2px; padding: 9px 11px; border: 0; border-radius: 10px;
+  background: transparent; color: var(--text); text-align: left; cursor: pointer;
+  transition: background-color .15s ease;
+}
+.pro-app .library-more-actions > div > button:hover:not(:disabled) { background: var(--accent-soft); }
+.pro-app .library-more-actions > div > button strong { font-size: 13px; font-weight: 600; }
+.pro-app .library-more-actions > div > button small { color: var(--text-3); font-size: 11.5px; }
+.pro-app .library-page-header .library-more-actions > summary { min-height: 38px; padding: 0 14px 0 16px; }
+.pro-app .editor-layout-menu > div { gap: 12px; padding: 14px; min-width: 280px; }
+.pro-app .editor-layout-menu label { display: grid; grid-template-columns: 56px minmax(0, 1fr) auto; align-items: center; gap: 10px; color: var(--text-2); font-size: 12px; }
+.pro-app .editor-layout-menu select { width: 100%; }
+.pro-app .editor-layout-menu .editor-ratio-control input { width: 100%; }
+.pro-app .editor-layout-menu .editor-reset { justify-self: start; }
+.pro-app .editor-layout-menu small { color: var(--text-3); font-size: 11px; line-height: 1.5; }
+
+/* 转写设置：运行设备卡片不再预留不存在的图标列 */
+.pro-app .transcription-setup .runtime-choice-grid { grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); }
+.pro-app .transcription-setup .runtime-choice-grid > button { grid-template-columns: minmax(0, 1fr); min-height: 64px; padding: 10px 12px; border-radius: 12px; transition: border-color .2s ease, background-color .2s ease, transform .35s var(--ease-spring, ease); }
+.pro-app .transcription-setup .runtime-choice-grid > button:hover:not(:disabled) { transform: translateY(-1px); }
+.pro-app .transcription-setup .runtime-choice-grid > button > span { display: grid; gap: 3px; }
+.pro-app .transcription-setup .runtime-choice-grid strong { font-size: 12.5px; }
+.pro-app .transcription-setup .runtime-choice-grid small { font-size: 11px; line-height: 1.4; }
+
+/* 工具面板较窄：OCR / 说话人卡片单列排布 */
+.pro-app .workspace-tool-panel .smart-tools-grid { grid-template-columns: minmax(0, 1fr); padding: 16px; gap: 14px; }
+
+/* 概览只剩 3 张卡片时均分整行 */
+.pro-app .library-overview { grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
+
+/* 只写了 className="button" 的按钮按次要按钮呈现 */
+:is(.pro-app, .settings-backdrop) .button:not(.primary):not(.secondary) {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow-xs);
+}
+:is(.pro-app, .settings-backdrop) .button:not(.primary):not(.secondary):hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
+  transform: translateY(-1px);
+}

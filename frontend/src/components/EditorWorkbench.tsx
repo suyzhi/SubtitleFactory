@@ -38,11 +38,17 @@ export default function EditorWorkbench({ player, editor, timeline, toolbar, ins
     <header className="editor-actions">
       <div className="editor-primary-actions">{toolbar}</div>
       <div className="editor-view-actions">
-        <label>布局<select aria-label="编辑器布局" value={layout} disabled={focused} onChange={event => setLayout(event.target.value as Layout)}>
-          <option value="auto">自动</option><option value="wide" disabled={width < 760}>左右</option><option value="stacked">上下</option>
-        </select></label>
-        <label className="editor-ratio-control">播放区<input aria-label="播放区比例" type="range" min={25} max={65} step={1} value={ratio} disabled={focused} onChange={event => changeRatio(Number(event.target.value))}/><output>{Math.round(ratio)}%</output></label>
-        <button className="button secondary editor-reset" disabled={focused} title="恢复当前布局的均分比例" onClick={() => changeRatio(50)}>均分</button>
+        <details className="editor-layout-menu popover-menu">
+          <summary className="button secondary" aria-label="编辑器布局选项">布局</summary>
+          <div>
+            <label>排列<select aria-label="编辑器布局" value={layout} disabled={focused} onChange={event => setLayout(event.target.value as Layout)}>
+              <option value="auto">自动</option><option value="wide" disabled={width < 760}>左右</option><option value="stacked">上下</option>
+            </select></label>
+            <label className="editor-ratio-control">播放区<input aria-label="播放区比例" type="range" min={25} max={65} step={1} value={ratio} disabled={focused} onChange={event => changeRatio(Number(event.target.value))}/><output>{Math.round(ratio)}%</output></label>
+            <button className="button secondary editor-reset" disabled={focused} title="恢复当前布局的均分比例" onClick={() => changeRatio(50)}>恢复均分</button>
+            <small>也可以直接拖动播放器与字幕之间的分隔条，双击恢复均分。</small>
+          </div>
+        </details>
         <button className="button secondary" aria-pressed={focused} onClick={() => setFocused(value => !value)}>{focused ? '显示播放器' : '专注字幕'}</button>
       </div>
     </header>

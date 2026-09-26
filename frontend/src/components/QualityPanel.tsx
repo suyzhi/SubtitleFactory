@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import * as api from '../api/backend';
 import type { EditorOperationResponse, QualityIssue, SubtitleSegment } from '../types';
@@ -31,6 +31,10 @@ export default function QualityPanel({ projectId, segments, onSeek, revision, on
     mutationFn: () => api.scanProjectQuality(projectId, rules),
     onSuccess: result => queryClient.setQueryData(queryKey, result),
   });
+  // Stored results may be stale or absent; a local scan is fast and keeps ignored items ignored.
+  const { mutate: runScan } = scanMutation;
+  const hasSegments = segments.length > 0;
+  useEffect(() => { if (hasSegments) runScan(); }, [projectId, hasSegments, runScan]);
   const markMutation = useMutation({
     mutationFn: ({ issue, status }: {issue: QualityIssue; status: QualityIssue['status']}) => api.updateQualityIssue(projectId, issue.id, status),
     onMutate: async ({ issue }) => {

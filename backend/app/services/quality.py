@@ -73,6 +73,9 @@ def evaluate(project_id: str, configuration: dict | None = None) -> list[dict]:
     issues: list[dict] = []
     previous = None
     previous_text = ""
+    # A project that has never been translated has nothing "missing"; only flag
+    # empty translations once translation work has started on this project.
+    translation_in_use = any((row["translated_text"] or "").strip() for row in rows)
     for row in rows:
         start, end = float(row["start"]), float(row["end"])
         duration = end - start
@@ -106,7 +109,7 @@ def evaluate(project_id: str, configuration: dict | None = None) -> list[dict]:
             issues.append(_issue("line_count", row, "warning", f"字幕包含 {len(lines)} 行", "减少行数"))
         if text and text == previous_text:
             issues.append(_issue("duplicate", row, "warning", "与上一条字幕完全重复", "确认是否应合并"))
-        if text and not translation:
+        if text and not translation and translation_in_use:
             issues.append(_issue("missing_translation", row, "info", "译文为空", "翻译或确认无需译文"))
         source_numbers = _NUMBER_RE.findall(text)
         target_numbers = _NUMBER_RE.findall(translation)

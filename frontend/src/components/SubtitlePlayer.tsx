@@ -33,6 +33,9 @@ export interface SubtitlePlayerHandle {
   seekTo: (time: number) => void;
   previewRange: (start: number, end: number) => void;
   clearPreviewRange: () => void;
+  togglePlay: () => void;
+  replay: () => void;
+  stepFrame: (direction: -1 | 1) => void;
 }
 
 function timecode(value: number) {
@@ -175,11 +178,6 @@ const SubtitlePlayer = forwardRef<SubtitlePlayerHandle, Props>(function Subtitle
 
   const clearPreviewRange = useCallback(() => setPreviewRangeState(null), []);
 
-  useImperativeHandle(
-    ref,
-    () => ({ seekTo: (next: number) => { setLoopCurrent(false); setPreviewRangeState(null); seekTo(next); }, previewRange: (start, end) => { void previewRange(start, end); }, clearPreviewRange }),
-    [clearPreviewRange, previewRange, seekTo],
-  );
 
   useEffect(() => {
     const video = videoRef.current;
@@ -254,6 +252,19 @@ const SubtitlePlayer = forwardRef<SubtitlePlayerHandle, Props>(function Subtitle
       });
     } else video.pause();
   }, []);
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      seekTo: (next: number) => { setLoopCurrent(false); setPreviewRangeState(null); seekTo(next); },
+      previewRange: (start, end) => { void previewRange(start, end); },
+      clearPreviewRange,
+      togglePlay,
+      replay: () => { void replay(); },
+      stepFrame,
+    }),
+    [clearPreviewRange, previewRange, replay, seekTo, stepFrame, togglePlay],
+  );
 
   const toggleFullscreen = useCallback(() => {
     onPresentationModeChange(fullscreen ? 'normal' : 'fullscreen');
