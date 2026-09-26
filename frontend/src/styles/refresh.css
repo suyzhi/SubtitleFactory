@@ -807,3 +807,159 @@
   border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
   transform: translateY(-1px);
 }
+
+/* CSS 箭头：替代 ›/⌄ 字符（字形基线不一，无法垂直居中） */
+:is(.pro-app, .settings-backdrop, .app-select-shell) .chevron {
+  display: inline-block;
+  flex: none;
+  width: 7px;
+  height: 7px;
+  margin: 0 2px;
+  border: solid currentColor;
+  border-width: 0 1.6px 1.6px 0;
+  border-radius: 0 0 1px 0;
+  transform: translateY(-2px) rotate(45deg);
+  transition: transform .32s var(--ease-spring, ease);
+}
+.pro-app .project-group-header[aria-expanded="false"] .chevron,
+.pro-app .chevron.collapsed { transform: translateX(-1px) rotate(-45deg); }
+:is(.pro-app, .settings-backdrop, .app-select-shell) .app-select-trigger > i.chevron { color: var(--text-3); }
+:is(.pro-app, .settings-backdrop, .app-select-shell) .app-select-trigger[aria-expanded="true"] > i.chevron { transform: translateY(2px) rotate(225deg); }
+.pro-app .app-library .project-group-header { justify-content: flex-start; }
+.pro-app .app-library .project-group-header > span { display: inline-flex; align-items: center; gap: 10px; }
+.pro-app .app-library .project-group-header i.chevron {
+  width: 22px; height: 22px; margin: 0; border: 0; border-radius: 7px;
+  display: grid; place-items: center; background: var(--surface-2); color: var(--text-3);
+  transform: none;
+}
+.pro-app .app-library .project-group-header i.chevron::before {
+  content: ''; width: 6px; height: 6px; border: solid currentColor; border-width: 0 1.6px 1.6px 0;
+  transform: translateY(-1px) rotate(45deg); transition: transform .32s var(--ease-spring, ease);
+}
+.pro-app .app-library .project-group-header[aria-expanded="false"] i.chevron { transform: none; }
+.pro-app .app-library .project-group-header[aria-expanded="false"] i.chevron::before { transform: translateX(-1px) rotate(-45deg); }
+.pro-app .app-library .project-group-header span small {
+  min-width: 24px; padding: 2px 8px; border-radius: 999px; background: var(--surface-2); color: var(--text-3);
+  font-size: 11px; font-weight: 600; text-align: center;
+}
+
+/* 旧 .btn 悬停会把文字设成白色，在浅色背景上看不见 */
+.pro-app .btn:hover:not(:disabled) { color: var(--text); background: color-mix(in srgb, var(--text-3) 12%, transparent); border-color: transparent; }
+.pro-app .btn { border-radius: 7px; transition: background-color .15s ease, color .15s ease; }
+
+/* 时间轴 */
+.pro-app .editor-timeline { max-height: none; overflow: hidden; }
+.pro-app .subtitle-timeline { height: auto; flex: none; }
+.pro-app .timeline-toolbar { height: 34px; gap: 12px; padding: 0 12px; font-size: 11px; }
+.pro-app .timeline-toolbar > strong { color: var(--text); font-size: 12px; font-weight: 650; }
+.pro-app .timeline-toolbar .timeline-clock { color: var(--text-2); font: 11px var(--mono); font-variant-numeric: tabular-nums; }
+.pro-app .timeline-active { min-width: 0; flex: 1; overflow: hidden; color: var(--text-2); font-size: 11.5px; text-overflow: ellipsis; white-space: nowrap; }
+.pro-app .timeline-controls { margin-left: auto; display: inline-flex; align-items: center; gap: 4px; }
+.pro-app .timeline-controls button {
+  min-width: 26px; height: 24px; padding: 0 8px; border: 1px solid var(--border-soft); border-radius: 7px;
+  background: var(--surface); color: var(--text-2); font-size: 11.5px; line-height: 1; cursor: pointer;
+  transition: border-color .15s ease, background-color .15s ease, color .15s ease;
+}
+.pro-app .timeline-controls button:hover:not(:disabled) { color: var(--text); border-color: var(--border); }
+.pro-app .timeline-controls button.active { color: var(--accent); background: var(--accent-soft); border-color: color-mix(in srgb, var(--accent) 30%, transparent); }
+.pro-app .timeline-controls input { width: 96px; margin: 0 2px; }
+.pro-app .timeline-scroll { position: relative; height: 72px; overflow-x: auto; overflow-y: hidden; scrollbar-width: thin; }
+.pro-app .timeline-track { height: 64px; }
+.pro-app .timeline-ruler span { font-size: 9.5px; font-variant-numeric: tabular-nums; }
+.pro-app .timeline-segment { overflow: hidden; white-space: nowrap; font-size: 9px; }
+.pro-app .timeline-segment.active {
+  z-index: 3; border-color: var(--accent); background: color-mix(in srgb, var(--accent) 32%, var(--surface));
+  color: var(--text); box-shadow: 0 0 0 2px var(--accent-soft);
+}
+.pro-app .timeline-waveform { opacity: .6; }
+.pro-app .timeline-empty {
+  position: absolute; inset: 22px 12px auto; margin: 0; padding: 7px 12px; border-radius: 9px;
+  background: color-mix(in srgb, var(--surface) 88%, transparent); color: var(--text-3);
+  font-size: 11.5px; text-align: center; pointer-events: none;
+  backdrop-filter: blur(6px);
+}
+
+/* ── 项目库：视图切换与分页 ─────────────────────────────────────────── */
+.pro-app .library-view-toggle {
+  display: inline-flex; gap: 2px; padding: 3px;
+  border: 1px solid var(--border-soft); border-radius: 10px;
+  background: var(--surface-2); box-shadow: var(--inset-sunken);
+  --indicator-radius: 7px; --indicator-bg: var(--surface);
+}
+.pro-app.theme-dark .library-view-toggle { background: color-mix(in srgb, var(--surface) 60%, black); --indicator-bg: var(--surface-3); }
+.pro-app .library-view-toggle button {
+  width: 32px; height: 26px; display: grid; place-items: center; padding: 0;
+  border: 0; border-radius: 7px; background: transparent; color: var(--text-3); cursor: pointer;
+  transition: color .2s ease;
+}
+.pro-app .library-view-toggle button svg { fill: currentColor; }
+.pro-app .library-view-toggle button:hover { color: var(--text-2); }
+.pro-app .library-view-toggle button[aria-pressed="true"] { color: var(--accent); }
+.pro-app .library-pager { display: inline-flex; align-items: center; gap: 6px; color: var(--text-2); font-variant-numeric: tabular-nums; }
+.pro-app .library-pager button {
+  width: 30px; height: 30px; display: grid; place-items: center; padding: 0;
+  border: 1px solid var(--border-soft); border-radius: 9px; background: var(--surface); color: var(--text-2);
+  box-shadow: var(--shadow-xs); cursor: pointer;
+  transition: border-color .15s ease, color .15s ease, transform .3s var(--ease-spring, ease);
+}
+.pro-app .library-pager button:hover:not(:disabled) { color: var(--text); border-color: var(--border); transform: translateY(-1px); }
+.pro-app .library-pager .chevron { margin: 0; }
+.pro-app .library-pager .chevron.flip { transform: translateX(1px) rotate(135deg); }
+
+/* ── 项目库：紧凑列表（单一分组容器 + 细分隔线） ─────────────────────── */
+.pro-app .app-library .library-list-view .project-group-items {
+  display: block; overflow: hidden;
+  border: 1px solid var(--border-soft); border-radius: 18px;
+  background: var(--surface); box-shadow: var(--shadow-card);
+}
+.pro-app .app-library .library-list-view .project-card-shell { margin: 0; min-height: 0; }
+.pro-app .app-library .library-list-view .project-card-shell + .project-card-shell { border-top: 1px solid var(--border-soft); }
+.pro-app .app-library .library-list-view .project-card {
+  min-height: 76px; padding: 10px 64px 10px 12px;
+  border: 0; border-radius: 0; background: transparent; box-shadow: none;
+}
+.pro-app .app-library .library-list-view .project-card:hover { transform: none; background: color-mix(in srgb, var(--surface-2) 70%, transparent); box-shadow: none; }
+.pro-app .app-library .library-list-view .project-card.active { box-shadow: inset 3px 0 var(--accent); }
+.pro-app .app-library .library-list-view .project-thumb { width: 96px; height: 54px; min-height: 54px; flex-basis: 96px; border-radius: 10px; }
+.pro-app .app-library .library-list-view .project-thumb::before { display: none; }
+.pro-app .app-library .library-list-view .project-card-copy { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 12px; padding: 0 0 0 16px; }
+.pro-app .app-library .library-list-view .project-card-copy strong { grid-column: 1; }
+.pro-app .app-library .library-list-view .project-card-copy small { grid-column: 1; margin-top: 3px; }
+.pro-app .app-library .library-list-view .media-mode-badge { grid-column: 2; grid-row: 1 / span 2; align-self: center; margin: 0; }
+.pro-app .app-library .library-list-view .project-task-hint { grid-column: 1 / -1; margin-top: 3px; }
+.pro-app .app-library .library-list-view .project-more,
+.pro-app .app-library .library-list-view .project-card-shell:hover .project-more {
+  top: 50%; right: 14px; width: 34px; height: 34px; border: 0; border-radius: 50%;
+  background: transparent; color: var(--text-3); box-shadow: none;
+  backdrop-filter: none; -webkit-backdrop-filter: none;
+  font-size: 13px; letter-spacing: 1.5px; opacity: .55;
+  transform: translateY(-50%);
+}
+.pro-app.theme-dark .app-library .library-list-view .project-more { background: transparent; color: var(--text-3); }
+.pro-app .app-library .library-list-view .project-card-shell:hover .project-more { opacity: 1; }
+.pro-app .app-library .library-list-view .project-more:hover,
+.pro-app .app-library .library-list-view .project-more[aria-expanded="true"] { opacity: 1; background: var(--surface-3); color: var(--text); }
+
+/* ── 视图切换动画：卡片与封面在网格/列表间平滑变形 ──────────────────── */
+html.layout-morphing .app-library .project-card-shell .project-thumb { view-transition-name: var(--vt-thumb); }
+/* Only the covers fly between positions; text and card chrome cross-fade, so nothing is stretched. */
+html.layout-morphing::view-transition-group(*) { animation-duration: 560ms; animation-timing-function: cubic-bezier(.2, .9, .25, 1); }
+html.layout-morphing::view-transition-old(*),
+html.layout-morphing::view-transition-new(*) { height: 100%; object-fit: cover; animation-duration: 300ms; }
+html.layout-morphing::view-transition-group(root) { animation: none; }
+html.layout-morphing::view-transition-old(root) { animation: sf-vt-out 180ms ease both; }
+html.layout-morphing::view-transition-new(root) { animation: sf-vt-in 360ms cubic-bezier(.2, .9, .25, 1) 60ms both; }
+@keyframes sf-vt-out { to { opacity: 0; } }
+@keyframes sf-vt-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+@supports not (view-transition-name: none) {
+  .layout-swap .project-card-shell { animation: sf-rise 460ms var(--ease-out) backwards; animation-delay: calc(var(--i, 0) * 28ms); }
+}
+
+/* 原生 ▶ 展开三角换成统一的 CSS 箭头 */
+.pro-app .subtitle-replace-options > summary { display: inline-flex; align-items: center; gap: 7px; list-style: none; color: var(--text-2); font-size: 12px; }
+.pro-app .subtitle-replace-options > summary::-webkit-details-marker { display: none; }
+.pro-app .subtitle-replace-options > summary::before {
+  content: ''; width: 6px; height: 6px; border: solid currentColor; border-width: 0 1.5px 1.5px 0;
+  transform: translateX(-1px) rotate(-45deg); transition: transform .3s var(--ease-spring, ease);
+}
+.pro-app .subtitle-replace-options[open] > summary::before { transform: translateY(-2px) rotate(45deg); }

@@ -71,7 +71,7 @@ export default function PlaylistBatchGroups({ batches, search, collapsed, workfl
           <button className="playlist-batch-toggle" aria-expanded={!isCollapsed} onClick={() => onToggle(batch.id)}>
             <span className="playlist-batch-cover">{batch.thumbnail_url ? <img src={batch.thumbnail_url} alt=""/> : '▶'}</span>
             <span><strong>{batch.title}</strong><small>{batch.channel || 'YouTube'} · {batch.completed_count}/{batch.item_count} 完成{batch.failed_count ? ` · ${batch.failed_count} 项需处理` : ''}</small><i><b style={{ width: `${batch.progress}%` }}/></i></span>
-            <em>{Math.round(batch.progress)}%</em><u>{isCollapsed ? '›' : '⌄'}</u>
+            <em>{Math.round(batch.progress)}%</em><u className={`chevron ${isCollapsed ? 'collapsed' : ''}`} aria-hidden="true"/>
           </button>
           <div className="playlist-batch-actions">
             {batch.status === 'paused' ? <button onClick={() => void act('批次已继续', () => api.resumePlaylistBatch(batch.id))}>继续</button> : <button disabled={!['running','pending'].includes(batch.status)} onClick={() => void act('批次已暂停', () => api.pausePlaylistBatch(batch.id))}>暂停</button>}

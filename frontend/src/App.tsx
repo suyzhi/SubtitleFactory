@@ -155,7 +155,6 @@ function App() {
     return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
   });
   const [motionEnabled, setMotionEnabled] = useState(() => localStorage.getItem('subtitle_factory_motion') !== 'off');
-  const [density, setDensity] = useState<'comfortable' | 'compact'>(() => localStorage.getItem('subtitle_factory_density') === 'compact' ? 'compact' : 'comfortable');
   const [libraryView, setLibraryView] = useState<'projects' | 'trash'>('projects');
   const [librarySearch, setLibrarySearch] = useState('');
   const [librarySearchHits, setLibrarySearchHits] = useState<SegmentSearchHit[]>([]);
@@ -249,6 +248,7 @@ function App() {
   const pageEntering = useTransientFlag(`${activeProject?.id}:${projectWorkspace}`, 700);
   const workspaceTabsRef = useSlidingIndicator<HTMLDivElement>(projectWorkspace);
   const libraryTabsRef = useSlidingIndicator<HTMLDivElement>(libraryView);
+  const layoutSwap = useTransientFlag(`layout:${compactLibrary}`, 700);
   const toolTabsRef = useSlidingIndicator<HTMLElement>(`${toolsOpen}:${toolsTab}`);
 
   const showToast = useCallback((message: string, duration = 2800) => {
@@ -269,6 +269,21 @@ function App() {
       return next;
     });
   }, []);
+
+  // Cards morph between the grid and the list: each card and cover is captured under its
+  // own view-transition name only for the duration of the switch (see .layout-morphing).
+  const toggleCompactLibrary = () => {
+    const apply = () => flushSync(() => setCompactLibrary(value => {
+      localStorage.setItem('subtitle_factory_library_compact', String(!value));
+      return !value;
+    }));
+    const root = document.documentElement;
+    if (!motionEnabled || window.matchMedia('(prefers-reduced-motion: reduce)').matches
+      || !document.startViewTransition || root.classList.contains('theme-revealing')) { apply(); return; }
+    root.classList.add('layout-morphing');
+    const transition = document.startViewTransition(apply);
+    void transition.finished.catch(() => undefined).finally(() => root.classList.remove('layout-morphing'));
+  };
 
   const themeTransitionBusy=useRef(false);
   const changeTheme=(next: 'light'|'dark', origin?:HTMLElement)=>{
@@ -292,8 +307,8 @@ function App() {
 
   useEffect(() => {
     localStorage.setItem('subtitle_factory_motion', motionEnabled ? 'on' : 'off');
-    localStorage.setItem('subtitle_factory_density', density);
-  }, [density, motionEnabled]);
+    localStorage.removeItem('subtitle_factory_density');
+  }, [motionEnabled]);
 
   useEffect(() => {
     if (!(window as any).__TAURI_INTERNALS__) return;
@@ -839,6 +854,8 @@ function App() {
       draftMutationPromise.current,
     ]);
     if (selectionIntent !== projectSelectionIntent.current) return;
+    // Reopening the same project keeps the mounted video, which will not report metadata again.
+    const switchingProject = activeProjectIdRef.current !== p.id;
     activeProjectIdRef.current = p.id;
     setActiveProject(p);
     editorRevision.current = Number(p.edit_revision || 0);
@@ -860,8 +877,7 @@ function App() {
     setCurrentTask(null);
     setPollInterval(null);
     setActiveSegmentIdx(-1);
-    setCurrentTime(0);
-    setVideoDuration(0);
+    if (switchingProject) { setCurrentTime(0); setVideoDuration(0); }
     setSubtitleStats(null);
     setSelectedStep(null);
     refreshProcessSteps(p);
@@ -2282,7 +2298,7 @@ function App() {
   </div>;
 
   return (
-    <AppSelectThemeContext.Provider value={theme}><div data-ui-build={PROFESSIONAL_UI_MARKER} data-ui-layout={LIBRARY_WORKSPACE_UI_MARKER} className={`app pro-app theme-${theme} density-${density} ${motionEnabled ? '' : 'motion-off'} presentation-${presentationMode} ${showProjectWorkspace && activeProject ? 'workspace-active' : 'library-home'}`}
+    <AppSelectThemeContext.Provider value={theme}><div data-ui-build={PROFESSIONAL_UI_MARKER} data-ui-layout={LIBRARY_WORKSPACE_UI_MARKER} className={`app pro-app theme-${theme} ${motionEnabled ? '' : 'motion-off'} presentation-${presentationMode} ${showProjectWorkspace && activeProject ? 'workspace-active' : 'library-home'}`}
       onDragEnter={event => { event.preventDefault(); setDragActive(true); }}
       onDragOver={event => { event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; }}
       onDragLeave={event => { if (!event.currentTarget.contains(event.relatedTarget as Node)) setDragActive(false); }}
@@ -2351,7 +2367,7 @@ function App() {
       <div className={`studio-shell v05-shell ${showProjectWorkspace && activeProject ? `app-project project-view-${projectWorkspace}` : 'app-library'} ${inspectorMode ? 'inspector-open' : ''} ${viewEntering ? 'view-entering' : ''} ${pageEntering ? 'page-entering' : ''}`} style={{
         '--left-panel-width': `${leftPanelWidth}px`, '--right-panel-width': `${rightPanelWidth}px`,
       } as React.CSSProperties}>
-        <aside className={`project-sidebar ${compactLibrary ? "library-list-view" : ""}`}>
+        <aside className={`project-sidebar ${compactLibrary ? "library-list-view" : ""} ${layoutSwap ? 'layout-swap' : ''}`}>
           <header className="library-page-header"><div><small>字幕工厂</small><h1>你的项目</h1><p>{youtubeEnabled ? '选择一个项目继续工作，或从视频和链接开始新的字幕任务。' : '选择一个项目继续工作，或导入您有权处理的视频。'}</p></div><div>
             <details className="library-more-actions popover-menu">
               <summary className="button secondary" aria-label="更多导入方式">更多</summary>
@@ -2375,7 +2391,7 @@ function App() {
             <button role="tab" aria-selected={libraryView === 'projects'} className={libraryView === 'projects' ? 'active' : ''} onClick={() => setLibraryView('projects')}>项目</button>
             <button role="tab" aria-selected={libraryView === 'trash'} className={libraryView === 'trash' ? 'active' : ''} onClick={() => setLibraryView('trash')}>回收站</button>
           </div>
-          <LibraryControls page={libraryPage} pages={libraryPages} total={libraryTotal} loading={libraryLoading} error={libraryError} compact={compactLibrary} status={libraryStatus} onPage={setLibraryPage} onStatus={setLibraryStatus} onRetry={() => setLibraryRefresh(value => value+1)} onCompact={() => setCompactLibrary(value => { localStorage.setItem('subtitle_factory_library_compact',String(!value)); return !value; })}/>
+          <LibraryControls page={libraryPage} pages={libraryPages} total={libraryTotal} loading={libraryLoading} error={libraryError} compact={compactLibrary} status={libraryStatus} onPage={setLibraryPage} onStatus={setLibraryStatus} onRetry={() => setLibraryRefresh(value => value+1)} onCompact={toggleCompactLibrary}/>
           {libraryView === 'projects' && <div className="library-filters"><input type="search" value={librarySearch} onChange={event => setLibrarySearch(event.target.value)} placeholder="搜索项目或所有字幕" aria-label="搜索项目或所有字幕" onKeyDown={event => {
             if (event.key === 'Escape') {
               event.preventDefault();
@@ -2430,11 +2446,11 @@ function App() {
             {libraryView === 'projects' && projectGroups.map(group => {
               const collapsed = collapsedProjectGroups.has(group.key);
               return <section className="project-group" key={group.key}>
-                <button className="project-group-header" aria-expanded={!collapsed} onClick={() => toggleProjectGroup(group.key)}><span><i>{collapsed ? '›' : '⌄'}</i>{group.label}</span><small>{group.projects.length}</small></button>
+                <button className="project-group-header" aria-expanded={!collapsed} onClick={() => toggleProjectGroup(group.key)}><span><i className="chevron" aria-hidden="true"/>{group.label}<small>{group.projects.length}</small></span></button>
                 {!collapsed && <div className="project-group-items">{group.projects.map((project, index) => {
                   const thumbnailUrl = api.getProjectThumbnailUrl(project);
                   const editingGroup = groupEditorProjectId === project.id;
-                  return <div className={`project-card-shell ${removingProjectIds.has(project.id) ? 'removing' : ''}`} key={project.id} style={{ '--i': Math.min(index, 11) } as React.CSSProperties} onContextMenu={event => openProjectMenu(event, project)}>
+                  return <div className={`project-card-shell ${removingProjectIds.has(project.id) ? 'removing' : ''}`} key={project.id} style={{ '--i': Math.min(index, 11), '--vt-card': `card-${project.id}`, '--vt-thumb': `thumb-${project.id}` } as React.CSSProperties} onContextMenu={event => openProjectMenu(event, project)}>
                     <button className={`project-card ${activeProject?.id === project.id ? 'active' : ''}`} onClick={() => void selectProject(project)}>
                       <span className="project-thumb"><span className="project-thumb-fallback">{project.source_type === 'youtube' ? '▶' : '▣'}</span>{thumbnailUrl && <img src={thumbnailUrl} alt="" loading="lazy" onError={event => { event.currentTarget.style.display = 'none'; }}/>}</span>
                       <span className="project-card-copy"><strong>{project.title}</strong><small>{languageLabel(project.language)} · {project.segments_count} 条 · {project.created_at.slice(0, 10)}</small><span className="media-mode-badge">{projectReadiness(project)}</span>{project.latest_task_status && <em className={`project-task-hint ${project.latest_task_status}`}>最近任务：{taskLabel(project.latest_task_status)}{project.latest_task_status === 'failed' ? ` · ${project.latest_task_message || ''}` : ''}</em>}</span>
@@ -2521,7 +2537,7 @@ function App() {
       {dragActive && <div className="drop-overlay"><div><span>⇩</span><strong>松开以导入视频</strong><small>支持 MP4、MKV、MOV、WebM 和 AVI</small></div></div>}
       {toast && <div className="studio-toast" role="status" aria-live="polite"><span>✓</span>{toast}</div>}
       {showAISettings && <>
-        <SettingsCenter open onClose={() => setShowAISettings(false)} returnFocusRef={settingsButtonRef} config={config} onConfigChange={setConfig} appSettings={appSettings} onAppSettingsChange={applyAppSettings} onAIProvidersChange={setAIProviderState} theme={theme} onThemeChange={changeTheme} motionEnabled={motionEnabled} onMotionEnabledChange={setMotionEnabled} density={density} onDensityChange={setDensity} health={health} onRefreshHealth={refreshHealth} modelStatus={modelStatus} onRefreshModels={refreshModels} onOpenLogs={() => { setToolsTab('process'); setToolsOpen(true); setShowProjectWorkspace(!!activeProject); setInspectorMode(null); }}/>
+        <SettingsCenter open onClose={() => setShowAISettings(false)} returnFocusRef={settingsButtonRef} config={config} onConfigChange={setConfig} appSettings={appSettings} onAppSettingsChange={applyAppSettings} onAIProvidersChange={setAIProviderState} theme={theme} onThemeChange={changeTheme} motionEnabled={motionEnabled} onMotionEnabledChange={setMotionEnabled} health={health} onRefreshHealth={refreshHealth} modelStatus={modelStatus} onRefreshModels={refreshModels} onOpenLogs={() => { setToolsTab('process'); setToolsOpen(true); setShowProjectWorkspace(!!activeProject); setInspectorMode(null); }}/>
       </>}
     </div></AppSelectThemeContext.Provider>
   );

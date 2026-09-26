@@ -191,8 +191,6 @@ function settingsProps(overrides: Partial<ComponentProps<typeof SettingsCenter>>
     onThemeChange: vi.fn(),
     motionEnabled: true,
     onMotionEnabledChange: vi.fn(),
-    density: 'comfortable',
-    onDensityChange: vi.fn(),
     health: null,
     onRefreshHealth: vi.fn(),
     modelStatus: {

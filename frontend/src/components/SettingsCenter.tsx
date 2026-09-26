@@ -44,8 +44,6 @@ interface Props {
   onThemeChange: (theme: 'light' | 'dark', origin?: HTMLElement) => void;
   motionEnabled: boolean;
   onMotionEnabledChange: (enabled: boolean) => void;
-  density: 'comfortable' | 'compact';
-  onDensityChange: (density: 'comfortable' | 'compact') => void;
   health: HealthStatus | null;
   onRefreshHealth: () => void;
   modelStatus: ModelStatusResult | null;
@@ -81,7 +79,7 @@ export default function SettingsCenter(props: Props) {
   const {
     open, onClose, returnFocusRef, config, onConfigChange, appSettings, onAppSettingsChange, onAIProvidersChange,
     theme, onThemeChange,
-    motionEnabled, onMotionEnabledChange, density, onDensityChange, health, onRefreshHealth,
+    motionEnabled, onMotionEnabledChange, health, onRefreshHealth,
     modelStatus, onRefreshModels, onOpenLogs,
   } = props;
   const youtubeEnabled = api.youtubeFeaturesEnabled();
@@ -662,10 +660,9 @@ export default function SettingsCenter(props: Props) {
             {category === 'appearance' && <>
               <SettingsSection title="外观" description="主题同时作用于 Web 界面和 macOS 原生标题栏。">
                 <Segmented value={theme} onChange={(value, origin) => onThemeChange(value as 'light' | 'dark', origin)} options={[['light', '浅色'], ['dark', '深色']]}/>
-                <label className="settings-field horizontal"><span><strong>界面密度</strong><small>紧凑模式适合小屏幕</small></span><AppSelect value={density} onChange={value=>onDensityChange(value as 'comfortable'|'compact')} label="界面密度" options={[{value:'comfortable',label:'舒适'},{value:'compact',label:'紧凑'}]}/></label>
               </SettingsSection>
               <SettingsSection title="动画" description="系统“减少动态效果”始终具有最高优先级。">
-                <Toggle label="界面动画" detail="状态反馈 120ms、常规过渡 180ms、弹窗和抽屉 240ms" checked={motionEnabled} onChange={onMotionEnabledChange}/>
+                <Toggle label="界面动画" detail="页面切换、卡片入场、按钮回弹、滑动选中与弹窗过渡" checked={motionEnabled} onChange={onMotionEnabledChange}/>
               </SettingsSection>
             </>}
 
