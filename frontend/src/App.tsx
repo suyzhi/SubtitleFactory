@@ -31,6 +31,10 @@ import {
   writeRecoveredSegmentDraft,
 } from './draftRecovery';
 import './App.css';
+import './styles/refresh.css';
+import './styles/motion.css';
+import { useSlidingIndicator, useTransientFlag } from './utils/motion';
+import AnimatedNumber from './components/AnimatedNumber';
 import TranscriptionCandidates from './components/TranscriptionCandidates';
 import LibraryControls from './components/LibraryControls';
 import { projectReadiness, taskLabel, taskProgressLabel, taskIsActive } from './projectState';
@@ -238,6 +242,12 @@ function App() {
   const styleSaveTimer = useRef<number | null>(null);
   const pendingSearchJump = useRef<SegmentSearchHit | null>(null);
   const toastTimer = useRef<number | null>(null);
+  const inProjectView = showProjectWorkspace && !!activeProject;
+  const viewEntering = useTransientFlag(inProjectView ? `project:${activeProject?.id}` : `library:${libraryView}:${libraryPage}:${projects.length > 0}`);
+  const pageEntering = useTransientFlag(`${activeProject?.id}:${projectWorkspace}`, 700);
+  const workspaceTabsRef = useSlidingIndicator<HTMLDivElement>(projectWorkspace);
+  const libraryTabsRef = useSlidingIndicator<HTMLDivElement>(libraryView);
+  const toolTabsRef = useSlidingIndicator<HTMLElement>(`${toolsOpen}:${toolsTab}`);
 
   const showToast = useCallback((message: string, duration = 2800) => {
     if (toastTimer.current !== null) window.clearTimeout(toastTimer.current);
@@ -2234,7 +2244,7 @@ function App() {
         <div className="topbar-actions">
           <button className="topbar-button" disabled={backendStatus !== 'connected'} onClick={handleImportLocal}><span>＋</span>导入</button>
           {youtubeEnabled && <button className={`topbar-button ${showLinkPopover ? 'active' : ''}`} disabled={backendStatus !== 'connected'} onClick={() => setShowLinkPopover(value => !value)}><span>⌁</span>链接</button>}
-          <button className={`task-status-pill ${backendStatus}`} onClick={() => setShowTaskDrawer(value => !value)} aria-expanded={showTaskDrawer}>
+          <button className={`task-status-pill ${backendStatus} ${isProcessing ? 'busy' : ''}`} onClick={() => setShowTaskDrawer(value => !value)} aria-expanded={showTaskDrawer}>
             <i className={`backend-dot ${backendStatus}`}/><span>{isProcessing ? (currentTask ? taskProgressLabel(currentTask) : '正在处理') : backendStatus === 'connected' ? (activeTaskCount ? `${activeTaskCount} 项后台任务` : '引擎就绪') : backendStatus === 'connecting' ? '正在启动' : '引擎异常'}</span>
           </button>
           <button className="icon-action" aria-label={theme === 'dark' ? '切换浅色模式' : '切换深色模式'} onClick={event => changeTheme(theme === 'dark' ? 'light' : 'dark',event.currentTarget)}>{theme === 'dark' ? '☀︎' : '◐'}</button>
@@ -2283,7 +2293,7 @@ function App() {
       {backendStatus === 'error' && <div className="engine-error-banner"><strong>本地引擎未能启动</strong><span>打开设置查看 FFmpeg、模型与存储诊断。</span><button onClick={refreshHealth}>重新检查</button></div>}
       {uploadProgress !== null && <div className="upload-progress-banner" role="status"><span>正在导入视频</span><progress value={uploadProgress} max={100}/><strong>{uploadProgress}%</strong></div>}
 
-      <div className={`studio-shell v05-shell ${showProjectWorkspace && activeProject ? `app-project project-view-${projectWorkspace}` : 'app-library'} ${inspectorMode ? 'inspector-open' : ''}`} style={{
+      <div className={`studio-shell v05-shell ${showProjectWorkspace && activeProject ? `app-project project-view-${projectWorkspace}` : 'app-library'} ${inspectorMode ? 'inspector-open' : ''} ${viewEntering ? 'view-entering' : ''} ${pageEntering ? 'page-entering' : ''}`} style={{
         '--left-panel-width': `${leftPanelWidth}px`, '--right-panel-width': `${rightPanelWidth}px`,
       } as React.CSSProperties}>
         <aside className={`project-sidebar ${compactLibrary ? "library-list-view" : ""}`}>
@@ -2294,14 +2304,14 @@ function App() {
             <button className="button primary" disabled={backendStatus !== 'connected'} onClick={handleImportLocal}>导入视频</button>
           </div></header>
           <section className="library-overview" aria-label="项目库概览">
-            <div><span>匹配项目</span><strong>{libraryTotal}</strong><small>{trashProjects.length ? `${trashProjects.length} 个在回收站` : '全部保存在本机'}</small></div>
-            <div><span>本页字幕</span><strong>{projects.reduce((total, project) => total + Number(project.segments_count || 0), 0)}</strong><small>可在项目库中全文搜索</small></div>
+            <div><span>匹配项目</span><strong><AnimatedNumber value={libraryTotal} animate={motionEnabled}/></strong><small>{trashProjects.length ? `${trashProjects.length} 个在回收站` : '全部保存在本机'}</small></div>
+            <div><span>本页字幕</span><strong><AnimatedNumber value={projects.reduce((total, project) => total + Number(project.segments_count || 0), 0)} animate={motionEnabled}/></strong><small>可在项目库中全文搜索</small></div>
             {youtubeEnabled
-              ? <div><span>批量任务</span><strong>{playlistBatches.filter(item => ['running', 'pending', 'paused', 'partial', 'failed'].includes(item.batch.status)).length}</strong><small>{playlistBatches.length ? `${playlistBatches.length} 个播放列表` : '暂无进行中的队列'}</small></div>
+              ? <div><span>批量任务</span><strong><AnimatedNumber value={playlistBatches.filter(item => ['running', 'pending', 'paused', 'partial', 'failed'].includes(item.batch.status)).length} animate={motionEnabled}/></strong><small>{playlistBatches.length ? `${playlistBatches.length} 个播放列表` : '暂无进行中的队列'}</small></div>
               : <div><span>隐私模式</span><strong>本地优先</strong><small>第三方媒体读取已关闭</small></div>}
             <div className={`library-runtime-card ${backendStatus}`}><span>本地引擎</span><strong>{backendStatus === 'connected' ? '就绪' : backendStatus === 'connecting' ? '启动中' : '需检查'}</strong><small>{backendStatus === 'connected' ? '媒体与转写工具可用' : backendStatus === 'connecting' ? '正在载入本机运行时' : '本地功能受限，AI 设置不应影响此状态'}</small></div>
           </section>
-          <div className="library-switcher" role="tablist" aria-label="项目库视图">
+          <div ref={libraryTabsRef} className="library-switcher sliding-tabs" role="tablist" aria-label="项目库视图">
             <button role="tab" aria-selected={libraryView === 'projects'} className={libraryView === 'projects' ? 'active' : ''} onClick={() => setLibraryView('projects')}>项目</button>
             <button role="tab" aria-selected={libraryView === 'trash'} className={libraryView === 'trash' ? 'active' : ''} onClick={() => setLibraryView('trash')}>回收站</button>
           </div>
@@ -2361,10 +2371,10 @@ function App() {
               const collapsed = collapsedProjectGroups.has(group.key);
               return <section className="project-group" key={group.key}>
                 <button className="project-group-header" aria-expanded={!collapsed} onClick={() => toggleProjectGroup(group.key)}><span><i>{collapsed ? '›' : '⌄'}</i>{group.label}</span><small>{group.projects.length}</small></button>
-                {!collapsed && <div className="project-group-items">{group.projects.map(project => {
+                {!collapsed && <div className="project-group-items">{group.projects.map((project, index) => {
                   const thumbnailUrl = api.getProjectThumbnailUrl(project);
                   const editingGroup = groupEditorProjectId === project.id;
-                  return <div className={`project-card-shell ${removingProjectIds.has(project.id) ? 'removing' : ''}`} key={project.id} onContextMenu={event => openProjectMenu(event, project)}>
+                  return <div className={`project-card-shell ${removingProjectIds.has(project.id) ? 'removing' : ''}`} key={project.id} style={{ '--i': Math.min(index, 11) } as React.CSSProperties} onContextMenu={event => openProjectMenu(event, project)}>
                     <button className={`project-card ${activeProject?.id === project.id ? 'active' : ''}`} onClick={() => void selectProject(project)}>
                       <span className="project-thumb"><span className="project-thumb-fallback">{project.source_type === 'youtube' ? '▶' : '▣'}</span>{thumbnailUrl && <img src={thumbnailUrl} alt="" loading="lazy" onError={event => { event.currentTarget.style.display = 'none'; }}/>}</span>
                       <span className="project-card-copy"><strong>{project.title}</strong><small>{languageLabel(project.language)} · {project.segments_count} 条 · {project.created_at.slice(0, 10)}</small><span className="media-mode-badge">{projectReadiness(project)}</span>{project.latest_task_status && <em className={`project-task-hint ${project.latest_task_status}`}>最近任务：{taskLabel(project.latest_task_status)}{project.latest_task_status === 'failed' ? ` · ${project.latest_task_message || ''}` : ''}</em>}</span>
@@ -2391,8 +2401,8 @@ function App() {
 
         <main className={`editor-workspace ${projectWorkspace === 'subtitles' ? 'workspace-editor' : ''} ${subtitleFocus ? 'subtitle-focus' : ''}`}>
           <nav className="project-workspace-nav" aria-label="项目工作区">
-            {([['subtitles', '编辑', `${segments.length} 条字幕`], ['style', '样式', '外观与位置'], ['export', '导出', '文件与视频']] as const).map(([id, label, detail]) => <button key={id} className={projectWorkspace === id ? 'active' : ''} aria-current={projectWorkspace === id ? 'page' : undefined} onClick={() => { setProjectWorkspace(id); if (id === 'subtitles') setSubtitleFocusRequest(request => request + 1); setInspectorMode(null); }}><span>{label}</span><small>{detail}</small></button>)}
-            <button className="workspace-tools-button" onClick={() => { setToolsTab('process'); setToolsOpen(true); setInspectorMode(null); }}><span>任务与工具</span><small>{currentTask ? currentTask.message || '运行中' : '质检、OCR、说话人'}</small></button>
+            <div ref={workspaceTabsRef} className="workspace-segments sliding-tabs">{([['subtitles', '编辑', `${segments.length} 条字幕`], ['style', '样式', '外观与位置'], ['export', '导出', '文件与视频']] as const).map(([id, label, detail]) => <button key={id} className={projectWorkspace === id ? 'active' : ''} aria-current={projectWorkspace === id ? 'page' : undefined} onClick={() => { setProjectWorkspace(id); if (id === 'subtitles') setSubtitleFocusRequest(request => request + 1); setInspectorMode(null); }}><span>{label}</span><small>{detail}</small></button>)}</div>
+            <button className={`workspace-tools-button ${toolsOpen ? 'open' : ''} ${isProcessing ? 'busy' : ''}`} aria-expanded={toolsOpen} onClick={() => { setToolsTab('process'); setToolsOpen(true); setInspectorMode(null); }}><span>任务与工具</span><small>{currentTask ? currentTask.message || '运行中' : '质检、OCR、说话人'}</small></button>
           </nav>
           <header className="workspace-page-heading">
             <div><small>{activeProject?.title}</small><h1>{projectWorkspace === 'subtitles' ? '字幕编辑' : projectWorkspace === 'style' ? '字幕样式' : '导出交付'}</h1></div>
@@ -2414,7 +2424,7 @@ function App() {
           {projectWorkspace === 'export' && <ExportWorkspace bilingual={config.bilingual} onBilingual={bilingual => {setConfig(current => ({...current,bilingual}));localStorage.setItem('subtitle_factory_export_bilingual',String(bilingual));}} hasSegments={hasSegments} hasVideo={hasLocalVideo} busy={taskStarting || (isProcessing && currentTask?.type === 'render') || Object.keys(draftItems).length > 0} onExport={format => void doExport(format)} onPackage={media => void exportProjectPackage(media)} task={<>
 {currentTask && ['render','export'].includes(currentTask.type) && <div className={`export-task-card ${currentTask.status}`}><div><strong>{currentTask.message || '导出任务'}</strong><small>{currentTask.status === 'success' ? '文件已准备完成' : '可离开此页面，任务会继续运行'}</small></div><progress max={100} value={currentTask.progress || 0}/><span>{Math.round(currentTask.progress || 0)}%</span></div>}</>}/>}
           </div>
-          {toolsOpen && <WorkspacePanel title="任务与工具" onClose={() => setToolsOpen(false)}><nav className="tool-panel-tabs" aria-label="工具分类">{([['process','任务'],['quality','质检与术语'],['smart','OCR 与说话人'],['content','内容']] as const).map(([id,label]) => <button key={id} aria-pressed={toolsTab === id} onClick={() => setToolsTab(id)}>{label}</button>)}<button onClick={() => setShowTaskDrawer(true)}>全部后台任务</button></nav>          {toolsTab === 'quality' && activeProject && <section className="task-page quality-task-page"><div className="quality-page-grid"><QualityPanel projectId={activeProject.id} segments={segments} revision={editorRevision.current} onEditorResult={result => acceptEditorResult(activeProject.id, result)} onSeek={time => { handleSeek(time); setProjectWorkspace('subtitles'); }}/><GlossaryPanel projectId={activeProject.id}/></div></section>}
+          {toolsOpen && <WorkspacePanel title="任务与工具" onClose={() => setToolsOpen(false)}><nav ref={toolTabsRef} className="tool-panel-tabs sliding-tabs" aria-label="工具分类">{([['process','任务'],['quality','质检与术语'],['smart','OCR 与说话人'],['content','内容']] as const).map(([id,label]) => <button key={id} aria-pressed={toolsTab === id} onClick={() => setToolsTab(id)}>{label}</button>)}<button onClick={() => setShowTaskDrawer(true)}>全部后台任务</button></nav>          {toolsTab === 'quality' && activeProject && <section className="task-page quality-task-page"><div className="quality-page-grid"><QualityPanel projectId={activeProject.id} segments={segments} revision={editorRevision.current} onEditorResult={result => acceptEditorResult(activeProject.id, result)} onSeek={time => { handleSeek(time); setProjectWorkspace('subtitles'); }}/><GlossaryPanel projectId={activeProject.id}/></div></section>}
           {toolsTab === 'smart' && activeProject && <section className="task-page smart-task-page"><SmartToolsPanel projectId={activeProject.id} revision={editorRevision.current} duration={videoDuration} onEditorResult={result => acceptEditorResult(activeProject.id, result)} onProjectChanged={() => void refreshActiveProject(activeProject.id)}/></section>}
           {toolsTab === 'process' && <TaskWorkspace steps={compactSteps} selected={activeProcessStep} onSelect={setSelectedStep} task={currentTask} settings={renderProcessSettings()} onPause={toggleTaskPause} onCancel={cancelCurrentTask} diagnostics={<details className="process-diagnostics"><summary>任务日志与诊断 <span>{processLogs.length}</span></summary><div><ProcessTimeline steps={processSteps} currentStepId={activeProcessStep} totalProgress={totalProgress} onStepClick={setSelectedStep}/><ProcessLogViewer logs={processLogs} collapsed={false} onToggle={() => undefined} onClear={() => setProcessLogs([])}/></div></details>}/>}
           {toolsTab === 'content' && activeProject && <Suspense fallback={<DeferredPanel label="正在打开内容工作区…"/>}>

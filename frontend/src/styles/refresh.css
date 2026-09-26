@@ -1,0 +1,734 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   字幕工厂 · 视觉设计层（ui/polish-motion）
+   在 App.css 之后加载，只负责视觉：色彩层次、阴影、圆角、排版与控件外观。
+   保留暖色品牌识别（赤陶橙），把边框让位给阴影，让界面更轻、更有层次。
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* ── 1. Tokens ─────────────────────────────────────────────────────────── */
+.pro-app,
+.settings-backdrop {
+  --radius-sm: 9px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 22px;
+  --accent-grad: linear-gradient(180deg, color-mix(in srgb, var(--accent-2) 88%, white), var(--accent));
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, .22);
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, .24), 0 6px 18px -6px rgba(0, 0, 0, .32);
+  --shadow-raised: 0 2px 6px rgba(0, 0, 0, .22), 0 22px 48px -14px rgba(0, 0, 0, .55);
+  --inset-sunken: inset 0 1px 2px rgba(0, 0, 0, .22);
+  --glass: color-mix(in srgb, var(--window-bg) 76%, transparent);
+}
+.pro-app.theme-dark,
+.settings-backdrop.theme-dark {
+  --accent-grad: linear-gradient(180deg, color-mix(in srgb, var(--accent) 94%, white), color-mix(in srgb, var(--accent) 84%, black));
+}
+.pro-app.theme-light,
+.settings-backdrop.theme-light {
+  --window-bg: #f6f4ee;
+  --canvas: #efece4;
+  --surface: #fffefb;
+  --surface-2: #f6f3ec;
+  --surface-3: #ede8de;
+  --elevated: #ffffff;
+  --border: rgba(70, 55, 35, .15);
+  --border-soft: rgba(70, 55, 35, .085);
+  --text: rgba(38, 33, 27, .94);
+  --text-2: rgba(62, 54, 44, .72);
+  --text-3: rgba(84, 74, 60, .52);
+  --shadow-xs: 0 1px 2px rgba(70, 50, 25, .06);
+  --shadow-card: 0 1px 2px rgba(70, 50, 25, .05), 0 6px 18px -8px rgba(70, 50, 25, .14);
+  --shadow-raised: 0 2px 6px rgba(70, 50, 25, .06), 0 24px 48px -16px rgba(70, 50, 25, .26);
+  --shadow-menu: 0 24px 64px -12px rgba(60, 42, 22, .26), 0 2px 10px rgba(60, 42, 22, .08);
+  --inset-sunken: inset 0 1px 2px rgba(70, 50, 25, .07);
+}
+
+/* ── 2. 基础控件 ───────────────────────────────────────────────────────── */
+.pro-app, .settings-backdrop { font-feature-settings: "tnum" 0; }
+:is(.pro-app, .settings-backdrop) .button {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  min-height: 34px;
+  padding: 0 15px;
+  border-radius: 10px;
+  font-weight: 600;
+}
+:is(.pro-app, .settings-backdrop) .button.primary {
+  border: 1px solid color-mix(in srgb, var(--accent) 70%, black 8%);
+  background: var(--accent-grad);
+  box-shadow: 0 1px 1px rgba(0,0,0,.12), 0 6px 16px -6px color-mix(in srgb, var(--accent) 70%, transparent), inset 0 1px 0 rgba(255,255,255,.28);
+  text-shadow: 0 1px 0 rgba(0,0,0,.12);
+}
+:is(.pro-app, .settings-backdrop) .button.primary:hover:not(:disabled) {
+  background: var(--accent-grad);
+  filter: brightness(1.05) saturate(1.05);
+  transform: translateY(-1px);
+  box-shadow: 0 2px 3px rgba(0,0,0,.1), 0 12px 24px -8px color-mix(in srgb, var(--accent) 75%, transparent), inset 0 1px 0 rgba(255,255,255,.32);
+}
+:is(.pro-app, .settings-backdrop) .button.primary::after {
+  content: ''; position: absolute; z-index: -1; top: 0; bottom: 0; left: 0; width: 38%;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,.38), transparent);
+  transform: translateX(-140%) skewX(-20deg);
+  pointer-events: none;
+}
+:is(.pro-app, .settings-backdrop) .button.secondary {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow-xs);
+}
+:is(.pro-app, .settings-backdrop) .button.secondary:hover:not(:disabled) {
+  background: var(--surface);
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
+  color: var(--text);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px -4px rgba(0,0,0,.14);
+}
+:is(.pro-app, .settings-backdrop) .button.secondary[aria-pressed="true"] {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+:is(.pro-app, .settings-backdrop) button:disabled { opacity: .42; filter: saturate(.6); }
+
+/* 原生 select：统一的圆角与箭头 */
+:is(.pro-app, .settings-backdrop) :is(.library-filters, .library-pagination, .editor-view-actions, .export-options, .style-template-bar, .media-selection-panel) select {
+  appearance: none;
+  -webkit-appearance: none;
+  height: 34px;
+  padding: 0 30px 0 11px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%238a7e70' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat right 11px center;
+  color: var(--text);
+  box-shadow: var(--shadow-xs);
+  cursor: pointer;
+  transition: border-color var(--dur-base, .2s) ease, box-shadow var(--dur-base, .2s) ease;
+}
+:is(.pro-app, .settings-backdrop) :is(.library-filters, .library-pagination, .editor-view-actions, .export-options, .style-template-bar, .media-selection-panel) select:hover { border-color: color-mix(in srgb, var(--accent) 30%, var(--border)); }
+:is(.pro-app, .settings-backdrop) select:focus-visible,
+:is(.pro-app, .settings-backdrop) input:not([type="range"]):not([type="checkbox"]):not([type="color"]):focus {
+  border-color: color-mix(in srgb, var(--accent) 70%, var(--border));
+  box-shadow: 0 0 0 4px var(--focus-ring);
+  outline: none;
+}
+:is(.pro-app, .settings-backdrop) input[type="range"] { accent-color: var(--accent); }
+:is(.pro-app, .settings-backdrop) input[type="checkbox"] { accent-color: var(--accent); }
+.pro-app .check-row > input[type="checkbox"] { width: 15px; height: 15px; margin: 0; }
+
+/* 设置开关：更饱满的轨道与弹性滑块 */
+.settings-backdrop .toggle-row > input[type="checkbox"] { width: 40px; height: 24px; border-radius: 12px; cursor: pointer; transition: background-color var(--dur-base, .2s) ease, box-shadow var(--dur-base, .2s) ease; }
+.settings-backdrop .toggle-row > input[type="checkbox"]::after { width: 20px; height: 20px; transition: transform 420ms var(--ease-spring, ease), width 200ms ease; }
+.settings-backdrop .toggle-row > input[type="checkbox"]:active::after { width: 24px; }
+.settings-backdrop .toggle-row > input[type="checkbox"]:checked { background: var(--accent-grad); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 60%, black 10%); }
+.settings-backdrop .toggle-row > input[type="checkbox"]:checked::after { transform: translateX(16px); }
+.settings-backdrop .toggle-row > input[type="checkbox"]:checked:active::after { transform: translateX(12px); }
+.pro-app .check-row { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; }
+
+/* ── 3. 通用滑动指示器（配合 useSlidingIndicator） ─────────────────────── */
+.sliding-tabs { position: relative; isolation: isolate; }
+.sliding-tabs::before {
+  content: '';
+  position: absolute; z-index: -1; left: 0; top: 0;
+  width: var(--indicator-w, 0); height: var(--indicator-h, 0);
+  transform: translate(var(--indicator-x, 0), var(--indicator-y, 0));
+  opacity: var(--indicator-opacity, 0);
+  border-radius: var(--indicator-radius, 9px);
+  background: var(--indicator-bg, var(--elevated));
+  box-shadow: var(--indicator-shadow, 0 1px 2px rgba(0,0,0,.08), 0 3px 10px -3px rgba(0,0,0,.16));
+  pointer-events: none;
+}
+:is(.pro-app, .settings-backdrop) .sliding-tabs > :is(.active, [aria-pressed="true"], [aria-selected="true"]) {
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+/* ── 4. 顶栏 ───────────────────────────────────────────────────────────── */
+.pro-app .studio-topbar {
+  height: 64px;
+  flex-basis: 64px;
+  border-bottom: 1px solid var(--border-soft);
+  background: var(--glass);
+  box-shadow: none;
+  backdrop-filter: saturate(1.7) blur(26px);
+  -webkit-backdrop-filter: saturate(1.7) blur(26px);
+}
+.pro-app.theme-dark .studio-topbar::before { background: color-mix(in srgb, #221e19 92%, transparent); }
+.pro-app.library-home .brand-block,
+.pro-app.library-home .active-project-title { align-self: center; margin-top: 0; }
+.pro-app.library-home .brand-block > strong { font-size: 15px; line-height: 1.2; letter-spacing: -.01em; }
+.pro-app .brand-mark { width: 30px; height: 30px; border-radius: 9px; box-shadow: 0 1px 2px rgba(0,0,0,.18), 0 6px 14px -6px rgba(0,0,0,.4); }
+.pro-app .active-project-title strong { font-size: 13px; font-weight: 650; letter-spacing: -.01em; }
+.pro-app .active-project-title span { font-size: 11px; }
+.pro-app .topbar-actions { gap: 8px; }
+.pro-app .topbar-button,
+.pro-app .icon-action,
+.pro-app .task-status-pill,
+.pro-app .topbar-back {
+  height: 34px;
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--surface) 70%, transparent);
+  box-shadow: var(--shadow-xs);
+  color: var(--text-2);
+}
+.pro-app.theme-dark :is(.topbar-button, .icon-action, .task-status-pill) { background: color-mix(in srgb, #3a342c 70%, transparent); box-shadow: none; }
+.pro-app .topbar-button { padding: 0 12px; font-size: 12px; font-weight: 600; color: var(--text); }
+.pro-app .topbar-button span { font-size: 14px; }
+.pro-app :is(.topbar-button, .icon-action, .topbar-back):hover:not(:disabled),
+.pro-app .topbar-button.active {
+  background: var(--surface);
+  border-color: var(--border);
+  color: var(--text);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px -4px rgba(0,0,0,.16);
+}
+.pro-app .icon-action { width: 34px; font-size: 15px; }
+.pro-app .topbar-back { min-width: 0; padding: 0 12px 0 8px; font-size: 12px; font-weight: 600; }
+.pro-app .topbar-back span { font-size: 20px; margin-top: -2px; }
+.pro-app .task-status-pill { padding: 0 11px; font-size: 11px; font-weight: 550; cursor: pointer; }
+.pro-app .task-status-pill:hover { background: var(--surface); color: var(--text); }
+.pro-app .task-status-pill.busy {
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
+  color: var(--accent);
+  background:
+    repeating-linear-gradient(-45deg, transparent 0 8px, color-mix(in srgb, var(--accent) 8%, transparent) 8px 16px),
+    color-mix(in srgb, var(--accent) 6%, var(--surface));
+  background-size: 32px 100%, auto;
+  animation: sf-stripes 1s linear infinite;
+}
+.pro-app .task-status-pill.busy .backend-dot { background: var(--accent); box-shadow: none; }
+
+/* ── 5. 项目库首页 ─────────────────────────────────────────────────────── */
+.pro-app .v05-shell.app-library { padding: 40px clamp(28px, 5.5vw, 88px) 72px; }
+.pro-app .v05-shell.app-library .project-sidebar {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-content: start;
+  column-gap: 16px;
+}
+.pro-app .v05-shell.app-library .project-sidebar > * { grid-column: 1 / -1; min-width: 0; }
+.pro-app .v05-shell.app-library .project-sidebar > .library-switcher { grid-column: 1; }
+.pro-app .v05-shell.app-library .project-sidebar > .library-pagination { grid-column: 2; }
+
+/* 标题区：衬线大标题 + 随内容滚动的暖色光晕（画在滚动容器背景上，不产生额外合成层） */
+.pro-app .v05-shell.app-library {
+  background:
+    radial-gradient(560px 300px at calc(clamp(28px, 5.5vw, 88px) + 120px) 60px, color-mix(in srgb, var(--accent) 13%, transparent), transparent 70%),
+    radial-gradient(460px 260px at calc(clamp(28px, 5.5vw, 88px) + 380px) 20px, color-mix(in srgb, var(--yellow) 9%, transparent), transparent 70%),
+    var(--window-bg);
+  background-attachment: local;
+}
+.pro-app.theme-dark .v05-shell.app-library {
+  background:
+    radial-gradient(560px 300px at calc(clamp(28px, 5.5vw, 88px) + 120px) 60px, color-mix(in srgb, var(--accent) 9%, transparent), transparent 70%),
+    var(--window-bg);
+  background-attachment: local;
+}
+.pro-app .library-page-header { margin-bottom: 30px; padding-top: 8px; }
+.pro-app .library-page-header small {
+  display: inline-flex; align-items: center; gap: 7px;
+  font-size: 11px; font-weight: 700; letter-spacing: .14em;
+}
+.pro-app .library-page-header small::before {
+  content: ''; width: 18px; height: 2px; border-radius: 2px; background: var(--accent);
+}
+.pro-app .library-page-header h1 {
+  margin: 10px 0 10px;
+  font-size: clamp(34px, 3.4vw, 48px);
+  font-weight: 700;
+  letter-spacing: -.02em;
+  background: linear-gradient(100deg, var(--text) 30%, color-mix(in srgb, var(--accent) 80%, var(--text)) 120%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.pro-app .library-page-header p { font-size: 14px; color: var(--text-2); }
+.pro-app .library-page-header > div:last-child { gap: 8px; }
+.pro-app .library-page-header .button { min-height: 38px; padding: 0 16px; font-size: 13px; }
+.pro-app .library-page-header .button.primary { padding: 0 20px; }
+
+/* 概览卡片 */
+.pro-app .library-overview { gap: 14px; margin: 0 0 28px; }
+.pro-app .library-overview > div {
+  position: relative;
+  overflow: hidden;
+  padding: 18px 20px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-lg);
+  background: linear-gradient(180deg, var(--surface), color-mix(in srgb, var(--surface) 55%, var(--surface-2)));
+  box-shadow: var(--shadow-card);
+}
+.pro-app .library-overview > div::after {
+  content: '';
+  position: absolute; top: 0; left: 18px; right: 18px; height: 2px;
+  border-radius: 0 0 2px 2px;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  opacity: 0;
+  transition: opacity var(--dur-base, .2s) ease;
+}
+.pro-app .library-overview > div:hover { transform: translateY(-2px); box-shadow: var(--shadow-raised); border-color: var(--border); }
+.pro-app .library-overview > div:hover::after { opacity: .9; }
+.pro-app .library-overview span { color: var(--text-2); font-size: 12px; font-weight: 600; }
+.pro-app .library-overview strong { font-size: 30px; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: -.03em; }
+.pro-app .library-overview small { font-size: 11px; }
+.pro-app .library-runtime-card strong { font-size: 17px; display: inline-flex; align-items: center; gap: 7px; }
+.pro-app .library-runtime-card strong::before {
+  content: ''; width: 8px; height: 8px; border-radius: 50%; background: currentColor;
+  box-shadow: 0 0 0 4px color-mix(in srgb, currentColor 18%, transparent);
+}
+.pro-app .library-runtime-card.connecting strong::before { animation: sf-breathe 1.3s ease-in-out infinite; }
+
+/* 项目 / 回收站 分段控件 */
+.pro-app .app-library .library-switcher {
+  width: max-content;
+  height: 40px;
+  min-height: 40px;
+  display: inline-grid;
+  grid-auto-flow: column;
+  grid-template-columns: none;
+  gap: 2px;
+  align-self: center;
+  margin: 0 0 16px;
+  padding: 3px;
+  border: 1px solid var(--border-soft);
+  border-radius: 12px;
+  background: var(--surface-2);
+  box-shadow: var(--inset-sunken);
+  --indicator-bg: var(--surface);
+}
+.pro-app.theme-dark .app-library .library-switcher { --indicator-bg: var(--surface-3); background: color-mix(in srgb, var(--surface) 60%, black); }
+.pro-app .app-library .library-switcher button {
+  min-width: 92px; height: 32px; padding: 0 18px;
+  border-radius: 9px; font-size: 13px; font-weight: 600; color: var(--text-3);
+}
+.pro-app .app-library .library-switcher button:hover { background: transparent; color: var(--text-2); transform: none; }
+.pro-app .app-library .library-switcher button.active { color: var(--text); }
+
+/* 分页与状态筛选：与分段控件同一行，右对齐、轻量化 */
+.pro-app .app-library .library-pagination {
+  justify-content: flex-end;
+  align-self: center;
+  gap: 8px;
+  margin-bottom: 16px;
+  padding: 0;
+  color: var(--text-3);
+  font-size: 12px;
+}
+.pro-app .app-library .library-pagination label { gap: 8px; color: var(--text-2); }
+.pro-app .app-library .library-pagination .button { min-height: 32px; height: 32px; padding: 0 12px; font-size: 12px; }
+.pro-app .app-library .library-pagination select { height: 32px; min-width: 96px; }
+
+/* 搜索 */
+.pro-app .app-library .library-filters { gap: 10px; margin-bottom: 26px; padding: 0; border: 0; }
+.pro-app .app-library .library-filters input {
+  height: 44px;
+  padding: 0 16px 0 42px;
+  border: 1px solid var(--border-soft);
+  border-radius: 14px;
+  background: var(--surface) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 16 16'%3E%3Ccircle cx='7' cy='7' r='5.25' fill='none' stroke='%238a7e70' stroke-width='1.6'/%3E%3Cpath d='M11 11l3.5 3.5' stroke='%238a7e70' stroke-width='1.6' stroke-linecap='round'/%3E%3C/svg%3E") no-repeat 16px center;
+  box-shadow: var(--shadow-card);
+  font-size: 14px;
+  transition: border-color var(--dur-base, .2s) ease, box-shadow var(--dur-base, .2s) ease;
+}
+.pro-app .app-library .library-filters input::placeholder { color: var(--text-3); }
+.pro-app .app-library .library-filters input:hover { border-color: var(--border); }
+.pro-app .app-library .library-filters input:focus { box-shadow: 0 0 0 4px var(--focus-ring), var(--shadow-card); }
+.pro-app .app-library .library-filters select { height: 44px; min-width: 128px; border-radius: 14px; border-color: var(--border-soft); box-shadow: var(--shadow-card); }
+
+/* 分组标题 */
+.pro-app .app-library .project-group-header { height: 30px; margin-bottom: 14px; }
+.pro-app .app-library .project-group-header:hover { background: transparent; box-shadow: none; transform: none; }
+.pro-app .app-library .project-group-header span { gap: 8px; font-size: 15px; font-weight: 650; letter-spacing: -.01em; }
+.pro-app .app-library .project-group-header i {
+  width: 20px; height: 20px; display: grid; place-items: center;
+  border-radius: 6px; background: var(--surface-2); color: var(--text-3); font-size: 12px;
+  transition: background-color .2s ease, color .2s ease;
+}
+.pro-app .app-library .project-group-header:hover i { background: var(--accent-soft); color: var(--accent); }
+.pro-app .app-library .project-group-header small { font: 600 11px var(--font); font-variant-numeric: tabular-nums; }
+
+/* 项目卡片 */
+.pro-app .app-library .project-group-items { grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 20px; }
+.pro-app .app-library .project-card {
+  border: 1px solid var(--border-soft);
+  border-radius: 18px;
+  background: var(--surface);
+  box-shadow: var(--shadow-card);
+}
+.pro-app .app-library .project-card:hover {
+  transform: translateY(-5px);
+  border-color: color-mix(in srgb, var(--accent) 28%, var(--border));
+  box-shadow: var(--shadow-raised);
+}
+.pro-app .app-library .project-card.active { border-color: color-mix(in srgb, var(--accent) 70%, transparent); box-shadow: 0 0 0 3px var(--accent-soft), var(--shadow-card); }
+.pro-app .app-library .project-thumb { min-height: 142px; }
+.pro-app .app-library .project-thumb::before {
+  content: ''; position: absolute; inset: 0; z-index: 2;
+  background: linear-gradient(180deg, rgba(0,0,0,0) 55%, rgba(0,0,0,.28));
+  pointer-events: none;
+}
+.pro-app .app-library .project-thumb::after {
+  content: '';
+  position: absolute; z-index: 3; left: 50%; top: 50%;
+  width: 46px; height: 46px; margin: -23px 0 0 -23px;
+  border-radius: 50%;
+  background: rgba(255,255,255,.2) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='18' viewBox='0 0 16 18'%3E%3Cpath d='M2 1.8v14.4c0 .8.9 1.3 1.6.9l12-7.2c.7-.4.7-1.4 0-1.8l-12-7.2C2.9.5 2 1 2 1.8z' fill='white'/%3E%3C/svg%3E") no-repeat 55% center;
+  border: 1px solid rgba(255,255,255,.35);
+  box-shadow: 0 8px 24px rgba(0,0,0,.28);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  opacity: 0;
+  transform: scale(.7);
+  pointer-events: none;
+}
+.pro-app .app-library .project-card:hover .project-thumb::after { opacity: 1; transform: scale(1); }
+.pro-app .app-library .project-card:hover .project-thumb img { transform: scale(1.07); filter: saturate(1.1); }
+.pro-app .app-library .trash-card .project-thumb::after { display: none; }
+.pro-app .app-library .project-card-copy { gap: 0; padding: 14px 16px 16px; }
+.pro-app .app-library .project-card-copy strong { font-size: 14px; font-weight: 650; letter-spacing: -.01em; }
+.pro-app .app-library .project-card-copy small { margin-top: 4px; font-size: 12px; font-variant-numeric: tabular-nums; }
+.pro-app .app-library .media-mode-badge {
+  margin-top: 10px;
+  padding: 3px 9px;
+  border: 0;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--green) 13%, transparent);
+  color: var(--green);
+  font-size: 11px;
+  font-weight: 600;
+}
+.pro-app .app-library .project-more {
+  top: 10px; right: 10px;
+  width: 30px; height: 30px;
+  border-radius: 10px;
+  transform: scale(.85);
+}
+.pro-app .app-library .project-card-shell:hover .project-more,
+.pro-app .app-library .project-more:focus-visible,
+.pro-app .app-library .project-more[aria-expanded="true"] { transform: scale(1); }
+.pro-app .app-library .project-empty {
+  min-height: 300px;
+  gap: 10px;
+  border: 1.5px dashed var(--border);
+  border-radius: 22px;
+  background: color-mix(in srgb, var(--surface) 60%, transparent);
+}
+.pro-app .app-library .project-empty > span {
+  width: 72px; height: 72px; border-radius: 20px;
+  background: var(--accent-soft); color: var(--accent); font-size: 34px;
+  box-shadow: 0 10px 30px -10px color-mix(in srgb, var(--accent) 60%, transparent);
+}
+.pro-app .library-skeleton i { height: 218px; border-radius: 18px; }
+.pro-app .app-library .library-skeleton { grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 20px; padding: 0; }
+
+/* 紧凑列表视图 */
+.pro-app .app-library .library-list-view .project-card { border-radius: 14px; }
+.pro-app .app-library .library-list-view .project-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-raised); }
+.pro-app .app-library .library-list-view .project-thumb { min-height: 58px; }
+.pro-app .app-library .library-list-view .project-thumb::after { width: 30px; height: 30px; margin: -15px 0 0 -15px; background-size: 10px; }
+.pro-app .app-library .library-list-view .media-mode-badge { margin-top: 6px; }
+.pro-app .app-library .library-list-view .project-card-copy { padding: 0 14px; }
+.pro-app .app-library .library-list-view .project-more,
+.pro-app .app-library .library-list-view .project-card-shell:hover .project-more { top: 50%; right: 14px; transform: translateY(-50%); }
+
+/* 全文搜索结果 */
+.pro-app .subtitle-search-hits > button { border-radius: 12px; transition: background-color .2s ease, transform .35s var(--ease-spring, ease); }
+.pro-app .subtitle-search-hits > button:hover,
+.pro-app .subtitle-search-hits > button.selected { transform: translateX(3px); }
+
+/* ── 6. 项目工作区：导航 ───────────────────────────────────────────────── */
+.pro-app .v05-shell.app-project .editor-workspace { background: var(--window-bg); }
+.pro-app .editor-workspace > .project-workspace-nav {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--border-soft);
+  background: color-mix(in srgb, var(--surface) 55%, transparent);
+}
+.pro-app .workspace-segments {
+  grid-column: 2;
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--border-soft);
+  border-radius: 13px;
+  background: var(--surface-2);
+  box-shadow: var(--inset-sunken);
+  --indicator-radius: 10px;
+  --indicator-bg: var(--surface);
+}
+.pro-app.theme-dark .workspace-segments { background: color-mix(in srgb, var(--surface) 60%, black); --indicator-bg: var(--surface-3); }
+.pro-app .editor-workspace > .project-workspace-nav .workspace-segments button {
+  height: 36px;
+  padding: 0 18px;
+  gap: 8px;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text-3);
+  box-shadow: none;
+}
+.pro-app .editor-workspace > .project-workspace-nav .workspace-segments button:hover { background: transparent; color: var(--text); }
+.pro-app .editor-workspace > .project-workspace-nav .workspace-segments button.active { color: var(--text); }
+.pro-app .workspace-segments span { font-size: 13px; font-weight: 650; }
+.pro-app .workspace-segments small {
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--text-3) 12%, transparent);
+  font-size: 10.5px;
+  font-weight: 550;
+  opacity: 1;
+  transition: background-color .25s ease, color .25s ease;
+}
+.pro-app .workspace-segments button.active small { background: var(--accent-soft); color: var(--accent); }
+.pro-app .editor-workspace > .project-workspace-nav .workspace-tools-button {
+  grid-column: 3;
+  justify-self: end;
+  max-width: 100%;
+  height: 36px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 14px;
+  border: 1px solid var(--border-soft);
+  border-radius: 11px;
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow-xs);
+}
+.pro-app .editor-workspace > .project-workspace-nav .workspace-tools-button::before {
+  content: ''; flex: none; width: 7px; height: 7px; border-radius: 50%;
+  background: color-mix(in srgb, var(--text-3) 60%, transparent);
+}
+.pro-app .editor-workspace > .project-workspace-nav .workspace-tools-button.busy::before { background: var(--accent); }
+.pro-app .editor-workspace > .project-workspace-nav .workspace-tools-button:hover { transform: translateY(-1px); border-color: var(--border); box-shadow: 0 4px 12px -4px rgba(0,0,0,.16); background: var(--surface); }
+.pro-app .editor-workspace > .project-workspace-nav .workspace-tools-button.open { border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); background: var(--accent-soft); color: var(--accent); }
+.pro-app .workspace-tools-button span { font-size: 12px; font-weight: 650; }
+.pro-app .workspace-tools-button small { min-width: 0; overflow: hidden; color: var(--text-3); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; opacity: 1; }
+@media (max-width: 1180px) { .pro-app .workspace-tools-button small { display: none; } }
+
+/* ── 7. 编辑器 ─────────────────────────────────────────────────────────── */
+.pro-app .editor-workbench { background: var(--window-bg); }
+.pro-app .editor-actions { gap: 8px 16px; padding: 10px 16px; border-bottom: 0; }
+.pro-app .editor-workbench .button { min-height: 32px; padding: 0 13px; border-radius: 9px; }
+.pro-app .editor-workbench .button.secondary { box-shadow: var(--shadow-xs); }
+.pro-app .editor-workbench .button:hover:not(:disabled) { transform: translateY(-1px); }
+.pro-app .editor-primary-actions .editor-save-status {
+  margin-left: 4px; padding: 3px 9px; border-radius: 999px;
+  background: color-mix(in srgb, var(--text-3) 12%, transparent);
+  color: var(--text-2); font-size: 11px; font-variant-numeric: tabular-nums;
+}
+.pro-app .editor-view-actions label { color: var(--text-3); font-size: 12px; }
+.pro-app .editor-view-actions select { height: 32px; min-height: 32px; }
+.pro-app .editor-ratio-control output { color: var(--text-2); font-size: 12px; }
+
+.pro-app .editor-body { padding: 0 12px 12px; }
+.pro-app .wide .editor-body { grid-template-columns: var(--editor-ratio) 12px minmax(0, 1fr); }
+.pro-app .stacked .editor-body { grid-template-rows: var(--editor-ratio) 12px minmax(0, 1fr); }
+.pro-app .editor-player {
+  border-radius: 16px;
+  background: #0b0a09;
+  box-shadow: 0 1px 2px rgba(0,0,0,.2), 0 16px 36px -18px rgba(0,0,0,.6);
+}
+.pro-app .editor-transcript {
+  border: 1px solid var(--border-soft);
+  border-radius: 16px;
+  box-shadow: var(--shadow-card);
+}
+.pro-app .editor-divider { background: transparent; }
+.pro-app .editor-divider::after { inset: calc(50% - 20px) 4px; border-radius: 4px; background: var(--text-3); opacity: .3; transition: opacity .2s ease, background-color .2s ease, inset .3s var(--ease-spring, ease); }
+.pro-app .stacked .editor-divider::after { inset: 4px calc(50% - 20px); }
+.pro-app .editor-divider:hover,
+.pro-app .editor-divider:focus-visible { background: transparent; }
+.pro-app .editor-divider:hover::after,
+.pro-app .editor-divider:focus-visible::after { inset: calc(50% - 32px) 4px; background: var(--accent); opacity: 1; }
+.pro-app .stacked .editor-divider:hover::after { inset: 4px calc(50% - 32px); }
+.pro-app .editor-timeline {
+  margin: 0 12px 12px;
+  border: 1px solid var(--border-soft);
+  border-radius: 14px;
+  background: var(--surface);
+  box-shadow: var(--shadow-card);
+}
+.pro-app .editor-timeline .subtitle-timeline { background: transparent; border: 0; }
+.pro-app .timeline-segment { border-radius: 6px; }
+.pro-app .timeline-segment:hover { transform: translateY(-2px); }
+.pro-app .timeline-playhead { box-shadow: 0 0 10px color-mix(in srgb, var(--yellow) 70%, transparent); }
+.pro-app .editor-inspector { border-radius: 0 16px 16px 0; box-shadow: -16px 0 40px -18px rgba(0,0,0,.4); }
+.pro-app .viewer-welcome { background: radial-gradient(120% 90% at 50% 20%, #2e2923 0, #16130f 60%, #0e0c0a 100%); }
+.pro-app .viewer-welcome > span { box-shadow: 0 0 0 10px rgba(255,255,255,.03), 0 0 0 22px rgba(255,255,255,.015); animation: sf-float 3.6s ease-in-out infinite; }
+
+/* 剧院 / 全屏：去掉卡片化的留白与圆角 */
+.pro-app:is(.presentation-theater, .presentation-fullscreen) .editor-body { padding: 0; }
+.pro-app:is(.presentation-theater, .presentation-fullscreen) .editor-player { border-radius: 0; box-shadow: none; }
+
+/* 字幕表格 */
+.pro-app .editor-transcript .subtitle-table-header { border-bottom: 1px solid var(--border-soft); }
+.pro-app .editor-transcript .subtitle-table-header h3 { color: var(--text); font-weight: 650; }
+.pro-app .editor-transcript .subtitle-table th { color: var(--text-3); font-weight: 600; letter-spacing: .02em; background: color-mix(in srgb, var(--surface-2) 60%, var(--surface)); }
+.pro-app .subtitle-table tr.active-row td { background: color-mix(in srgb, var(--accent) 9%, var(--surface)); }
+.pro-app .subtitle-table tr.active-row td:first-child { box-shadow: inset 3px 0 var(--accent); }
+.pro-app .editor-transcript .subtitle-findbar > input { border-radius: 10px; }
+
+/* ── 8. 样式页 ─────────────────────────────────────────────────────────── */
+.pro-app .editor-workspace .style-canvas { padding: 16px; }
+.pro-app .editor-workspace .style-canvas-stage {
+  border: 0;
+  border-radius: 18px;
+  box-shadow: 0 2px 4px rgba(0,0,0,.18), 0 30px 60px -24px rgba(0,0,0,.55);
+}
+.pro-app .style-template-bar {
+  padding: 8px 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: 14px;
+  background: var(--surface);
+  box-shadow: var(--shadow-card);
+}
+.pro-app .style-template-bar button { border-radius: 9px; background: var(--surface); transition: border-color .2s ease, transform .35s var(--ease-spring, ease); }
+.pro-app .style-template-bar button:hover { border-color: color-mix(in srgb, var(--accent) 40%, var(--border)); transform: translateY(-1px); }
+.pro-app .editor-workspace .style-controls-page {
+  margin: 16px 16px 16px 0;
+  border: 1px solid var(--border-soft);
+  border-radius: 18px;
+  background: var(--surface);
+  box-shadow: var(--shadow-card);
+}
+.pro-app .editor-workspace .style-controls-page > header { padding: 18px 18px 14px; }
+.pro-app .style-controls-page .subtitle-style-panel section,
+.pro-app .style-controls-page .style-section { transition: border-color .2s ease, box-shadow .3s ease; }
+
+/* ── 9. 导出页 ─────────────────────────────────────────────────────────── */
+.pro-app .export-task-page { padding: 36px clamp(20px, 5vw, 64px) 48px; }
+.pro-app .export-page-hero { max-width: 760px; margin: 0 auto 22px; padding: 0; border: 0; }
+.pro-app .export-page-hero h2 { margin: 8px 0 8px; font-size: 30px; letter-spacing: -.02em; }
+.pro-app .export-page-hero p { color: var(--text-2); font-size: 14px; }
+.pro-app .export-task-page > .tool-panel-tabs,
+.pro-app .export-options { max-width: 760px; }
+.pro-app .export-task-page > .tool-panel-tabs {
+  width: max-content;
+  margin: 0 auto 0 max(0px, calc((100% - 760px) / 2));
+  padding: 3px;
+  border: 1px solid var(--border-soft);
+  border-radius: 12px;
+  background: var(--surface-2);
+  box-shadow: var(--inset-sunken);
+  --indicator-bg: var(--surface);
+}
+.pro-app.theme-dark .export-task-page > .tool-panel-tabs { background: color-mix(in srgb, var(--surface) 60%, black); --indicator-bg: var(--surface-3); }
+.pro-app .export-task-page > .tool-panel-tabs button { height: 32px; padding: 0 16px; background: transparent; color: var(--text-3); font-weight: 600; }
+.pro-app .export-task-page > .tool-panel-tabs button[aria-pressed="true"] { color: var(--text); }
+.pro-app .export-options {
+  margin-top: 18px;
+  padding: 26px 28px;
+  border: 1px solid var(--border-soft);
+  border-radius: 20px;
+  background: var(--surface);
+  box-shadow: var(--shadow-card);
+}
+.pro-app .export-options > label:not(.check-row) { color: var(--text); font-weight: 600; }
+.pro-app .export-options select { width: 100%; height: 42px; padding-inline: 14px 34px; border-radius: 12px; font-weight: 500; }
+.pro-app .export-options p { color: var(--text-2); font-size: 13px; }
+.pro-app .export-options > .button { min-height: 42px; padding: 0 22px; font-size: 14px; }
+.pro-app .export-options.export-package { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.pro-app .export-options.export-package > p { flex: 1 1 100%; }
+.pro-app .export-task-card { max-width: 760px; border-radius: 16px; box-shadow: var(--shadow-card); }
+
+/* ── 10. 任务与工具浮动面板 ────────────────────────────────────────────── */
+.pro-app .editor-workspace > .workspace-tool-panel {
+  top: 68px; right: 12px; bottom: 12px;
+  border: 1px solid var(--border-soft);
+  border-radius: 20px;
+  background: color-mix(in srgb, var(--elevated) 94%, transparent);
+  box-shadow: var(--shadow-menu);
+  backdrop-filter: saturate(1.4) blur(30px);
+  -webkit-backdrop-filter: saturate(1.4) blur(30px);
+}
+.pro-app .workspace-tool-panel > header { padding: 16px 18px 10px; }
+.pro-app .workspace-tool-panel > header h2 { font-size: 19px; }
+.pro-app .workspace-tool-panel > header .button { min-height: 30px; }
+.pro-app .workspace-tool-panel .tool-panel-tabs { gap: 2px; padding: 6px 14px 12px; --indicator-bg: var(--accent-soft); --indicator-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 25%, transparent); }
+.pro-app .workspace-tool-panel .tool-panel-tabs button { height: 32px; padding: 0 12px; border-radius: 9px; background: transparent; color: var(--text-2); font-weight: 600; transition: color .2s ease; }
+.pro-app .workspace-tool-panel .tool-panel-tabs button:hover { color: var(--text); background: color-mix(in srgb, var(--text-3) 8%, transparent); }
+.pro-app .workspace-tool-panel .tool-panel-tabs button[aria-pressed="true"] { color: var(--accent); }
+.pro-app .task-step-nav { gap: 6px; padding: 10px 14px; background: transparent; border-bottom-color: var(--border-soft); }
+.pro-app .task-step-nav button { border-radius: 12px; background: var(--surface); box-shadow: var(--shadow-xs); transition: transform .35s var(--ease-spring, ease), border-color .2s ease, background-color .2s ease; }
+.pro-app .task-step-nav button:hover { transform: translateY(-2px); }
+.pro-app .task-step-nav button[aria-pressed="true"] { box-shadow: 0 0 0 3px var(--accent-soft); }
+.pro-app .workspace-tool-panel .inspector-section { border-color: var(--border-soft); border-radius: 16px; background: var(--surface); }
+
+/* ── 11. 浮层 ──────────────────────────────────────────────────────────── */
+.pro-app .modal-backdrop,
+.modal-backdrop.settings-backdrop,
+.pro-app .utility-dialog-backdrop,
+.pro-app .preflight-overlay {
+  background: rgba(24, 18, 12, .34);
+  backdrop-filter: blur(12px) saturate(1.2);
+  -webkit-backdrop-filter: blur(12px) saturate(1.2);
+}
+.pro-app.theme-dark .modal-backdrop, .modal-backdrop.settings-backdrop.theme-dark, .pro-app.theme-dark .utility-dialog-backdrop { background: rgba(0, 0, 0, .5); }
+.settings-backdrop .settings-center,
+.pro-app :is(.rename-dialog, .import-flow, .preflight-card) {
+  border: 1px solid var(--border-soft);
+  border-radius: 24px;
+  box-shadow: 0 40px 100px -20px rgba(0,0,0,.45), 0 0 0 1px rgba(255,255,255,.04) inset;
+}
+.pro-app .rename-dialog { padding: 22px; }
+.pro-app .rename-dialog h2 { font-size: 17px; }
+.pro-app .rename-dialog p { font-size: 12px; }
+.pro-app .rename-dialog input { height: 40px; border-radius: 11px; }
+
+/* 设置中心：侧栏滑动选中态 */
+.settings-backdrop .settings-navigation nav {
+  --indicator-radius: 10px;
+  --indicator-bg: color-mix(in srgb, var(--accent) 13%, var(--surface));
+  --indicator-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+.settings-backdrop .settings-navigation nav button { border-radius: 10px; transition: color .2s ease, background-color .2s ease; }
+.settings-backdrop .settings-navigation nav button:hover { background: color-mix(in srgb, var(--text-3) 9%, transparent); transform: none; }
+.settings-backdrop .settings-navigation nav button.active { color: var(--accent); font-weight: 650; }
+.settings-backdrop .settings-navigation nav button i { transition: background-color .25s ease, color .25s ease, transform .4s var(--ease-spring, ease); }
+.settings-backdrop .settings-navigation nav button.active i { background: var(--accent); color: white; transform: scale(1.08); }
+.settings-backdrop .segmented-control { --indicator-radius: 8px; --indicator-bg: var(--elevated); }
+.settings-backdrop .segmented-control button { transition: color .2s ease; }
+.settings-backdrop .segmented-control button.active { color: var(--text); font-weight: 600; }
+
+/* 右键菜单 */
+.pro-app .context-menu { border-color: var(--border-soft); border-radius: 14px; padding: 5px; }
+.pro-app .context-menu button { border-radius: 9px; }
+.pro-app .context-menu button:hover:not(:disabled) { transform: none; box-shadow: none; }
+
+/* 提示 */
+.pro-app .studio-toast {
+  min-height: 42px;
+  padding: 0 18px 0 12px;
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 550;
+}
+.pro-app .studio-toast span {
+  width: 22px; height: 22px; display: grid; place-items: center;
+  border-radius: 50%; background: var(--green); color: white; font-size: 12px;
+}
+
+/* 拖放导入：流动虚线边框 */
+.pro-app .drop-overlay { background: color-mix(in srgb, var(--accent) 8%, rgba(20,14,8,.42)); }
+.pro-app .drop-overlay > div {
+  border: 0;
+  border-radius: 20px;
+  --dash: color-mix(in srgb, var(--accent) 75%, white);
+  background:
+    linear-gradient(90deg, var(--dash) 50%, transparent 0) repeat-x 0 0 / 20px 2px,
+    linear-gradient(90deg, var(--dash) 50%, transparent 0) repeat-x 0 100% / 20px 2px,
+    linear-gradient(0deg, var(--dash) 50%, transparent 0) repeat-y 0 0 / 2px 20px,
+    linear-gradient(0deg, var(--dash) 50%, transparent 0) repeat-y 100% 0 / 2px 20px,
+    color-mix(in srgb, var(--elevated) 94%, transparent);
+}
+.pro-app .drop-overlay span { border-radius: 20px; }
+
+/* 首次运行预检 */
+.pro-app .preflight-checks > span { border-color: var(--border-soft); border-radius: 14px; background: var(--surface-2); }
+.pro-app .preflight-checks > span.ok i { background: color-mix(in srgb, var(--green) 16%, transparent); color: var(--green); }
+.pro-app .preflight-device { border-radius: 14px; }

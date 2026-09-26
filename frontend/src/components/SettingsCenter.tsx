@@ -8,6 +8,7 @@ import type {
 } from '../types';
 import LanguagePicker from './LanguagePicker';
 import AppSelect from './AppSelect';
+import { useSlidingIndicator } from '../utils/motion';
 import { languageLabel } from '../languages';
 
 type Category = 'general' | 'transcription' | 'ai' | 'translation' | 'storage' | 'appearance' | 'about';
@@ -87,6 +88,7 @@ export default function SettingsCenter(props: Props) {
   const externalPathsEnabled = api.externalRuntimePathsEnabled();
   const distributionChannel = api.getDistributionChannel();
   const [category, setCategory] = useState<Category>('general');
+  const navRef = useSlidingIndicator<HTMLElement>(category);
   const [draft, setDraft] = useState<AppSettings>(appSettings);
   const [warnings, setWarnings] = useState<AppSettingWarning[]>([]);
   const [busy, setBusy] = useState(false);
@@ -447,7 +449,7 @@ export default function SettingsCenter(props: Props) {
       <section ref={dialogRef} tabIndex={-1} className="settings-center" role="dialog" aria-modal="true" aria-label="设置中心" onMouseDown={event => event.stopPropagation()}>
         <aside className="settings-navigation">
           <div className="settings-title"><strong>设置</strong><small>字幕工厂</small></div>
-          <nav aria-label="设置分类">
+          <nav ref={navRef} className="sliding-tabs" aria-label="设置分类">
             {CATEGORIES.map(item => <button key={item.id} className={category === item.id ? 'active' : ''} onClick={() => { setCategory(item.id); setMessage(''); setError(''); }}>
               <i>{item.icon}</i><span>{item.label}</span>
             </button>)}
@@ -713,7 +715,8 @@ function Toggle({ label, detail, checked, onChange }: { label: string; detail?: 
 }
 
 function Segmented({ value, onChange, options }: { value: string; onChange: (value: string, origin: HTMLElement) => void; options: string[][] }) {
-  return <div className="segmented-control">{options.map(([id, label]) => <button className={value === id ? 'active' : ''} key={id} onClick={event => onChange(id,event.currentTarget)}>{label}</button>)}</div>;
+  const ref = useSlidingIndicator<HTMLDivElement>(value);
+  return <div ref={ref} className="segmented-control sliding-tabs">{options.map(([id, label]) => <button className={value === id ? 'active' : ''} key={id} onClick={event => onChange(id,event.currentTarget)}>{label}</button>)}</div>;
 }
 
 function RuntimeRow({ label, value }: { label: string; value: { ok: boolean; title: string; detail: string } }) {
