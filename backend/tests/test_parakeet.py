@@ -513,3 +513,112 @@ class ParakeetInferenceAdapterTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def _fake_coreml_model(model: Path) -> None:
+    model.mkdir(parents=True, exist_ok=True)
+    for name in parakeet._COREML_REQUIRED_MODEL_ENTRIES:
+        path = model / name
+        if name.endswith(".mlmodelc"):
+            path.mkdir(exist_ok=True)
+        else:
+            path.write_text("{}", encoding="utf-8")
+
+
+def _fake_cli(path: Path) -> Path:
+    path.write_text("#!/bin/sh\necho usage\n", encoding="utf-8")
+    path.chmod(0o755)
+    return path
+
+
+class ParakeetAppManagedCoreMLTests(unittest.TestCase):
+    def test_discovery_prefers_app_managed_model_and_bundled_cli_over_memo(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            cache = root / "models"
+            _fake_coreml_model(cache / PARAKEET_MODEL_ID)
+            memo = root / "home" / "Library" / "Application Support" / "Memo"
+            _fake_coreml_model(memo / "models" / PARAKEET_MODEL_ID)
+            cli = _fake_cli(root / "parakeet-coreml")
+            with patch.object(parakeet, "bundled_coreml_cli", return_value=cli), patch.object(
+                parakeet, "_valid_coreml_cli", return_value=True
+            ), patch.object(parakeet.Path, "home", return_value=root / "home"):
+                runtime = parakeet.discover_coreml_runtime(allow_environment=False, cache_root=cache)
+            self.assertEqual(runtime.model_dir, (cache / PARAKEET_MODEL_ID).resolve())
+            self.assertEqual(runtime.cli_path, cli.resolve())
+            self.assertEqual(runtime.source, "app_managed")
+
+    def test_missing_model_with_bundled_cli_is_downloadable_not_unavailable(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            cli = _fake_cli(root / "parakeet-coreml")
+            with patch.object(parakeet, "bundled_coreml_cli", return_value=cli), patch.object(
+                parakeet, "_valid_coreml_cli", return_value=True
+            ), patch.object(parakeet.Path, "home", return_value=root / "empty-home"):
+                status = parakeet.get_parakeet_model_status(PARAKEET_MODEL_ID, cache_root=root / "models")
+            self.assertFalse(status["ready"])
+            self.assertTrue(status["download_required"])
+            self.assertEqual(status["state"], "not_downloaded")
+            self.assertEqual(status["repository"], parakeet.PARAKEET_COREML_REPOSITORY)
+            self.assertEqual(status["download_bytes"], parakeet.PARAKEET_COREML_DOWNLOAD_BYTES)
+
+    def test_missing_bundled_cli_and_memo_reports_unavailable(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            with patch.object(parakeet, "bundled_coreml_cli", return_value=None), patch.object(
+                parakeet.Path, "home", return_value=root / "empty-home"
+            ):
+                status = parakeet.get_parakeet_model_status(PARAKEET_MODEL_ID, cache_root=root)
+            self.assertFalse(status["download_required"])
+            self.assertEqual(status["state"], "unavailable")
+
+    def test_official_manifest_is_pinned_and_covers_required_entries(self):
+        self.assertIn(parakeet.PARAKEET_COREML_REVISION, parakeet.PARAKEET_COREML_BASE_URL)
+        paths = {relative for relative, _, _ in parakeet.PARAKEET_COREML_FILES}
+        for entry in parakeet._COREML_REQUIRED_MODEL_ENTRIES:
+            if entry.endswith(".mlmodelc"):
+                self.assertIn(f"{entry}/weights/weight.bin", paths)
+                self.assertIn(f"{entry}/coremldata.bin", paths)
+            else:
+                self.assertIn(entry, paths)
+        for _relative, size, digest in parakeet.PARAKEET_COREML_FILES:
+            self.assertGreater(size, 0)
+            self.assertRegex(digest, r"^[0-9a-f]{64}$")
+
+    def test_download_writes_staging_then_swaps_and_repair_reuses_files(self):
+        manifest = (
+            ("Encoder.mlmodelc/weights/weight.bin", 4, "a"),
+            ("Decoder.mlmodelc/weights/weight.bin", 4, "b"),
+            ("JointDecision.mlmodelc/weights/weight.bin", 4, "c"),
+            ("Preprocessor.mlmodelc/weights/weight.bin", 4, "d"),
+            ("parakeet_v3_vocab.json", 2, "e"),
+        )
+        fetched: list[str] = []
+
+        def fake_download(url, destination, size, progress, checkpoint, expected_sha256=None):
+            if destination.is_file():
+                return
+            fetched.append(url.rsplit("/", 1)[-1] if "vocab" in url else url.split("/")[-3])
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_bytes(b"x" * size)
+            progress(size, size, False)
+
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            task_id = task_manager.create_task(None, "prepare_model")
+            with patch.object(parakeet, "PARAKEET_COREML_FILES", manifest), patch.object(
+                parakeet, "PARAKEET_COREML_DOWNLOAD_BYTES", 18
+            ), patch.object(parakeet, "_download_file", side_effect=fake_download):
+                target = parakeet.ensure_parakeet_coreml_model(task_id, root)
+                self.assertTrue(parakeet._valid_coreml_model_dir(target))
+                self.assertFalse((root / f".{PARAKEET_MODEL_ID}.downloading").exists())
+                self.assertEqual(len(fetched), 5)
+
+                fetched.clear()
+                (target / "Encoder.mlmodelc" / "weights" / "weight.bin").unlink()
+                target = parakeet.ensure_parakeet_coreml_model(task_id, root, repair=True)
+                self.assertEqual(fetched, ["Encoder.mlmodelc"])
+                self.assertTrue((target / "Encoder.mlmodelc" / "weights" / "weight.bin").is_file())
+                self.assertEqual(
+                    [path.name for path in root.iterdir()], [PARAKEET_MODEL_ID],
+                )

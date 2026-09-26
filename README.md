@@ -12,7 +12,7 @@
 - 发布版内置 arm64 FFmpeg/FFprobe，YouTube 高清画面与音频合并不依赖 Homebrew。
 - YouTube 下载保留，网页播放器已移除，项目统一使用本地视频播放。
 - 模型与运行设备分别选择；不静默更换模型或从 Apple GPU 回退 CPU。CPU 保持 beam=5 与逐词时间戳，Qwen MLX 默认 20 秒切段。
-- Parakeet ONNX 下载到 App 自己的数据目录，不写入源码或 App 包。
+- Parakeet ONNX 与 Parakeet Core ML 都下载到 App 自己的数据目录，不写入源码或 App 包；Core ML 转写组件由 `scripts/build-parakeet-coreml.sh` 从源码构建。
 - 新增项目回收站、恢复、永久删除与运行中删除确认。
 - 新增完整设置中心、运行时诊断、可扩展语言选择器和模型路径校验。
 - 主界面重构为项目库、播放器、紧凑流程栏、工作标签页与按需检查器。
@@ -80,7 +80,7 @@ API Key 在发布版中保存到 macOS Keychain；数据库只保留配置状态
 | Whisper | Tiny、Base、Small、Medium、Large V3、Large V3 Turbo，按 CPU/Apple GPU 下载固定提交 |
 | Distil-Whisper Large V3 | 仅英语；其他语言会提示改用 Whisper Small |
 | Parakeet ONNX | 由模型管理器下载并原子校验到 App 数据目录 |
-| Parakeet Core ML | 仅校验用户本机已有的 Memo 模型，不伪装成网络下载 |
+| Parakeet Core ML | 从 Hugging Face 官方仓库 `FluidInference/parakeet-tdt-0.6b-v3-coreml`（固定提交 `7dd20fe`，约 461 MB）下载并逐文件校验 SHA-256；由 App 自带的开源 `parakeet-coreml`（FluidAudio）在 Apple Neural Engine 上运行。检测到 Memo 时可作为回退 |
 | 自定义模型 | 通过原生文件选择器设置；失效时自动回退 Whisper Small |
 
 选择 Parakeet 不支持的源语言时，开始任务前会提示切换到 Whisper。

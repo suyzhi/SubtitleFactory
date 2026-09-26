@@ -279,7 +279,7 @@ export default function SettingsCenter(props: Props) {
   }, [modelDevice, modelFamily, modelLanguage, modelReadyFilter, modelScenario, modelSearch, modelStatus, modelTimestamp]);
 
   const modelSourceLabels = useMemo(() => ({
-    bundled: '内置', app_download: 'App 下载', external_detected: '外部检测', custom: '自定义路径',
+    bundled: '内置', app_download: 'App 下载', app_managed: 'App 下载', external_detected: 'Memo（外部检测）', custom: '自定义路径',
     environment: '环境变量', unavailable: '不可用', huggingface: 'Hugging Face',
     github: 'GitHub', legacy_cache: '已有缓存', custom_path: '本地目录',
     local_selection: '本地目录',
@@ -529,13 +529,12 @@ export default function SettingsCenter(props: Props) {
                     return <details className="model-category" key={categoryId}>
                       <summary><strong>{models[0].category_name || categoryId}</strong><span>{models.length} 个模型</span></summary>
                       <div className="model-list">{models.map(model => {
-                        const selectedRuntime = String((draft.transcription_runtime_by_model as Record<string, string> | undefined)?.[model.id] || model.selected_runtime || '');
+                        const selectedRuntime = String((draft.transcription_runtime_by_model as Record<string, string> | undefined)?.[model.id] || model.selected_runtime || (model.runtimes?.length === 1 ? model.runtimes[0].id : ''));
                         const selectedVariant = model.runtimes?.find(runtime => runtime.id === selectedRuntime);
                         const ready = Boolean(selectedVariant?.model_ready);
                         const canDownload = Boolean(selectedVariant?.download_required);
                         const modelReady = Boolean(model.ready || model.runtimes?.some(runtime => runtime.model_ready));
                         const hasDownloadableRuntime = Boolean(model.runtimes?.some(runtime => runtime.download_required));
-                        const isExternalCoreML = model.id === 'parakeet-tdt-0.6b-v3-coreml';
                         const isFunCloud = model.id === 'fun-asr-realtime';
                         const dashscopeConfigured = Boolean(providerCards.find(card => card.provider_id === 'dashscope')?.has_api_key);
                         const funCloudGranted = Boolean(cloudAuthorizations.find(item => item.capability === 'transcription' && item.provider_id === 'dashscope')?.granted);
@@ -587,10 +586,8 @@ export default function SettingsCenter(props: Props) {
                               ? dashscopeConfigured
                                 ? <button className={`button secondary model-action${funCloudGranted?' danger':''}`} disabled={busy} onClick={() => void updateTranscriptionCloudAuthorization(!funCloudGranted)}>{funCloudGranted?'撤销上传授权':'授权音频上传'}</button>
                                 : <button className="button secondary model-action" onClick={() => { setCategory('ai'); setError('请先保存通义千问（百炼）API Key。'); }}>配置百炼</button>
-                              : isExternalCoreML && externalPathsEnabled
-                              ? <button className="button secondary model-action" onClick={() => void choosePath('coreml_model_path', 'coreml_model', true)}>重新选择目录</button>
                               : selectedRuntime && (ready || canDownload) && <button className="button secondary model-action" disabled={!!preparingModel} onClick={() => void prepareModel(model.id, selectedRuntime, ready)}>{preparingModel === taskKey ? '处理中…' : ready ? '修复' : '下载'}</button>}
-                            {!isFunCloud && !isExternalCoreML && !selectedRuntime && (modelReady || hasDownloadableRuntime) && <small className="model-runtime-required">先选择运行设备</small>}
+                            {!isFunCloud && !selectedRuntime && (modelReady || hasDownloadableRuntime) && <small className="model-runtime-required">先选择运行设备</small>}
                             {modelReady && model.removable && <button className="button secondary model-action danger" disabled={busy || !!preparingModel} onClick={() => void removeModel(model)}>移除</button>}
                             {preparingModel === taskKey && task && <button className="button secondary model-action danger" onClick={() => void api.cancelTask(task.id)}>取消</button>}
                           </span>
@@ -603,7 +600,7 @@ export default function SettingsCenter(props: Props) {
               </SettingsSection>
               {externalPathsEnabled && <SettingsSection title="自定义运行时" description="路径只保存在本机，不会写入项目、日志或发布包。">
                 {renderPath('自定义模型目录', 'custom_model_path', 'model', '选择包含模型文件的目录', true)}
-                {renderPath('外部 Core ML 目录', 'coreml_model_path', 'coreml_model', '可选；检测到后才参与自动选择', true)}
+                {renderPath('外部 Core ML 目录', 'coreml_model_path', 'coreml_model', '可选；留空时使用 App 下载的官方模型', true)}
                 {renderPath('转写 CLI', 'coreml_cli_path', 'cli', '可选可执行文件')}
               </SettingsSection>}
             </>}

@@ -76,6 +76,10 @@ from ..services.model_catalog import (
 )
 from ..services.parakeet_transcriber import (
     PARAKEET_ARCHIVE_BYTES,
+    PARAKEET_COREML_DOWNLOAD_BYTES,
+    PARAKEET_COREML_REPOSITORY,
+    PARAKEET_COREML_REVISION,
+    PARAKEET_COREML_SOURCE_URL,
     PARAKEET_MODEL_ID,
     PARAKEET_ONNX_MODEL_ID,
     PARAKEET_SUPPORTED_LANGUAGES,
@@ -151,7 +155,7 @@ RUNTIME_LABELS = {
     "cpu": ("CPU", "faster-whisper / sherpa-onnx"),
     "mlx": ("Apple GPU", "MLX Whisper · Metal"),
     "coreml": ("Apple GPU / Neural Engine", "sherpa-onnx · Core ML"),
-    "external_coreml": ("外部 Core ML", "Memo Parakeet CLI"),
+    "external_coreml": ("Apple Neural Engine", "Core ML · FluidAudio"),
     FUN_ASR_RUNTIME: ("阿里云（云端）", "Fun-Realtime-ASR · DashScope"),
 }
 
@@ -188,7 +192,18 @@ def _runtime_options(model_id: str, imported: dict | None = None, model_ready: b
     result=[]
     for runtime_id in _runtime_ids(model_id, imported):
         available, reason = _runtime_available(runtime_id, model_id)
-        if (runtime_id == "external_coreml" or imported) and not model_ready:
+        coreml_status = (
+            get_transcription_model_status(model_id)
+            if runtime_id == "external_coreml" and model_id == PARAKEET_MODEL_ID else None
+        )
+        if runtime_id == "external_coreml" and coreml_status is not None:
+            if not model_ready and not coreml_status.get("download_required"):
+                available, reason = False, str(coreml_status.get("error") or "Core ML 转写组件不可用")
+            elif not model_ready:
+                reason = "首次使用时从 Hugging Face 下载官方 Core ML 模型"
+            else:
+                reason = "Core ML 模型与转写组件已就绪"
+        elif imported and not model_ready:
             available, reason = False, "外部模型路径或配套 CLI 需要重新校验"
         label, engine = RUNTIME_LABELS.get(runtime_id, (runtime_id, runtime_id))
         if runtime_id == "mlx" and model_id in QWEN_ASR_MODEL_IDS:
@@ -241,15 +256,16 @@ def _runtime_options(model_id: str, imported: dict | None = None, model_ready: b
                 "status": status.get("state"),
             })
         elif model_id == PARAKEET_MODEL_ID:
+            status = coreml_status or {}
             item.update({
                 "model_ready": bool(model_ready),
-                "download_required": False,
-                "download_bytes": 0,
-                "repository": "本地 Memo 模型",
-                "revision": None,
-                "source_url": None,
-                "source": "custom_path" if model_ready else "local_selection",
-                "status": "ready" if model_ready else "unavailable",
+                "download_required": bool(not model_ready and status.get("download_required")),
+                "download_bytes": PARAKEET_COREML_DOWNLOAD_BYTES,
+                "repository": PARAKEET_COREML_REPOSITORY,
+                "revision": PARAKEET_COREML_REVISION,
+                "source_url": PARAKEET_COREML_SOURCE_URL,
+                "source": status.get("source") or ("custom_path" if model_ready else "huggingface"),
+                "status": "ready" if model_ready else status.get("state", "unavailable"),
             })
         else:
             item.update({
@@ -626,24 +642,24 @@ def transcription_models(project_id: Optional[str] = None, language: str = "auto
         },
         {
             "id": PARAKEET_MODEL_ID,
-            "name": "Parakeet V3 外部 Core ML",
+            "name": "Parakeet V3 Core ML",
             "languages": sorted(PARAKEET_SUPPORTED_LANGUAGES),
             "category_id": "parakeet",
             "category_name": "Parakeet",
-            "purpose": "校验并使用本机已有的 Memo Core ML 模型",
+            "purpose": "在 Apple 神经网络引擎上快速转写欧洲语种",
             "language_description": "英语及 25 种欧洲语言",
-            "size_label": "本地模型，不提供网络下载",
-            "publisher": "本地 Memo 模型",
-            "tags": ["欧洲语种", "外部模型", "Core ML"],
-            "source_site": "本地目录",
+            "size_label": "下载约 461 MB",
+            "publisher": "NVIDIA / FluidInference",
+            "tags": ["欧洲语种", "Neural Engine", "Core ML"],
+            "source_site": "Hugging Face 官方仓库",
             "family": "NeMo TDT",
-            "scenarios": ["欧洲语种", "外部 Core ML"],
-            "strengths": ["复用用户已有 Memo 模型", "不复制外部模型文件"],
-            "limitations": ["需要用户提供并校验外部模型与 CLI", "不能由 App 下载或删除"],
+            "scenarios": ["欧洲语种", "通用字幕", "长节目"],
+            "strengths": ["使用 Apple Neural Engine，速度快且省电", "原生词元时间戳", "随 App 附带开源转写组件"],
+            "limitations": ["不支持中文、日韩和俄语", "需要 Apple Silicon 与 macOS 14"],
             "speed_tier": "很快", "accuracy_tier": "高", "memory_tier": "中",
             "timestamp_mode": "token", "punctuation_mode": "native",
-            "installed_bytes": 0,
-            "license": "以上游 NVIDIA Parakeet 模型许可为准",
+            "installed_bytes": PARAKEET_COREML_DOWNLOAD_BYTES,
+            "license": "CC-BY-4.0（NVIDIA Parakeet；Core ML 转换：FluidInference）",
         },
         {
             "id": FUN_ASR_MODEL_ID,

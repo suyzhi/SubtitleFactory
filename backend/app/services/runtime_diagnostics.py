@@ -188,6 +188,14 @@ def _bundled_candidates(name: str) -> Iterable[tuple[Path, str]]:
                 yield resolved, "bundled"
 
 
+def bundled_executable(name: str) -> Path | None:
+    """Return the first executable helper shipped inside the App bundle, if any."""
+    for candidate, _source in _bundled_candidates(name):
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            return candidate
+    return None
+
+
 def _resolve_executable(
     name: str,
     *,

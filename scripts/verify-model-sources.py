@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import sys
 import urllib.error
@@ -18,6 +19,10 @@ from app.services.model_catalog import (  # noqa: E402
     WHISPER_MODEL_CATALOG,
 )
 from app.services.parakeet_transcriber import (  # noqa: E402
+    PARAKEET_COREML_BASE_URL,
+    PARAKEET_COREML_FILES,
+    PARAKEET_COREML_REPOSITORY,
+    PARAKEET_COREML_REVISION,
     PARAKEET_ARCHIVE_BYTES,
     PARAKEET_ARCHIVE_SHA256,
     PARAKEET_ARCHIVE_URL,
@@ -153,6 +158,36 @@ def verify_hugging_face() -> int:
     return checked
 
 
+def verify_parakeet_coreml() -> int:
+    """LFS weights are compared by SHA-256 metadata; small regular files are hashed."""
+    entries = get_json(
+        f"https://huggingface.co/api/models/{PARAKEET_COREML_REPOSITORY}/tree/"
+        f"{PARAKEET_COREML_REVISION}?recursive=true&expand=false"
+    )
+    if not isinstance(entries, list):
+        raise RuntimeError(f"无效的 Hugging Face 元数据：{PARAKEET_COREML_REPOSITORY}")
+    by_name = {item["path"]: item for item in entries if item.get("type") == "file"}
+    for name, size, sha256 in PARAKEET_COREML_FILES:
+        actual = by_name.get(name)
+        if not actual:
+            raise RuntimeError(f"来源漂移：{PARAKEET_COREML_REPOSITORY} 缺少 {name}")
+        if actual.get("size") != size:
+            raise RuntimeError(f"来源漂移：{PARAKEET_COREML_REPOSITORY}/{name} 大小已变化")
+        lfs = actual.get("lfs") or {}
+        if lfs:
+            digest = lfs.get("oid")
+        else:
+            request = urllib.request.Request(
+                PARAKEET_COREML_BASE_URL + name,
+                headers={"User-Agent": product_user_agent("release-source-verifier")},
+            )
+            with urllib.request.urlopen(request, timeout=45) as response:
+                digest = hashlib.sha256(response.read()).hexdigest()
+        if digest != sha256:
+            raise RuntimeError(f"来源漂移：{PARAKEET_COREML_REPOSITORY}/{name} SHA-256 已变化")
+    return len(PARAKEET_COREML_FILES)
+
+
 def verify_github() -> int:
     release = get_json(
         "https://api.github.com/repos/k2-fsa/sherpa-onnx/releases/tags/asr-models"
@@ -214,7 +249,7 @@ def verify_github() -> int:
 
 def main() -> int:
     try:
-        hf_count = verify_hugging_face()
+        hf_count = verify_hugging_face() + verify_parakeet_coreml()
         github_count = verify_github()
     except (RuntimeError, urllib.error.URLError, TimeoutError) as exc:
         print(f"模型来源验证失败：{exc}", file=sys.stderr)

@@ -171,6 +171,12 @@ if [ "$DISTRIBUTION_CHANNEL" != "app_store" ]; then
 fi
 swiftc -target "arm64-apple-macos${MINIMUM_MACOS_VERSION}" \
   "$ROOT/backend/runtime/vision_ocr.swift" -O -o "$OUTPUT_DIR/bin/vision-ocr"
+"$ROOT/scripts/build-parakeet-coreml.sh" "$OUTPUT_DIR/bin"
+mkdir -p "$OUTPUT_DIR/THIRD_PARTY_LICENSES/fluidaudio"
+cp "$ROOT/backend/build/parakeet-coreml/checkouts/FluidAudio/LICENSE" \
+  "$OUTPUT_DIR/THIRD_PARTY_LICENSES/fluidaudio/LICENSE"
+cp "$ROOT/backend/runtime/parakeet-coreml/NOTICE.md" \
+  "$OUTPUT_DIR/THIRD_PARTY_LICENSES/fluidaudio/NOTICE.md"
 chmod +x "$OUTPUT_DIR/bin/ffmpeg" "$OUTPUT_DIR/bin/ffprobe"
 if [ "$DISTRIBUTION_CHANNEL" != "app_store" ]; then
   chmod 755 "$OUTPUT_DIR/bin/deno"

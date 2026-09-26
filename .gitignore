@@ -29,6 +29,8 @@ backend/build/
 backend/dist/
 backend/test_*.py
 frontend/src-tauri/binaries/
+backend/runtime/bin/
+backend/runtime/parakeet-coreml/.build/
 vendor/ffmpeg/darwin-arm64/
 vendor/ffmpeg/build/
 vendor/ffmpeg/source/

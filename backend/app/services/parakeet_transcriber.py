@@ -1,8 +1,10 @@
-"""Independent Parakeet runtimes: App-managed ONNX and optional Core ML.
+"""Independent Parakeet runtimes: App-managed ONNX and Core ML.
 
-The ONNX model is downloaded only into the App data directory. Memo's Core ML
-runtime is detected as an optional external accelerator and is never treated as
-a release dependency or silently substituted for an explicitly selected model.
+Both models are downloaded only into the App data directory from pinned
+official sources. Core ML inference runs through the bundled open-source
+``parakeet-coreml`` CLI (FluidAudio); a Memo installation is still detected as
+an optional fallback, but is never required nor silently substituted for an
+explicitly selected model.
 """
 
 from __future__ import annotations
@@ -31,7 +33,7 @@ from typing import Any, Callable, Iterator
 from ..utils.config import MODELS_DIR, environment_path_overrides_enabled
 from ..utils.task_manager import TaskCancelled, task_manager
 from ..version import product_user_agent
-from .runtime_diagnostics import validate_runtime_executable
+from .runtime_diagnostics import bundled_executable, validate_runtime_executable
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +60,46 @@ SILERO_VAD_BYTES = 643_854
 PARAKEET_EXTRACTED_ESTIMATE_BYTES = 671_000_000
 PARAKEET_ARCHIVE_SHA256 = "5793d0fd397c5778d2cf2126994d58e9d56b1be7c04d13c7a15bb1b4eafb16bf"
 SILERO_VAD_SHA256 = "9e2449e1087496d8d4caba907f23e0bd3f78d91fa552479bb9c23ac09cbb1fd6"
+
+# Core ML conversion of nvidia/parakeet-tdt-0.6b-v3 (CC-BY-4.0) published by
+# FluidInference for FluidAudio. Pinned to one revision; only the entries the
+# runner needs (~461 MiB of the 3.5 GB repository) are downloaded, each checked
+# against its exact size and SHA-256.
+PARAKEET_COREML_REPOSITORY = "FluidInference/parakeet-tdt-0.6b-v3-coreml"
+PARAKEET_COREML_REVISION = "7dd20fe6b1797d35f5e3307e8b1732d9a178edfe"
+PARAKEET_COREML_BASE_URL = (
+    f"https://huggingface.co/{PARAKEET_COREML_REPOSITORY}/resolve/{PARAKEET_COREML_REVISION}/"
+)
+PARAKEET_COREML_SOURCE_URL = (
+    f"https://huggingface.co/{PARAKEET_COREML_REPOSITORY}/tree/{PARAKEET_COREML_REVISION}"
+)
+PARAKEET_COREML_CLI_NAME = "parakeet-coreml"
+PARAKEET_COREML_FILES: tuple[tuple[str, int, str], ...] = (
+    ("Decoder.mlmodelc/analytics/coremldata.bin", 243, "4238c4e81ecd0dc94bd7dfbb60f7e2cc824107c1ffe0387b8607b72833dba350"),
+    ("Decoder.mlmodelc/coremldata.bin", 554, "18647af085d87bd8f3121c8a9b4d4564c1ede038dab63d295b4e745cf2d7fb99"),
+    ("Decoder.mlmodelc/metadata.json", 3427, "a39e93cd8371b8ded92635c7804fcd0590f0d1dd9415c6d19a0484be073077d9"),
+    ("Decoder.mlmodelc/model.mil", 13110, "ef2a0a281695398a62fde86ac269c68f73d5b578d7ed3b31f2ba91a2d1ea1f35"),
+    ("Decoder.mlmodelc/weights/weight.bin", 23604992, "48adf0f0d47c406c8253d4f7fef967436a39da14f5a65e66d5a4b407be355d41"),
+    ("Encoder.mlmodelc/analytics/coremldata.bin", 243, "42e638870d73f26b332918a3496ce36793fbb413a81cbd3d16ba01328637a105"),
+    ("Encoder.mlmodelc/coremldata.bin", 485, "d48034a167a82e88fc3df64f60af963ab3983538271175b8319e7d5720a0fb86"),
+    ("Encoder.mlmodelc/metadata.json", 2921, "da24da9cca943fb29d7fa8e376d57fca7cb3aa08ca51b956b0b0e56813f087e9"),
+    ("Encoder.mlmodelc/model.mil", 959769, "ed7b19156ca29fa7dfd6891deb9fda4b0e8893f68597c985d135736546a43808"),
+    ("Encoder.mlmodelc/weights/weight.bin", 445187200, "e2020f323703477a5b21d7c2d282c403e371afb5962e79877e3033e73ba6f421"),
+    ("JointDecision.mlmodelc/analytics/coremldata.bin", 243, "bc69ef031ed427e888b1f3889d13eb373655edd5ac9927de20b5dae281b636b7"),
+    ("JointDecision.mlmodelc/coremldata.bin", 534, "f56ded0404498e666ffcd84dda0c393924fc3581345ad03e41429ff560cb97b6"),
+    ("JointDecision.mlmodelc/metadata.json", 2936, "3044edab5e4ee331d37cef7100074653c944a0e58184ab618aab183a0e0707bc"),
+    ("JointDecision.mlmodelc/model.mil", 9723, "2cb084d7e0dc86ad3ddaa53a9631cdd5d97f19839218845b0e65ca065a4d1a5e"),
+    ("JointDecision.mlmodelc/weights/weight.bin", 12642764, "4e0e63d840032f7f07ddb1d64446051166281e5491bf22da8a945c41f6eedb3e"),
+    ("Preprocessor.mlmodelc/analytics/coremldata.bin", 243, "c9beeb989c8d66f8be11df59bc6df277ec76cee404f6865b46243835ef562f6d"),
+    ("Preprocessor.mlmodelc/coremldata.bin", 486, "dbde3f2300842c1fd51ef3ff948a0bcffe65ffd2dca10707f2509f32c1d65b1d"),
+    ("Preprocessor.mlmodelc/metadata.json", 2841, "2a98699e22d279dd37fa1d238aeb1c6db1df0d6fad687775324157689d8f3acf"),
+    ("Preprocessor.mlmodelc/model.mil", 28181, "4b8518a956450fec57f06c2a21bdffc26973f7f1fa6842fb38fe917f896b6b93"),
+    ("Preprocessor.mlmodelc/weights/weight.bin", 491072, "129b76e3aeafa8afa3ea76d995b964b145fe83700d579f6ff42c4c38fa0968ea"),
+    ("config.json", 475, "97f19ecccd0fdc730d76fb918090fa8bc64bce8ea4ad43715d5e9c2c7350db66"),
+    ("parakeet_v3_vocab.json", 151122, "7ec60e05f1b24480736ec0eed40900f4626bce1fa9a60fd700ec7e2a59198735"),
+    ("parakeet_vocab.json", 151122, "7ec60e05f1b24480736ec0eed40900f4626bce1fa9a60fd700ec7e2a59198735"),
+)
+PARAKEET_COREML_DOWNLOAD_BYTES = sum(size for _, size, _ in PARAKEET_COREML_FILES)
 
 # Sizes are deliberately lower bounds: they catch incomplete extraction while
 # allowing an upstream-compatible re-export to remain usable.
@@ -134,6 +176,14 @@ class ParakeetSession:
     progress_start: float = 25.0
 
 
+def managed_coreml_model_dir(cache_root: Path | None = None) -> Path:
+    return Path(cache_root or MODELS_DIR).expanduser() / PARAKEET_MODEL_ID
+
+
+def bundled_coreml_cli() -> Path | None:
+    return bundled_executable(PARAKEET_COREML_CLI_NAME)
+
+
 def _valid_coreml_model_dir(path: Path) -> bool:
     if not path.is_dir():
         return False
@@ -164,12 +214,15 @@ def discover_coreml_runtime(
     *,
     strict: bool = True,
     allow_environment: bool | None = None,
+    cache_root: Path | None = None,
 ) -> CoreMLRuntime | None:
-    """Find Memo's Core ML runtime without embedding a user-specific path.
+    """Find a Core ML model plus runner without embedding a user-specific path.
 
-    Explicit App-setting paths are authoritative. Environment paths are a
-    development/advanced diagnostic feature and are ignored by normal frozen
-    releases. ``strict=False`` is useful for startup fallback/status checks.
+    Explicit App-setting paths are authoritative. Otherwise the App-managed
+    model and the bundled ``parakeet-coreml`` CLI are preferred, and a Memo
+    installation is only a fallback. Environment paths are a development/
+    advanced diagnostic feature and are ignored by normal frozen releases.
+    ``strict=False`` is useful for startup fallback/status checks.
     """
     if allow_environment is None:
         allow_environment = environment_path_overrides_enabled()
@@ -196,6 +249,21 @@ def discover_coreml_runtime(
             return None
     else:
         resolved_cli = None
+
+    managed_model = False
+    bundled_cli = False
+    if resolved_model is None:
+        candidate = managed_coreml_model_dir(cache_root)
+        if _valid_coreml_model_dir(candidate):
+            resolved_model = candidate.resolve()
+            managed_model = True
+    if resolved_cli is None:
+        candidate = bundled_coreml_cli()
+        if candidate is not None and _valid_coreml_cli(candidate):
+            resolved_cli = candidate.resolve()
+            bundled_cli = True
+    if managed_model and bundled_cli and source == "external_detected":
+        source = "app_managed"
 
     if sys.platform == "darwin":
         memo_root = Path.home() / "Library" / "Application Support" / "Memo"
@@ -541,6 +609,7 @@ def get_parakeet_model_status(
                     and coreml_cli_path is None
                     and environment_path_overrides_enabled()
                 ),
+                cache_root=cache_root,
             )
         except RuntimeError:
             runtime = None
@@ -551,7 +620,26 @@ def get_parakeet_model_status(
                 "source": runtime.source,
                 "state": "ready",
                 "download_required": False,
+                "repository": PARAKEET_COREML_REPOSITORY,
+                "revision": PARAKEET_COREML_REVISION,
+                "source_url": PARAKEET_COREML_SOURCE_URL,
                 "error": "",
+            }
+        if coreml_model_dir is None and bundled_coreml_cli() is not None:
+            # The runner ships with the App; only the official model is missing.
+            managed = managed_coreml_model_dir(cache_root)
+            partial = managed.exists() or managed.with_name(f".{PARAKEET_MODEL_ID}.downloading").exists()
+            return {
+                "model_id": model_id,
+                "ready": False,
+                "source": "huggingface",
+                "state": "invalid" if partial else "not_downloaded",
+                "download_required": True,
+                "download_bytes": PARAKEET_COREML_DOWNLOAD_BYTES,
+                "repository": PARAKEET_COREML_REPOSITORY,
+                "revision": PARAKEET_COREML_REVISION,
+                "source_url": PARAKEET_COREML_SOURCE_URL,
+                "error": "模型缓存不完整，可执行修复" if partial else "模型尚未下载",
             }
         validation = None
         if coreml_model_dir is not None or coreml_cli_path is not None:
@@ -563,7 +651,7 @@ def get_parakeet_model_status(
             "state": "unavailable",
             "download_required": False,
             "error": (validation or {}).get(
-                "error", "未发现外部 Core ML 模型与配套 CLI",
+                "error", "当前运行包缺少 Core ML 转写组件 parakeet-coreml，也未发现 Memo 的 Core ML 模型与 CLI",
             ),
         }
     if model_id != PARAKEET_ONNX_MODEL_ID:
@@ -599,12 +687,13 @@ def _download_file(
     expected_size: int,
     progress_callback: Callable[[int, int, bool], None],
     checkpoint: Callable[[], None],
+    expected_sha256: str | None = None,
 ) -> None:
     """Download atomically with HTTP Range resume and cooperative cancellation."""
     destination.parent.mkdir(parents=True, exist_ok=True)
     partial = destination.with_name(f"{destination.name}.part")
 
-    expected_sha256 = {
+    expected_sha256 = expected_sha256 or {
         PARAKEET_ARCHIVE_URL: PARAKEET_ARCHIVE_SHA256,
         SILERO_VAD_URL: SILERO_VAD_SHA256,
     }.get(url)
@@ -1077,6 +1166,132 @@ def ensure_parakeet_assets(
         return assets
 
 
+def ensure_parakeet_coreml_model(
+    task_id: str,
+    cache_root: Path | None = None,
+    *,
+    repair: bool = False,
+) -> Path:
+    """Download the pinned official Core ML model into the App data directory.
+
+    Files are fetched into a hidden staging folder (resumable, SHA-256 checked)
+    and swapped in atomically, so an existing model stays usable until the new
+    one is complete. A repair reuses verified files through hard links.
+    """
+    root = Path(cache_root or MODELS_DIR).expanduser().resolve()
+    root.mkdir(parents=True, exist_ok=True)
+    target = managed_coreml_model_dir(root)
+    if _valid_coreml_model_dir(target) and not repair:
+        return target
+
+    with _DOWNLOAD_LOCK:
+        if _valid_coreml_model_dir(target) and not repair:
+            return target
+        staging = root / f".{PARAKEET_MODEL_ID}.downloading"
+        staging.mkdir(parents=True, exist_ok=True)
+        if target.is_dir():
+            for relative, _size, _digest in PARAKEET_COREML_FILES:
+                source, destination = target / relative, staging / relative
+                if source.is_file() and not destination.exists():
+                    destination.parent.mkdir(parents=True, exist_ok=True)
+                    try:
+                        os.link(source, destination)
+                    except OSError:
+                        pass
+        present = sum(
+            size for relative, size, _ in PARAKEET_COREML_FILES
+            if (staging / relative).is_file()
+        )
+        if shutil.disk_usage(root).free < max(0, PARAKEET_COREML_DOWNLOAD_BYTES - present) + 64 * 1024 * 1024:
+            raise ParakeetModelError(
+                "模型下载空间不足；请至少保留约 550 MB 可用空间",
+                "MODEL_DISK_SPACE_INSUFFICIENT",
+                "释放磁盘空间后重试；现有可用模型不会被删除",
+            )
+        task_manager.update_task(
+            task_id,
+            step="downloading_model",
+            progress=2,
+            message=f"正在从 Hugging Face 下载 Parakeet Core ML 模型（约 {_format_mib(PARAKEET_COREML_DOWNLOAD_BYTES)}）...",
+            details={"model_download": {
+                "status": "downloading", "model_id": PARAKEET_MODEL_ID,
+                "downloaded_bytes": 0, "total_bytes": PARAKEET_COREML_DOWNLOAD_BYTES,
+                "repository": PARAKEET_COREML_REPOSITORY, "revision": PARAKEET_COREML_REVISION,
+            }},
+        )
+        task_manager.add_log(
+            task_id, "info", "Parakeet Core ML",
+            f"从官方仓库 {PARAKEET_COREML_REPOSITORY} 获取模型，版本已固定并逐文件校验 SHA-256",
+        )
+        completed = 0
+        last_percent = -1
+        try:
+            for relative, size, digest in PARAKEET_COREML_FILES:
+                def report(downloaded: int, _total: int, resumed: bool, done: int = completed) -> None:
+                    nonlocal last_percent
+                    overall = done + downloaded
+                    percent = min(100, int(overall * 100 / PARAKEET_COREML_DOWNLOAD_BYTES))
+                    if percent == last_percent:
+                        return
+                    last_percent = percent
+                    resume_text = "（断点续传）" if resumed else ""
+                    task_manager.update_task(
+                        task_id,
+                        step="downloading_model",
+                        progress=2 + percent * 0.9,
+                        message=(
+                            f"正在下载 Parakeet Core ML 模型{resume_text}：{percent}% · "
+                            f"{_format_mib(overall)} / {_format_mib(PARAKEET_COREML_DOWNLOAD_BYTES)}"
+                        ),
+                        details={"model_download": {
+                            "status": "downloading", "model_id": PARAKEET_MODEL_ID,
+                            "downloaded_bytes": overall, "total_bytes": PARAKEET_COREML_DOWNLOAD_BYTES,
+                            "resumed": resumed,
+                        }},
+                    )
+
+                _download_file(
+                    PARAKEET_COREML_BASE_URL + relative,
+                    staging / relative,
+                    size,
+                    report,
+                    lambda: task_manager.checkpoint(task_id),
+                    expected_sha256=digest,
+                )
+                completed += size
+            if not _valid_coreml_model_dir(staging):
+                raise RuntimeError("Core ML 模型文件校验后仍不完整")
+        except TaskCancelled:
+            raise
+        except Exception as exc:
+            task_manager.add_log(
+                task_id, "error", "Parakeet Core ML", "模型下载失败", detail=str(exc),
+                suggestion="请检查网络（需要能访问 huggingface.co）和磁盘空间后重试；已下载部分会断点续传",
+            )
+            if isinstance(exc, ParakeetModelError):
+                raise
+            raise ParakeetModelError(
+                f"Parakeet Core ML 模型准备失败：{exc}",
+                "MODEL_INSTALL_FAILED",
+                "请重试修复；原有可用模型仍然保留",
+            ) from exc
+
+        backup = target.with_name(f".{target.name}.backup-{uuid.uuid4().hex}")
+        try:
+            if target.exists():
+                os.replace(target, backup)
+            os.replace(staging, target)
+        except OSError as exc:
+            if not target.exists() and backup.exists():
+                os.replace(backup, target)
+            raise RuntimeError(f"Core ML 模型原子替换失败：{exc}") from exc
+        finally:
+            if target.exists():
+                shutil.rmtree(backup, ignore_errors=True)
+        task_manager.add_log(task_id, "info", "Parakeet Core ML", "官方 Core ML 模型已下载并通过校验")
+        return target
+
+
 def prepare_parakeet_model(
     task_id: str,
     model_id: str = PARAKEET_ONNX_MODEL_ID,
@@ -1090,16 +1305,26 @@ def prepare_parakeet_model(
     if model_id == PARAKEET_MODEL_ID:
         status = get_parakeet_model_status(
             model_id,
+            cache_root=cache_root,
             coreml_model_dir=coreml_model_dir,
             coreml_cli_path=coreml_cli_path,
         )
+        uses_managed_model = coreml_model_dir is None and bundled_coreml_cli() is not None
+        if status.get("download_required") or (repair and uses_managed_model):
+            ensure_parakeet_coreml_model(task_id, cache_root, repair=repair)
+            status = get_parakeet_model_status(
+                model_id,
+                cache_root=cache_root,
+                coreml_model_dir=coreml_model_dir,
+                coreml_cli_path=coreml_cli_path,
+            )
         if not status["ready"]:
             raise RuntimeError(status["error"])
         task_manager.update_task(
             task_id,
             step="model_ready",
             progress=100,
-            message="外部 Core ML 模型已通过校验",
+            message="Parakeet Core ML 模型已准备完成",
             details={"model_status": status},
         )
         return status
@@ -1297,7 +1522,7 @@ def _create_coreml_session(
         task_id,
         step="loading_model",
         progress=3,
-        message="正在加载外部 Parakeet Core ML 模型...",
+        message="正在加载 Parakeet Core ML 模型...",
         details={
             "coreml": {
                 "status": "ready",
@@ -1313,7 +1538,7 @@ def _create_coreml_session(
         task_id,
         "info",
         "Parakeet Core ML",
-        "已加载外部 Core ML 模型与 CLI",
+        "已加载 Core ML 模型与转写组件",
     )
     try:
         payload = _run_coreml_cli(task_id, audio_path, runtime)
@@ -1395,12 +1620,15 @@ def create_parakeet_session(
                 and environment_path_overrides_enabled()
             ),
         )
+        if runtime is None and coreml_model_dir is None and bundled_coreml_cli() is not None:
+            ensure_parakeet_coreml_model(task_id)
+            runtime = discover_coreml_runtime(None, coreml_cli_path, strict=False, allow_environment=False)
         if runtime is None:
-            error = RuntimeError("外部 Parakeet Core ML 模型或 CLI 当前不可用")
+            error = RuntimeError("Parakeet Core ML 模型或转写组件当前不可用")
             error.error_code = "MODEL_RUNTIME_MISSING"
             error.recoverable = True
             error.available_actions = ["choose_fallback", "open_settings"]
-            error.suggestion = "请选择 Whisper Small，或重新选择完整的 Core ML 模型与 CLI"
+            error.suggestion = "请在设置中下载 Parakeet Core ML 模型，或改用 Parakeet V3 ONNX / Whisper"
             raise error
         return _create_coreml_session(
             task_id, audio_path, normalized_language, runtime
