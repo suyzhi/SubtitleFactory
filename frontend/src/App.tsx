@@ -73,7 +73,7 @@ import AppSelect from './components/AppSelect';
 import { languageLabel } from './languages';
 import { resolveConfiguredModel, resolveRuntimeSelection } from './transcriptionSelection';
 import appIcon from './assets/branding/app-icon-ui.png';
-import settingsIcon from './assets/player-icons/settings.png';
+import PlayerIcon from './components/PlayerIcons';
 
 const SubtitlePlayer = lazy(() => import('./components/SubtitlePlayer'));
 const ProductionCenter = lazy(() => import('./components/ProductionCenter'));
@@ -2313,13 +2313,13 @@ function App() {
           <span data-tauri-drag-region>{showProjectWorkspace && activeProject ? [languageLabel(activeProject.language), activeProject.target_language && activeProject.target_language !== 'none' && segments.some(segment => segment.translated_text) ? `译文 ${languageLabel(activeProject.target_language)}` : '', projectReadiness(activeProject)].filter(Boolean).join(' · ') : '本地优先的专业字幕工作台'}</span>
         </div>
         <div className="topbar-actions">
-          {inProjectView && <button className="topbar-button" disabled={backendStatus !== 'connected'} onClick={handleImportLocal}><span>＋</span>导入</button>}
-          {inProjectView && youtubeEnabled && <button className={`topbar-button ${showLinkPopover ? 'active' : ''}`} disabled={backendStatus !== 'connected'} onClick={() => setShowLinkPopover(value => !value)}><span>⌁</span>链接</button>}
+          {inProjectView && <button className="topbar-button" disabled={backendStatus !== 'connected'} onClick={handleImportLocal}><PlayerIcon name="plus"/>导入</button>}
+          {inProjectView && youtubeEnabled && <button className={`topbar-button ${showLinkPopover ? 'active' : ''}`} disabled={backendStatus !== 'connected'} onClick={() => setShowLinkPopover(value => !value)}><PlayerIcon name="link"/>链接</button>}
           <button className={`task-status-pill ${backendStatus} ${isProcessing ? 'busy' : ''}`} onClick={() => setShowTaskDrawer(value => !value)} aria-expanded={showTaskDrawer}>
             <i className={`backend-dot ${backendStatus}`}/><span>{isProcessing ? (currentTask ? taskProgressLabel(currentTask) : '正在处理') : backendStatus === 'connected' ? (activeTaskCount ? `${activeTaskCount} 项后台任务` : '引擎就绪') : backendStatus === 'connecting' ? '正在启动' : '引擎异常'}</span>
           </button>
-          <button className="icon-action" aria-label={theme === 'dark' ? '切换浅色模式' : '切换深色模式'} onClick={event => changeTheme(theme === 'dark' ? 'light' : 'dark',event.currentTarget)}>{theme === 'dark' ? '☀︎' : '◐'}</button>
-          <button ref={settingsButtonRef} className="icon-action" aria-label="打开设置" onClick={() => setShowAISettings(true)}><img className="topbar-control-icon" src={settingsIcon} alt=""/></button>
+          <button className="icon-action" aria-label={theme === 'dark' ? '切换浅色模式' : '切换深色模式'} onClick={event => changeTheme(theme === 'dark' ? 'light' : 'dark',event.currentTarget)}><PlayerIcon name={theme === 'dark' ? 'sun' : 'moon'}/></button>
+          <button ref={settingsButtonRef} className="icon-action" aria-label="打开设置" onClick={() => setShowAISettings(true)}><PlayerIcon name="settings"/></button>
         </div>
         {youtubeEnabled && showLinkPopover && <OverlayDialog label="从 YouTube 链接创建" onClose={()=>setShowLinkPopover(false)}><div className="link-popover">
           <div><strong>从 YouTube 链接创建</strong><button aria-label="关闭" onClick={() => setShowLinkPopover(false)}>×</button></div>
@@ -2379,13 +2379,14 @@ function App() {
             {youtubeEnabled && <button className="button secondary" disabled={backendStatus !== 'connected'} onClick={() => setShowLinkPopover(true)}>添加链接</button>}
             <button className="button primary" disabled={backendStatus !== 'connected'} onClick={handleImportLocal}>导入视频</button>
           </div></header>
-          <section className="library-overview" aria-label="项目库概览">
-            <div><span>匹配项目</span><strong><AnimatedNumber value={libraryTotal} animate={motionEnabled}/></strong><small>{trashProjects.length ? `${trashProjects.length} 个在回收站` : '全部保存在本机'}</small></div>
-            <div><span>本页字幕</span><strong><AnimatedNumber value={projects.reduce((total, project) => total + Number(project.segments_count || 0), 0)} animate={motionEnabled}/></strong><small>可在项目库中全文搜索</small></div>
+          <section className="library-overview library-stats" aria-label="项目库概览">
+            <div title="当前筛选条件下的项目，全部保存在本机"><strong><AnimatedNumber value={libraryTotal} animate={motionEnabled}/></strong><span>个项目</span></div>
+            <div title="本页项目的字幕总数，可在上方搜索框全文搜索"><strong><AnimatedNumber value={projects.reduce((total, project) => total + Number(project.segments_count || 0), 0)} animate={motionEnabled}/></strong><span>条字幕</span></div>
             {youtubeEnabled
-              ? <div><span>批量任务</span><strong><AnimatedNumber value={playlistBatches.filter(item => ['running', 'pending', 'paused', 'partial', 'failed'].includes(item.batch.status)).length} animate={motionEnabled}/></strong><small>{playlistBatches.length ? `${playlistBatches.length} 个播放列表` : '暂无进行中的队列'}</small></div>
-              : <div><span>隐私模式</span><strong>本地优先</strong><small>第三方媒体读取已关闭</small></div>}
-            {backendStatus !== 'connected' && <div className={`library-runtime-card ${backendStatus}`}><span>本地引擎</span><strong>{backendStatus === 'connecting' ? '启动中' : '需检查'}</strong><small>{backendStatus === 'connecting' ? '正在载入本机运行时' : '本地功能受限，AI 设置不应影响此状态'}</small></div>}
+              ? <div title={playlistBatches.length ? `${playlistBatches.length} 个播放列表` : '暂无进行中的队列'}><strong><AnimatedNumber value={playlistBatches.filter(item => ['running', 'pending', 'paused', 'partial', 'failed'].includes(item.batch.status)).length} animate={motionEnabled}/></strong><span>个批量任务进行中</span></div>
+              : <div title="第三方媒体读取已关闭"><strong>本地优先</strong><span>隐私模式</span></div>}
+            {trashProjects.length > 0 && <div><strong>{trashProjects.length}</strong><span>个在回收站</span></div>}
+            {backendStatus !== 'connected' && <div className={`library-runtime-card ${backendStatus}`}><strong>{backendStatus === 'connecting' ? '引擎启动中' : '引擎需检查'}</strong><span>{backendStatus === 'connecting' ? '正在载入本机运行时' : '本地功能受限，请在设置中查看诊断'}</span></div>}
           </section>
           <div ref={libraryTabsRef} className="library-switcher sliding-tabs" role="tablist" aria-label="项目库视图">
             <button role="tab" aria-selected={libraryView === 'projects'} className={libraryView === 'projects' ? 'active' : ''} onClick={() => setLibraryView('projects')}>项目</button>

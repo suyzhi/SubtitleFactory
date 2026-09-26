@@ -1,16 +1,10 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import type { SubtitleDisplayMode, SubtitleSegment, SubtitleStyleSettings } from '../types';
-import playIcon from '../assets/player-icons/play.png';
-import pauseIcon from '../assets/player-icons/pause.png';
-import volumeIcon from '../assets/player-icons/volume.png';
-import mutedIcon from '../assets/player-icons/muted.png';
-import captionsIcon from '../assets/player-icons/captions.png';
-import fullscreenIcon from '../assets/player-icons/fullscreen.png';
-import theaterIcon from '../assets/player-icons/theater.png';
 import {
   SUBTITLE_FONT_OPTIONS, SUBTITLE_POSITION_MAX, SUBTITLE_POSITION_MIN,
 } from '../subtitleStyle';
 import AppSelect from './AppSelect';
+import PlayerIcon from './PlayerIcons';
 import * as api from '../api/backend';
 
 interface Props {
@@ -56,9 +50,6 @@ const MODE_OPTIONS: { label: string; value: SubtitleDisplayMode }[] = [
   { label: '双语 · 译文在上', value: 'bilingual_translated_first' },
 ];
 
-function ControlIcon({ src }: { src: string }) {
-  return <img className="control-icon" src={src} alt="" draggable={false} />;
-}
 
 const SubtitlePlayer = forwardRef<SubtitlePlayerHandle, Props>(function SubtitlePlayer({
   projectId, videoUrl, segments, style, activeIdx, initialTime = 0,
@@ -361,25 +352,25 @@ const SubtitlePlayer = forwardRef<SubtitlePlayerHandle, Props>(function Subtitle
             style={{ '--seek': `${duration ? time / duration * 100 : 0}%` } as React.CSSProperties} />
           <div className="player-control-row">
             <button className="player-icon-btn" aria-label={playing ? '暂停' : '播放'} onClick={togglePlay}>
-              <ControlIcon src={playing ? pauseIcon : playIcon} />
+              <PlayerIcon name={playing ? 'pause' : 'play'}/>
             </button>
             <button className="player-icon-btn player-frame-btn" aria-label="重播" aria-keyshortcuts="R"
-              title="重播 (R)" onClick={() => void replay()}><b>↺</b><span>重播</span></button>
+              title="重播 (R)" onClick={() => void replay()}><PlayerIcon name="replay"/></button>
             <button className="player-icon-btn player-frame-btn" aria-label="前一帧" aria-keyshortcuts=","
               title={`前一帧 (, · ${frameRateReliable ? '视频帧率' : '回退 30 FPS'})`}
-              onClick={() => stepFrame(-1)}><b>│◀</b><span>前一帧</span></button>
+              onClick={() => stepFrame(-1)}><PlayerIcon name="frameBack"/></button>
             <button className="player-icon-btn player-frame-btn" aria-label="后一帧" aria-keyshortcuts="."
               title={`后一帧 (. · ${frameRateReliable ? '视频帧率' : '回退 30 FPS'})`}
-              onClick={() => stepFrame(1)}><b>▶│</b><span>后一帧</span></button>
+              onClick={() => stepFrame(1)}><PlayerIcon name="frameForward"/></button>
             <button className={`player-icon-btn player-step-btn ${loopCurrent || previewRangeState ? 'active' : ''}`} aria-label={previewRangeState ? '停止循环短片范围' : '循环当前字幕'} aria-pressed={loopCurrent || Boolean(previewRangeState)} onClick={() => {
               if (previewRangeState) setPreviewRangeState(null);
               else setLoopCurrent(value => !value);
-            }}>↻</button>
+            }} title="循环当前字幕"><PlayerIcon name="loop"/></button>
             <button className="player-icon-btn" aria-label={muted ? '取消静音' : '静音'} onClick={() => {
               const next = !muted;
               setMuted(next);
               if (videoRef.current) videoRef.current.muted = next;
-            }}><ControlIcon src={muted || volume === 0 ? mutedIcon : volumeIcon} /></button>
+            }}><PlayerIcon name={muted || volume === 0 ? 'muted' : 'volume'}/></button>
             <input className="volume-slider" aria-label="音量" type="range" min={0} max={1} step={0.05} value={volume}
               onChange={event => {
                 const next = Number(event.target.value);
@@ -395,13 +386,13 @@ const SubtitlePlayer = forwardRef<SubtitlePlayerHandle, Props>(function Subtitle
             }} options={availableRates.map(value=>({value:String(value),label:`${value}×`}))}/>
             <button className={`player-icon-btn ${style.mode !== 'off' ? 'active' : ''}`} aria-label="字幕设置"
               aria-haspopup="dialog" aria-expanded={showSubtitleMenu}
-              onClick={() => setShowSubtitleMenu(value => !value)}><ControlIcon src={captionsIcon} /></button>
+              onClick={() => setShowSubtitleMenu(value => !value)}><PlayerIcon name="captions"/></button>
             <button className={`player-icon-btn ${theaterMode ? 'active' : ''}`} aria-label={theaterMode ? '退出剧院模式' : '剧院模式'}
               aria-keyshortcuts="T" title={theaterMode ? '退出剧院模式 (T / Esc)' : '剧院模式 (T)'}
-              onClick={() => onPresentationModeChange(theaterMode ? 'normal' : 'theater')}><ControlIcon src={theaterIcon} /></button>
+              onClick={() => onPresentationModeChange(theaterMode ? 'normal' : 'theater')}><PlayerIcon name="theater"/></button>
             <button className={`player-icon-btn ${fullscreen ? 'active' : ''}`} aria-label={fullscreen ? '退出全屏' : '全屏'}
               aria-keyshortcuts="F" title={fullscreen ? '退出全屏 (F / Esc)' : '视频全屏 (F)'}
-              onClick={toggleFullscreen}><ControlIcon src={fullscreenIcon} /></button>
+              onClick={toggleFullscreen}><PlayerIcon name={fullscreen ? 'exitFullscreen' : 'fullscreen'}/></button>
           </div>
         </div>
       </div>

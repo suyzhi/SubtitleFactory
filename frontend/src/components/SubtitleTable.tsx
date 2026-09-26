@@ -338,15 +338,14 @@ function SubtitleTable({
           <thead>
             <tr>
               <th className="col-idx">#</th>
-              <th className="col-time">开始</th>
-              <th className="col-time">结束</th>
+              <th className="col-time">时间</th>
               <th className="col-text">原文/整理</th>
               {showTranslation && <th className="col-text">译文</th>}
-              <th className="col-lock" title="锁定后批量替换与 AI 处理不会修改该条">锁定</th>
+              <th className="col-actions"><span className="sr-only">操作</span></th>
             </tr>
           </thead>
           <tbody>
-            {topSpacer > 0 && <tr className="virtual-spacer" aria-hidden="true"><td colSpan={showTranslation ? 6 : 5} style={{ height: topSpacer }}/></tr>}
+            {topSpacer > 0 && <tr className="virtual-spacer" aria-hidden="true"><td colSpan={showTranslation ? 5 : 4} style={{ height: topSpacer }}/></tr>}
             {renderedSegments.map(seg => {
               const isActive = seg.index === activeIdx;
               const isEditing = seg.index === editingIdx;
@@ -361,14 +360,13 @@ function SubtitleTable({
                   title={qualityIssue}
                   className={`${isActive ? 'active-row' : ''} ${seg.locked ? 'locked-row' : ''} ${qualityIssue ? 'quality-warning' : ''}`}
                 >
-                  <td className="col-idx"><span className="subtitle-row-identity"><input type="checkbox" aria-label={`选择第 ${seg.index} 条字幕`} checked={selectedIndices.has(seg.index)} onChange={() => toggleSelected(seg.index)}/><span>{seg.index}</span><button className="btn btn-ghost btn-xs" aria-label={`第 ${seg.index} 条字幕属性`} onClick={() => onInspect?.(seg.index)}>⋯</button></span></td>
+                  <td className="col-idx"><span className="subtitle-row-identity"><input type="checkbox" aria-label={`选择第 ${seg.index} 条字幕`} checked={selectedIndices.has(seg.index)} onChange={() => toggleSelected(seg.index)}/><span>{seg.index}</span></span></td>
                   <td className="col-time">
-                    {isEditing && editField === 'start' ? <input className="time-edit-input" type="number" min="0" step="0.001" autoFocus value={editValue} onChange={event => setEditValue(event.target.value)} onBlur={saveEdit} onKeyDown={event => event.key === 'Enter' ? saveEdit() : event.key === 'Escape' ? cancelEdit() : undefined}/>
-                      : <><button className="time-seek" onMouseDown={event => { if(event.button===0){event.preventDefault();onSeek(seg.start);} }} onClick={event => { if(event.detail===0)onSeek(seg.start); }}>{fmtTime(seg.start)}</button><button className="time-edit" aria-label={`编辑第 ${seg.index} 条开始时间`} onClick={() => startEdit(seg, 'start')}>✎</button></>}
-                  </td>
-                  <td className="col-time">
-                    {isEditing && editField === 'end' ? <input className="time-edit-input" type="number" min="0" step="0.001" autoFocus value={editValue} onChange={event => setEditValue(event.target.value)} onBlur={saveEdit} onKeyDown={event => event.key === 'Enter' ? saveEdit() : event.key === 'Escape' ? cancelEdit() : undefined}/>
-                      : <><button className="time-seek" onMouseDown={event => { if(event.button===0){event.preventDefault();onSeek(seg.end);} }} onClick={event => { if(event.detail===0)onSeek(seg.end); }}>{fmtTime(seg.end)}</button><button className="time-edit" aria-label={`编辑第 ${seg.index} 条结束时间`} onClick={() => startEdit(seg, 'end')}>✎</button></>}
+                    {(['start', 'end'] as const).map(field => <span className={`time-line ${field}`} key={field}>
+                      {isEditing && editField === field
+                        ? <input className="time-edit-input" type="number" min="0" step="0.001" autoFocus value={editValue} aria-label={`第 ${seg.index} 条${field === 'start' ? '开始' : '结束'}时间`} onChange={event => setEditValue(event.target.value)} onBlur={saveEdit} onKeyDown={event => event.key === 'Enter' ? saveEdit() : event.key === 'Escape' ? cancelEdit() : undefined}/>
+                        : <><button className="time-seek" title={field === 'start' ? '跳到开始' : '跳到结束'} onMouseDown={event => { if(event.button===0){event.preventDefault();onSeek(seg[field]);} }} onClick={event => { if(event.detail===0)onSeek(seg[field]); }}>{fmtTime(seg[field])}</button><button className="time-edit" aria-label={`编辑第 ${seg.index} 条${field === 'start' ? '开始' : '结束'}时间`} onClick={() => startEdit(seg, field)}>✎</button></>}
+                    </span>)}
                   </td>
                   <td className="col-text editable"
                     onClick={() => !isEditing && startEdit(seg, 'clean_text')}>
@@ -398,15 +396,23 @@ function SubtitleTable({
                       <span className="text-preview">{seg.translated_text || '...'}</span>
                     )}
                   </td>}
-                  <td className="col-lock">
-                    <input type="checkbox" checked={seg.locked} disabled={disabled}
-                      aria-label={`锁定第 ${seg.index} 条字幕`}
-                      onChange={e => onUpdate(seg.index, { locked: e.target.checked })} />
+                  <td className="col-actions">
+                    <span className="row-actions">
+                      <button type="button" className="row-icon" aria-label={`第 ${seg.index} 条字幕属性`} title="时间与说话人属性" onClick={() => onInspect?.(seg.index)}>
+                        <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="3.5" cy="8" r="1.3"/><circle cx="8" cy="8" r="1.3"/><circle cx="12.5" cy="8" r="1.3"/></svg>
+                      </button>
+                      <button type="button" className={`row-icon lock ${seg.locked ? 'on' : ''}`} aria-pressed={seg.locked} disabled={disabled}
+                        aria-label={`${seg.locked ? '解锁' : '锁定'}第 ${seg.index} 条字幕`}
+                        title={seg.locked ? '已锁定：批量替换与 AI 处理不会修改该条' : '锁定后批量替换与 AI 处理不会修改该条'}
+                        onClick={() => onUpdate(seg.index, { locked: !seg.locked })}>
+                        <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="3" y="7" width="10" height="7" rx="2"/><path d={seg.locked ? 'M5.5 7V5a2.5 2.5 0 0 1 5 0v2' : 'M5.5 7V5a2.5 2.5 0 0 1 4.8-1'} fill="none" strokeWidth="1.5" strokeLinecap="round"/></svg>
+                      </button>
+                    </span>
                   </td>
                 </tr>
               );
             })}
-            {bottomSpacer > 0 && <tr className="virtual-spacer" aria-hidden="true"><td colSpan={showTranslation ? 6 : 5} style={{ height: bottomSpacer }}/></tr>}
+            {bottomSpacer > 0 && <tr className="virtual-spacer" aria-hidden="true"><td colSpan={showTranslation ? 5 : 4} style={{ height: bottomSpacer }}/></tr>}
           </tbody>
         </table>
       </div>
