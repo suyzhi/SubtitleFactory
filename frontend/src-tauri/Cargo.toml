@@ -1,6 +1,6 @@
 [package]
 name = "app"
-version = "5.0.1"
+version = "0.6.0"
 description = "Apple Silicon subtitle production desktop app"
 authors = ["Subtitle Factory"]
 license = ""
