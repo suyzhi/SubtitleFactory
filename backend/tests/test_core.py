@@ -18,8 +18,14 @@ if "SUBTITLE_FACTORY_DATA_DIR" not in os.environ:
 from app.api.tasks import _task_dict
 from app.models.database import get_db, init_db
 from app.services.ai_providers import (
+    THINKING_OUTPUT_ALLOWANCE,
     AIProviderRequestError,
+    assigned_provider,
+    ensure_provider_cards,
+    get_provider,
+    list_provider_cards,
     prepare_chat_payload,
+    save_provider,
 )
 from app.services.ai_quality import generate_quality_preview
 from app.services.ai_settings import get_ai_settings, save_ai_settings
@@ -140,21 +146,62 @@ class AIResultValidationTests(unittest.TestCase):
         self.assertIn("required_output_schema", payload["messages"][1]["content"])
         self.assertEqual(result[0]["ids"], ["1"])
 
-    def test_deepseek_v4_compatibility_does_not_affect_other_providers(self):
-        base = {"model": "deepseek-v4-flash", "messages": []}
-        deepseek = prepare_chat_payload(
-            {"provider": "deepseek", "model": "deepseek-v4-flash"}, base,
-        )
+    def test_deepseek_thinking_is_disabled_for_every_model_name_by_default(self):
+        base = {"model": "deepseek-flash", "messages": [], "max_tokens": 4096}
+        # deepseek-flash is the current API name; the old exact-name check missed
+        # it and left thinking on, truncating JSON and forcing recursive splits.
+        for model in ("deepseek-flash", "deepseek-v4-flash", "deepseek-v4-pro", "deepseek-chat"):
+            deepseek = prepare_chat_payload({"provider": "deepseek", "model": model}, base)
+            self.assertEqual(deepseek["thinking"], {"type": "disabled"}, model)
+            self.assertEqual(deepseek["max_tokens"], 4096, model)
         provider_card = prepare_chat_payload(
-            {"provider_id": "deepseek", "model": "deepseek-v4-pro"}, base,
+            {"provider_id": "deepseek", "model": "deepseek-v4-pro", "thinking_enabled": False}, base,
         )
         openrouter = prepare_chat_payload(
-            {"provider": "openrouter", "model": "deepseek/deepseek-v4-flash"}, base,
+            {"provider": "openrouter", "model": "deepseek/deepseek-v4-flash", "thinking_enabled": True}, base,
         )
-        self.assertEqual(deepseek["thinking"], {"type": "disabled"})
         self.assertEqual(provider_card["thinking"], {"type": "disabled"})
         self.assertNotIn("thinking", openrouter)
+        self.assertEqual(openrouter["max_tokens"], 4096)
         self.assertNotIn("thinking", base)
+
+    def test_deepseek_thinking_toggle_enables_reasoning_with_extra_output_room(self):
+        base = {"model": "deepseek-flash", "messages": [], "max_tokens": 4096}
+        prepared = prepare_chat_payload(
+            {"provider": "deepseek", "model": "deepseek-flash", "thinking_enabled": True}, base,
+        )
+        self.assertEqual(prepared["thinking"], {"type": "enabled"})
+        self.assertEqual(prepared["max_tokens"], 4096 + THINKING_OUTPUT_ALLOWANCE)
+        self.assertEqual(base["max_tokens"], 4096)
+
+    def test_provider_thinking_toggle_persists_and_survives_saves_that_omit_it(self):
+        init_db()
+        ensure_provider_cards()
+        db = get_db()
+        snapshot = dict(db.execute("SELECT * FROM ai_provider_configs WHERE provider_id='deepseek'").fetchone())
+        db.close()
+        original = get_provider("deepseek", True)
+        try:
+            self.assertFalse(original["thinking_enabled"])
+            save_provider("deepseek", original["base_url"], "deepseek-flash", "sk-test", True, True)
+            self.assertTrue(get_provider("deepseek", False)["thinking_enabled"])
+            self.assertTrue(assigned_provider("clean", "deepseek")["thinking_enabled"])
+            save_provider("deepseek", original["base_url"], "deepseek-flash", None, True)
+            card = next(item for item in list_provider_cards() if item["provider_id"] == "deepseek")
+            self.assertTrue(card["thinking_enabled"])
+            self.assertTrue(card["supports_thinking"])
+            save_provider("deepseek", original["base_url"], "deepseek-flash", None, True, False)
+            self.assertFalse(get_provider("deepseek", False)["thinking_enabled"])
+            openai = next(item for item in list_provider_cards() if item["provider_id"] == "openai")
+            self.assertFalse(openai["supports_thinking"])
+        finally:
+            db = get_db()
+            columns = [column for column in snapshot if column != "provider_id"]
+            db.execute(
+                f"UPDATE ai_provider_configs SET {','.join(f'{column}=?' for column in columns)} WHERE provider_id='deepseek'",
+                [snapshot[column] for column in columns],
+            )
+            db.commit(); db.close()
 
     def test_cleaner_length_finish_adaptively_splits_and_recovers(self):
         batch = [

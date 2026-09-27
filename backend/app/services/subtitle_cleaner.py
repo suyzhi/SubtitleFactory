@@ -89,6 +89,7 @@ def clean_subtitles(task_id: str, project_id: str, target_length: int = 42, prov
         f"开始分析 {len(rows)} 条字幕，将在 {total_batches} 个语义批次中识别完整句子",
         detail=(
             f"AI: {ai['provider']} · {ai['model']} · "
+            f"{'思考开启' if ai.get('thinking_enabled') else '思考关闭'} · "
             f"输入字符 {_batch_character_count(rows)} · 单批最多 32 条/3500 字符"
         )
     )

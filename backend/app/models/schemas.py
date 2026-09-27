@@ -274,6 +274,7 @@ class AIProviderUpdate(BaseModel):
     api_key: Optional[str] = None
     model: str
     enabled: bool = True
+    thinking_enabled: Optional[bool] = None
 
 
 class AIAssignmentsUpdate(BaseModel):

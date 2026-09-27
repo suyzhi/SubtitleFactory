@@ -272,7 +272,7 @@ describe('SettingsCenter model catalog', () => {
     const provider: api.AIProviderCard = {
       provider_id: 'deepseek', name: 'DeepSeek', base_url: 'https://api.deepseek.com/v1',
       api_key: '', model: 'deepseek-v4-flash', models: ['deepseek-v4-flash'],
-      enabled: true, has_api_key: false,
+      enabled: true, has_api_key: false, supports_thinking: true, thinking_enabled: false,
     };
     const assignments = {
       clean_provider_id: 'deepseek',
@@ -353,6 +353,38 @@ describe('SettingsCenter model catalog', () => {
     await waitFor(() => expect(api.prepareTranscriptionModel).toHaveBeenCalledWith('tiny', 'cpu', false));
   });
 
+  it('saves the per-provider thinking toggle and hides it where unsupported', async () => {
+    const deepseek: api.AIProviderCard = {
+      provider_id: 'deepseek', name: 'DeepSeek', base_url: 'https://api.deepseek.com/v1',
+      api_key: '', model: 'deepseek-flash', models: ['deepseek-flash'],
+      enabled: true, has_api_key: true, supports_thinking: true, thinking_enabled: false,
+    };
+    const openai: api.AIProviderCard = {
+      ...deepseek, provider_id: 'openai', name: 'OpenAI', model: 'gpt-4.1-mini',
+      models: ['gpt-4.1-mini'], supports_thinking: false,
+    };
+    vi.mocked(api.getAIProviders).mockResolvedValueOnce({
+      providers: [deepseek, openai],
+      assignments: { clean_provider_id: 'deepseek', translate_provider_id: 'deepseek', content_provider_id: 'deepseek' },
+    });
+    vi.mocked(api.saveAIProvider).mockResolvedValueOnce({ ...deepseek, thinking_enabled: true });
+    render(<SettingsCenter {...settingsProps()}/>);
+
+    fireEvent.click(screen.getByRole('button', { name: /AI 服务/ }));
+    const providerSection = (await screen.findByText('模型供应商')).closest('section');
+    const [deepseekCard, openaiCard] = Array.from(providerSection?.querySelectorAll('details.provider-card') || []) as HTMLElement[];
+    expect(within(openaiCard).queryByLabelText(/思考模式/)).toBeNull();
+    fireEvent.click(deepseekCard.querySelector('summary')!);
+    const toggle = within(deepseekCard).getByLabelText(/思考模式/);
+    expect(toggle).not.toBeChecked();
+    fireEvent.click(toggle);
+    fireEvent.click(within(deepseekCard).getByRole('button', { name: '保存' }));
+
+    await waitFor(() => expect(api.saveAIProvider).toHaveBeenCalledWith(
+      'deepseek', expect.objectContaining({ thinking_enabled: true }),
+    ));
+  });
+
   it('requires visible confirmation before authorizing Fun-Realtime-ASR audio upload', async () => {
     vi.spyOn(window, 'confirm').mockReturnValueOnce(true);
     vi.mocked(api.getAIProviders).mockResolvedValueOnce({
@@ -360,7 +392,7 @@ describe('SettingsCenter model catalog', () => {
         provider_id: 'dashscope', name: '通义千问',
         base_url: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
         api_key: '', model: 'qwen-plus', models: ['qwen-plus'], enabled: true,
-        has_api_key: true,
+        has_api_key: true, supports_thinking: false, thinking_enabled: false,
       }],
       assignments: { clean_provider_id: 'deepseek', translate_provider_id: 'deepseek', content_provider_id: 'deepseek' },
     });
@@ -401,6 +433,8 @@ describe('SettingsCenter model catalog', () => {
         models: ['deepseek-v4-flash', 'deepseek-v4-pro'],
         enabled: true,
         has_api_key: true,
+        supports_thinking: true,
+        thinking_enabled: false,
       }],
       assignments: {
         clean_provider_id: 'deepseek',

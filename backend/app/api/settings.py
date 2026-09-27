@@ -594,7 +594,7 @@ def read_ai_provider_cards():
 @router.put("/settings/ai/providers/{provider_id}")
 def update_ai_provider_card(provider_id: str, req: AIProviderUpdate):
     try:
-        return {"provider": save_provider(provider_id, req.base_url, req.model, req.api_key, req.enabled)}
+        return {"provider": save_provider(provider_id, req.base_url, req.model, req.api_key, req.enabled, req.thinking_enabled)}
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
 

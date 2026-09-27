@@ -1110,7 +1110,7 @@ export async function testAISettings(settings: AISettings): Promise<{ ok: boolea
   return request('/api/settings/ai/test', { method: 'POST', body: JSON.stringify(settings) });
 }
 
-export interface AIProviderCard { provider_id:string; name:string; base_url:string; api_key:string; model:string; models:string[]; enabled:boolean; has_api_key:boolean; last_test_status?:string; last_latency_ms?:number; }
+export interface AIProviderCard { provider_id:string; name:string; base_url:string; api_key:string; model:string; models:string[]; enabled:boolean; has_api_key:boolean; supports_thinking:boolean; thinking_enabled:boolean; last_test_status?:string; last_latency_ms?:number; }
 export interface AIAssignments { clean_provider_id:string; translate_provider_id:string; content_provider_id:string; }
 export interface AIProvidersResponse { providers:AIProviderCard[]; assignments:AIAssignments; }
 export const getAIProviders=()=>request<AIProvidersResponse>('/api/settings/ai/providers');

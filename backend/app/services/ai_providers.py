@@ -9,7 +9,9 @@ from .ai_settings import PROVIDER_PRESETS
 from .secret_store import get_secret, keychain_enabled, save_secret
 
 PRESETS = {item["id"]: item for item in PROVIDER_PRESETS}
-DEEPSEEK_V4_MODELS = {"deepseek-v4-flash", "deepseek-v4-pro"}
+# Extra output room when thinking is on: reasoning tokens share max_tokens with
+# the final JSON, so the caller's budget alone would truncate the answer.
+THINKING_OUTPUT_ALLOWANCE = 32768
 
 
 class AIProviderRequestError(RuntimeError):
@@ -31,12 +33,15 @@ def prepare_chat_payload(ai: dict, payload: dict[str, Any]) -> dict[str, Any]:
     """Apply provider/model compatibility without changing the caller's payload."""
     prepared = dict(payload)
     provider = str(ai.get("provider") or ai.get("provider_id") or "").strip().lower()
-    model = str(ai.get("model") or "").strip().lower()
-    if provider == "deepseek" and model in DEEPSEEK_V4_MODELS:
-        # DeepSeek V4 enables thinking by default. Subtitle transforms require a
-        # short deterministic final JSON response, so reasoning would only consume
-        # the output budget before the JSON body is complete.
-        prepared["thinking"] = {"type": "disabled"}
+    if provider == "deepseek":
+        # DeepSeek enables thinking by default on every current model name
+        # (deepseek-flash, deepseek-v4-*, and the legacy aliases routed to them),
+        # so the user's toggle is always sent explicitly.
+        if ai.get("thinking_enabled"):
+            prepared["thinking"] = {"type": "enabled"}
+            prepared["max_tokens"] = int(prepared.get("max_tokens") or 0) + THINKING_OUTPUT_ALLOWANCE
+        else:
+            prepared["thinking"] = {"type": "disabled"}
     return prepared
 
 
@@ -106,9 +111,11 @@ def list_provider_cards(include_secret: bool = False) -> list[dict]:
     result = []
     for row in rows:
         item = dict(row); preset = PRESETS.get(item["provider_id"], {})
-        item.update({"name": preset.get("name", item["provider_id"]), "models": preset.get("models", [])})
+        item.update({"name": preset.get("name", item["provider_id"]), "models": preset.get("models", []),
+                     "supports_thinking": bool(preset.get("supports_thinking"))})
         item["api_key"] = get_secret(f"provider:{item['provider_id']}", item.get("api_key", ""))
         item["enabled"] = bool(item["enabled"]); item["has_api_key"] = bool(item["api_key"])
+        item["thinking_enabled"] = bool(item.get("thinking_enabled"))
         if not include_secret: item["api_key"] = ""
         result.append(item)
     return result
@@ -119,23 +126,29 @@ def get_provider(provider_id: str, include_secret: bool = True) -> dict:
     row = db.execute("SELECT * FROM ai_provider_configs WHERE provider_id=?", (provider_id,)).fetchone(); db.close()
     if not row: raise ValueError("AI 供应商不存在")
     result = dict(row)
+    result["thinking_enabled"] = bool(result.get("thinking_enabled"))
     result["api_key"] = get_secret(f"provider:{provider_id}", result.get("api_key", ""))
     if not include_secret:
         result["has_api_key"] = bool(result["api_key"]); result["api_key"] = ""
     return result
 
 
-def save_provider(provider_id: str, base_url: str, model: str, api_key: str | None, enabled: bool = True) -> dict:
+def save_provider(
+    provider_id: str, base_url: str, model: str, api_key: str | None, enabled: bool = True,
+    thinking_enabled: bool | None = None,
+) -> dict:
     current = get_provider(provider_id, True)
     secret = current["api_key"] if not api_key else api_key.strip()
     model = (model or "").strip()
     if not model: raise ValueError("模型名称不能为空")
+    # Older clients omit the field; keep the stored choice instead of resetting it.
+    thinking = current["thinking_enabled"] if thinking_enabled is None else bool(thinking_enabled)
     save_secret(f"provider:{provider_id}", secret)
     stored_secret = "" if keychain_enabled() else secret
     db = get_db(); db.execute(
-        """UPDATE ai_provider_configs SET base_url=?,api_key=?,model=?,enabled=?,updated_at=?,has_api_key=?,keychain_ref=?,
+        """UPDATE ai_provider_configs SET base_url=?,api_key=?,model=?,enabled=?,thinking_enabled=?,updated_at=?,has_api_key=?,keychain_ref=?,
            last_test_status='',last_test_at='',last_latency_ms=0 WHERE provider_id=?""",
-        (_validate_url(base_url), stored_secret, model, int(enabled), time.strftime("%Y-%m-%d %H:%M:%S"), int(bool(secret)), f"provider:{provider_id}" if keychain_enabled() else None, provider_id),
+        (_validate_url(base_url), stored_secret, model, int(enabled), int(thinking), time.strftime("%Y-%m-%d %H:%M:%S"), int(bool(secret)), f"provider:{provider_id}" if keychain_enabled() else None, provider_id),
     ); db.commit(); db.close()
     return get_provider(provider_id, False)
 

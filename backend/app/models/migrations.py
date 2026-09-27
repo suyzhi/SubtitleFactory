@@ -12,7 +12,7 @@ import time
 from pathlib import Path
 from typing import Callable
 
-CURRENT_SCHEMA_VERSION = 12
+CURRENT_SCHEMA_VERSION = 13
 
 
 def _columns(conn: sqlite3.Connection, table: str) -> set[str]:
@@ -557,6 +557,11 @@ def _migration_v12(conn: sqlite3.Connection) -> None:
     )
 
 
+def _migration_v13(conn: sqlite3.Connection) -> None:
+    """Model thinking is an explicit per-provider choice; off keeps subtitle jobs fast."""
+    _add_column(conn, "ai_provider_configs", "thinking_enabled INTEGER NOT NULL DEFAULT 0")
+
+
 MIGRATIONS: tuple[tuple[int, Callable[[sqlite3.Connection], None]], ...] = (
     (1, _migration_v1),
     (2, _migration_v2),
@@ -570,6 +575,7 @@ MIGRATIONS: tuple[tuple[int, Callable[[sqlite3.Connection], None]], ...] = (
     (10, _migration_v10),
     (11, _migration_v11),
     (12, _migration_v12),
+    (13, _migration_v13),
 )
 
 
