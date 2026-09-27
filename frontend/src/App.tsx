@@ -246,9 +246,9 @@ function App() {
   const inProjectView = showProjectWorkspace && !!activeProject;
   const viewEntering = useTransientFlag(inProjectView ? `project:${activeProject?.id}` : `library:${libraryView}:${libraryPage}:${projects.length > 0}`);
   const pageEntering = useTransientFlag(`${activeProject?.id}:${projectWorkspace}`, 700);
-  const workspaceTabsRef = useSlidingIndicator<HTMLDivElement>(projectWorkspace);
+  const workspaceTabsRef = useSlidingIndicator<HTMLDivElement>(`${inProjectView}:${projectWorkspace}`);
   const libraryTabsRef = useSlidingIndicator<HTMLDivElement>(libraryView);
-  const layoutSwap = useTransientFlag(`layout:${compactLibrary}`, 700);
+  const layoutSwap = useTransientFlag(typeof document !== 'undefined' && 'startViewTransition' in document ? 'layout' : `layout:${compactLibrary}`, 700);
   const toolTabsRef = useSlidingIndicator<HTMLElement>(`${toolsOpen}:${toolsTab}`);
 
   const showToast = useCallback((message: string, duration = 2800) => {
@@ -280,9 +280,17 @@ function App() {
     const root = document.documentElement;
     if (!motionEnabled || window.matchMedia('(prefers-reduced-motion: reduce)').matches
       || !document.startViewTransition || root.classList.contains('theme-revealing')) { apply(); return; }
+    // Snapshotting every cover is what makes the switch stutter; only the visible ones need to fly.
+    const visible = Array.from(document.querySelectorAll<HTMLElement>('.app-library .project-card-shell'))
+      .filter(shell => { const rect = shell.getBoundingClientRect(); return rect.bottom > 0 && rect.top < window.innerHeight; })
+      .slice(0, 16);
+    visible.forEach(shell => shell.setAttribute('data-morph', ''));
     root.classList.add('layout-morphing');
     const transition = document.startViewTransition(apply);
-    void transition.finished.catch(() => undefined).finally(() => root.classList.remove('layout-morphing'));
+    void transition.finished.catch(() => undefined).finally(() => {
+      root.classList.remove('layout-morphing');
+      visible.forEach(shell => shell.removeAttribute('data-morph'));
+    });
   };
 
   const themeTransitionBusy=useRef(false);
@@ -2477,6 +2485,8 @@ function App() {
         <div className="panel-resizer panel-resizer-left" role="separator" aria-label="调整项目库宽度" tabIndex={0} onPointerDown={event => beginResize('left', event)} onKeyDown={event => { if (event.key === 'ArrowLeft') setLeftPanelWidth(value => Math.max(210, value - 16)); if (event.key === 'ArrowRight') setLeftPanelWidth(value => Math.min(430, value + 16)); }}/>
 
         <main className={`editor-workspace ${projectWorkspace === 'subtitles' ? 'workspace-editor' : ''} ${subtitleFocus ? 'subtitle-focus' : ''}`}>
+          {/* The workspace is hidden behind the library; rendering it there only slows every library update. */}
+          {inProjectView && <>
           <nav className="project-workspace-nav" aria-label="项目工作区">
             <div ref={workspaceTabsRef} className="workspace-segments sliding-tabs">{([['subtitles', '编辑', `${segments.length} 条字幕`], ['style', '样式', '外观与位置'], ['export', '导出', '文件与视频']] as const).map(([id, label, detail]) => <button key={id} className={projectWorkspace === id ? 'active' : ''} aria-current={projectWorkspace === id ? 'page' : undefined} onClick={() => { setProjectWorkspace(id); if (id === 'subtitles') setSubtitleFocusRequest(request => request + 1); setInspectorMode(null); }}><span>{label}</span><small>{detail}</small></button>)}</div>
             <button className={`workspace-tools-button ${toolsOpen ? 'open' : ''} ${isProcessing ? 'busy' : ''}`} aria-expanded={toolsOpen} onClick={() => { setToolsTab('process'); setToolsOpen(true); setInspectorMode(null); }}><span>任务与工具</span><small>{currentTask ? currentTask.message || '运行中' : '质检、OCR、说话人'}</small></button>
@@ -2514,6 +2524,7 @@ function App() {
             />
           </Suspense>}
 </WorkspacePanel>}
+          </>}
         </main>
 
 

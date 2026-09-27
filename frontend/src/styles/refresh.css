@@ -941,7 +941,8 @@
 .pro-app .app-library .library-list-view .project-more[aria-expanded="true"] { opacity: 1; background: var(--surface-3); color: var(--text); }
 
 /* ── 视图切换动画：卡片与封面在网格/列表间平滑变形 ──────────────────── */
-html.layout-morphing .app-library .project-card-shell .project-thumb { view-transition-name: var(--vt-thumb); }
+html.layout-morphing .app-library .project-card-shell[data-morph] .project-thumb { view-transition-name: var(--vt-thumb); }
+html.layout-morphing .app-library *, html.layout-morphing .app-library *::before, html.layout-morphing .app-library *::after { transition: none !important; animation: none !important; }
 /* Only the covers fly between positions; text and card chrome cross-fade, so nothing is stretched. */
 html.layout-morphing::view-transition-group(*) { animation-duration: 560ms; animation-timing-function: cubic-bezier(.2, .9, .25, 1); }
 html.layout-morphing::view-transition-old(*),
