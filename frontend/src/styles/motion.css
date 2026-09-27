@@ -1,22 +1,37 @@
-/* ══════════════════════════════════════════════════════════════════════════
-   字幕工厂 · 动效层
-   所有入场动画都挂在 .view-entering / .page-entering 这两个短暂存在的类上，
-   即使 WebView 没有推进动画，类被移除后元素也会回到完全可见的最终状态。
-   “外观与动画 → 关闭动画”（.motion-off）与系统“减少动态效果”都会让这里失效。
-   ══════════════════════════════════════════════════════════════════════════ */
+/* 动效：关键帧、入场、微交互。“关闭动画”与系统“减少动态效果”会让这里失效。 */
 
-.pro-app,
-.settings-backdrop {
-  --ease-spring: cubic-bezier(.34, 1.36, .64, 1);
-  --ease-out: cubic-bezier(.16, 1, .3, 1);
-  --ease-in-out: cubic-bezier(.65, 0, .35, 1);
-  --dur-quick: 140ms;
-  --dur-base: 240ms;
-  --dur-slow: 420ms;
-  --dur-enter: 560ms;
+@keyframes pulse { 50% { opacity: .35; } }
+@keyframes status-ready { from { transform: scale(.4); opacity: .2; } 60% { transform: scale(1.25); } to { transform: scale(1); opacity: 1; } }
+@keyframes badge-in { from { opacity: 0; transform: translateY(3px) scale(.97); } to { opacity: 1; transform: none; } }
+@keyframes task-strip-in { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
+@keyframes group-items-in { from { opacity: 0; transform: translateY(-3px); } to { opacity: 1; transform: none; } }
+@keyframes menu-in { from { opacity: 0; transform: translateY(8px) scale(.98); } to { opacity: 1; transform: none; } }
+@keyframes panel-in { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: none; } }
+@keyframes toast-in { from { opacity: 0; transform: translate(-50%, 12px); } to { opacity: 1; transform: translate(-50%, 0); } }
+@keyframes float-in { from { opacity: 0; transform: translateY(-8px) scale(.96); } to { opacity: 1; transform: none; } }
+@keyframes deferred-spin { to { transform: rotate(360deg); } }
+@keyframes subtle-pulse { 50% { opacity: .45; } }
+@keyframes reveal-y { from { opacity: 0; transform: translateY(-3px); } to { opacity: 1; transform: none; } }
+@keyframes content-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+@keyframes inspector-in { from { opacity: 0; transform: translateX(8px); } to { opacity: 1; transform: none; } }
+@keyframes dialog-in { from { opacity: 0; transform: translateY(8px) scale(.985); } to { opacity: 1; transform: none; } }
+@keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes skeleton-shimmer { from { background-position: 100% 0; } to { background-position: -100% 0; } }
+@keyframes workspace-tools-in { from { opacity:0; transform:translateX(24px); } to { opacity:1; transform:translateX(0); } }
+@keyframes select-option-bubble {
+  0% { opacity: 0; transform: translateY(5px) scale(.9); }
+  65% { opacity: 1; transform: translateY(-1px) scale(1); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
 }
-
-/* ── Keyframes ─────────────────────────────────────────────────────────── */
+@keyframes utility-backdrop-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes utility-dialog-in { from { opacity: 0; transform: translateY(10px) scale(.96); } to { opacity: 1; transform: none; } }
+@keyframes theme-reveal {
+  from { clip-path: circle(0% at var(--theme-reveal-x) var(--theme-reveal-y)); }
+  /* 150% of the normalized diagonal covers every corner from any origin. */
+  to { clip-path: circle(150% at var(--theme-reveal-x) var(--theme-reveal-y)); }
+}
+@keyframes sf-vt-out { to { opacity: 0; } }
+@keyframes sf-vt-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 @keyframes sf-rise { from { opacity: 0; transform: translateY(16px) scale(.985); } to { opacity: 1; transform: none; } }
 @keyframes sf-fade-up { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
 @keyframes sf-fade-down { from { opacity: 0; transform: translateY(-8px); } to { opacity: 1; transform: none; } }
@@ -47,37 +62,60 @@
 @keyframes sf-spin { to { transform: rotate(360deg); } }
 @keyframes sf-shimmer { from { background-position: 180% 0; } to { background-position: -80% 0; } }
 
-/* ── 视图入场：项目库 ─────────────────────────────────────────────────── */
+.pro-app, .settings-backdrop {
+  --ease-spring: cubic-bezier(.34, 1.36, .64, 1);
+  --ease-out: cubic-bezier(.16, 1, .3, 1);
+  --ease-in-out: cubic-bezier(.65, 0, .35, 1);
+  --dur-quick: 140ms;
+  --dur-base: 240ms;
+  --dur-slow: 420ms;
+  --dur-enter: 560ms;
+}
 .view-entering.app-library .library-page-header { animation: sf-fade-up var(--dur-enter) var(--ease-out) backwards; }
 .view-entering.app-library .library-overview > div { animation: sf-rise var(--dur-enter) var(--ease-out) backwards; }
 .view-entering.app-library .library-overview > div:nth-child(1) { animation-delay: 60ms; }
 .view-entering.app-library .library-overview > div:nth-child(2) { animation-delay: 110ms; }
 .view-entering.app-library .library-overview > div:nth-child(3) { animation-delay: 160ms; }
 .view-entering.app-library .library-overview > div:nth-child(4) { animation-delay: 210ms; }
-.view-entering.app-library :is(.library-switcher, .library-pagination, .library-filters) { animation: sf-fade-up var(--dur-enter) var(--ease-out) 200ms backwards; }
-.view-entering.app-library .project-group-header { animation: sf-fade-up var(--dur-slow) var(--ease-out) 240ms backwards; }
-.view-entering.app-library .project-card-shell,
-.view-entering.app-library .trash-card { animation: sf-rise 620ms var(--ease-out) backwards; animation-delay: calc(260ms + var(--i, 0) * 45ms); }
-.view-entering.app-library .project-empty { animation: sf-pop var(--dur-enter) var(--ease-out) 200ms backwards; }
 
-/* ── 视图入场：项目工作区 ─────────────────────────────────────────────── */
+.view-entering.app-library :is(.library-switcher, .library-pagination, .library-filters) {
+  animation: sf-fade-up var(--dur-enter) var(--ease-out) 200ms backwards;
+}
+.view-entering.app-library .project-group-header { animation: sf-fade-up var(--dur-slow) var(--ease-out) 240ms backwards; }
+
+.view-entering.app-library .project-card-shell, .view-entering.app-library .trash-card {
+  animation: sf-rise 620ms var(--ease-out) backwards;
+  animation-delay: calc(260ms + var(--i, 0) * 45ms);
+}
+.view-entering.app-library .project-empty { animation: sf-pop var(--dur-enter) var(--ease-out) 200ms backwards; }
 .view-entering.app-project .project-workspace-nav { animation: sf-fade-down var(--dur-slow) var(--ease-out) backwards; }
 :is(.view-entering, .page-entering).app-project .workbench-split > * { animation: sf-rise 520ms var(--ease-out) 40ms backwards; }
 .page-entering.app-project .style-controls-page { animation: sf-panel-right 560ms var(--ease-out) 90ms backwards; }
 .export-options { animation: sf-fade-up var(--dur-slow) var(--ease-out); }
 
-/* ── 滑动指示器 ───────────────────────────────────────────────────────── */
 .sliding-tabs[data-indicator-ready]::before {
   transition: transform 460ms var(--ease-spring), width 460ms var(--ease-spring),
     height 460ms var(--ease-spring), opacity var(--dur-base) ease;
 }
 
-/* ── 按钮：按压回弹、主按钮扫光 ───────────────────────────────────────── */
-:is(.pro-app, .settings-backdrop) :is(.button, .topbar-button, .icon-action, .task-status-pill, .topbar-back, .sidebar-action, .workspace-tools-button) {
+:is(.pro-app,
+.settings-backdrop) :is(.button,
+.topbar-button,
+.icon-action,
+.task-status-pill,
+.topbar-back,
+.sidebar-action,
+.workspace-tools-button) {
   transition: transform var(--dur-slow) var(--ease-spring), background-color var(--dur-base) ease,
     border-color var(--dur-base) ease, box-shadow var(--dur-base) ease, color var(--dur-base) ease, opacity var(--dur-base) ease;
 }
-:is(.pro-app, .settings-backdrop) :is(.button, .topbar-button, .icon-action, .topbar-back, .workspace-tools-button):not(:disabled):active {
+
+:is(.pro-app,
+.settings-backdrop) :is(.button,
+.topbar-button,
+.icon-action,
+.topbar-back,
+.workspace-tools-button):not(:disabled):active {
   transform: scale(.955);
   transition-duration: 90ms;
 }
@@ -85,32 +123,53 @@
 .topbar-back:hover span { transform: translateX(-3px); }
 .topbar-back span { display: inline-block; transition: transform var(--dur-slow) var(--ease-spring); }
 .icon-action[aria-label*="模式"]:hover { transform: rotate(-18deg) scale(1.06); }
-.brand-block:hover .brand-mark { transform: translateY(-2px) rotate(-6deg) scale(1.06); transition: transform 520ms var(--ease-spring); }
 
-/* ── 卡片微交互 ───────────────────────────────────────────────────────── */
-.pro-app .app-library .project-card { transition: transform 520ms var(--ease-spring), box-shadow var(--dur-slow) var(--ease-out), border-color var(--dur-base) ease, background-color var(--dur-base) ease; }
+.brand-block:hover .brand-mark {
+  transform: translateY(-2px) rotate(-6deg) scale(1.06);
+  transition: transform 520ms var(--ease-spring);
+}
+
+.pro-app .app-library .project-card {
+  transition: transform 520ms var(--ease-spring), box-shadow var(--dur-slow) var(--ease-out), border-color var(--dur-base) ease, background-color var(--dur-base) ease;
+}
 .pro-app .app-library .project-card:not(:disabled):active { transform: translateY(-1px) scale(.975); transition-duration: 120ms; }
 .pro-app .app-library .project-thumb img { transition: transform 900ms var(--ease-out), filter var(--dur-slow) ease; }
 .pro-app .app-library .project-thumb::after { transition: opacity var(--dur-base) ease, transform 520ms var(--ease-spring); }
-.pro-app .library-overview > div { transition: transform 480ms var(--ease-spring), box-shadow var(--dur-slow) var(--ease-out), border-color var(--dur-base) ease; }
-.pro-app .app-library .project-more { transition: opacity var(--dur-base) ease, transform var(--dur-slow) var(--ease-spring), background-color var(--dur-base) ease; }
-.pro-app .project-empty > span { animation: sf-float 3.6s var(--ease-in-out) infinite; }
 
-/* ── 氛围：标题光晕、状态指示 ─────────────────────────────────────────── */
+.pro-app .library-overview > div {
+  transition: transform 480ms var(--ease-spring), box-shadow var(--dur-slow) var(--ease-out), border-color var(--dur-base) ease;
+}
+
+.pro-app .app-library .project-more {
+  transition: opacity var(--dur-base) ease, transform var(--dur-slow) var(--ease-spring), background-color var(--dur-base) ease;
+}
+.pro-app .project-empty > span { animation: sf-float 3.6s var(--ease-in-out) infinite; }
 .backend-dot.connected { --ping-color: var(--green); animation: sf-ping 2.4s var(--ease-out) 3; }
 .backend-dot.connecting { animation: sf-breathe 1.3s var(--ease-in-out) infinite; }
-.workspace-tools-button.busy::before,
-.task-status-pill.busy .backend-dot { animation: sf-breathe 1.2s var(--ease-in-out) infinite; }
+
+.workspace-tools-button.busy::before, .task-status-pill.busy .backend-dot {
+  animation: sf-breathe 1.2s var(--ease-in-out) infinite;
+}
 .page-task-status i { --ping-color: var(--accent); animation: sf-ping 1.6s var(--ease-out) infinite; }
 :is(.pro-app, .settings-backdrop) progress::-webkit-progress-value { transition: width var(--dur-slow) var(--ease-out); }
 .library-skeleton i { animation: sf-shimmer 1.6s var(--ease-in-out) infinite; }
-
-/* ── 浮层：弹窗、菜单、面板、提示 ─────────────────────────────────────── */
 .modal-backdrop, .utility-dialog-backdrop, .preflight-overlay, .production-overlay { animation: sf-fade var(--dur-base) ease both; }
-.settings-center, .rename-dialog, .import-flow, .preflight-card, .playlist-dialog, .production-center, .modal-card { animation: sf-pop 520ms var(--ease-out) both; }
+
+.settings-center,
+.rename-dialog,
+.import-flow,
+.preflight-card,
+.playlist-dialog,
+.production-center,
+.modal-card {
+  animation: sf-pop 520ms var(--ease-out) both;
+}
 .utility-dialog { animation: sf-pop 520ms var(--ease-out); }
 .context-menu { transform-origin: top left; animation: sf-menu 260ms var(--ease-spring); }
-.context-menu button { transition: background-color var(--dur-quick) ease, color var(--dur-quick) ease, transform var(--dur-base) var(--ease-spring); }
+
+.context-menu button {
+  transition: background-color var(--dur-quick) ease, color var(--dur-quick) ease, transform var(--dur-base) var(--ease-spring);
+}
 .editor-workspace > .workspace-tool-panel { animation: sf-panel-right 520ms var(--ease-out); }
 .editor-inspector { animation: sf-panel-right var(--dur-slow) var(--ease-out); }
 .studio-toast { animation: sf-toast 560ms var(--ease-out); }
@@ -121,10 +180,13 @@
 .subtitle-table tr td { transition: background-color var(--dur-base) ease, box-shadow var(--dur-base) ease; }
 .deferred-module i, .playlist-loading i { animation: sf-spin .8s linear infinite; }
 
-/* ── 关闭动画 ─────────────────────────────────────────────────────────── */
 .motion-off.settings-backdrop *,
 .motion-off.settings-backdrop *::before,
-.motion-off.settings-backdrop *::after { animation: none !important; transition: none !important; }
+.motion-off.settings-backdrop *::after {
+  animation: none !important;
+  transition: none !important;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .project-empty > span, .drop-overlay span { animation: none !important; }
 }

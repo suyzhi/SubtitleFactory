@@ -30,8 +30,17 @@ import {
   readRecoveredSegmentDraft,
   writeRecoveredSegmentDraft,
 } from './draftRecovery';
-import './App.css';
-import './styles/refresh.css';
+import './styles/tokens.css';
+import './styles/base.css';
+import './styles/app-shell.css';
+import './styles/library.css';
+import './styles/workspace.css';
+import './styles/editor.css';
+import './styles/player.css';
+import './styles/style-export.css';
+import './styles/tools.css';
+import './styles/settings.css';
+import './styles/overlays.css';
 import './styles/motion.css';
 import { useSlidingIndicator, useTransientFlag } from './utils/motion';
 import AnimatedNumber from './components/AnimatedNumber';

@@ -1,0 +1,196 @@
+/* 项目工作区框架：分段导航、页面容器。 */
+.subtitle-focus .workbench-split { grid-template-columns: 0 minmax(0,1fr); }
+
+@media (max-width:1000px) {
+  .workbench-split { grid-template-columns: minmax(300px,42fr) minmax(380px,58fr); }
+}
+
+.workbench-split {
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  background: var(--border);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: clamp(380px, var(--viewer-height, 470px), calc(100% - 220px)) minmax(220px, 1fr);
+  gap: 1px;
+}
+
+@container editor (min-width: 1180px) {
+  .workbench-split { grid-template-columns: minmax(520px, 48fr) minmax(580px, 52fr); grid-template-rows: minmax(0, 1fr); }
+}
+.presentation-theater .workbench-split, .presentation-fullscreen .workbench-split { display: block; }
+
+@media (max-height: 760px) {
+  .workbench-split { grid-template-rows: clamp(370px, var(--viewer-height, 420px), calc(100% - 210px)) minmax(210px, 1fr); }
+}
+
+@media (max-width: 1599px) {
+  .workbench-split {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: clamp(380px, var(--viewer-height, 470px), calc(100% - 220px)) minmax(220px, 1fr);
+  }
+}
+.v05-shell.app-project { display: block; overflow: hidden; }
+
+.project-workspace-nav {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 5px;
+  padding: 9px clamp(18px, 3vw, 42px);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+.project-workspace-nav button:hover { background: var(--surface-2); color: var(--text); }
+.project-workspace-nav span { font-size: 14px; font-weight: 650; }
+.workspace-tools-button { border-left-color: transparent !important; }
+
+.workspace-page-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 11px clamp(24px, 3.5vw, 52px);
+  border-bottom: 1px solid var(--border-soft);
+  background: var(--window-bg);
+}
+.workspace-page-heading h1 { margin: 0; color: var(--text); font-size: 22px; line-height: 1.2; letter-spacing: -.02em; }
+.page-task-status { max-width: 420px; display: flex; align-items: center; gap: 9px; color: var(--text-2); font-size: 12px; }
+
+.page-task-status i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  box-shadow: 0 0 0 5px var(--accent-soft);
+}
+.page-task-status span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.page-task-status strong { color: var(--accent); }
+.task-page { width: 100%; height: 100%; min-height: 0; overflow: auto; background: var(--window-bg); }
+.task-page h2, .task-page h3 { color: var(--text); }
+
+@media (max-width: 1100px) {
+  .project-workspace-nav { padding-inline: 18px; }
+  .project-workspace-nav small { display: none; }
+}
+
+@media (max-height: 760px) {
+  .project-workspace-nav { padding-block: 6px; }
+  .workspace-page-heading { padding-block: 8px; }
+}
+
+.presentation-theater .project-workspace-nav,
+.presentation-fullscreen .project-workspace-nav,
+.presentation-theater .workspace-page-heading,
+.presentation-fullscreen .workspace-page-heading {
+  display: none !important;
+}
+
+@media (max-width: 1100px) {
+  .workspace-active .active-project-title span { display: none; }
+}
+.workspace-tool-panel > .task-page { flex: 1; min-height: 0; overflow: auto; }
+
+@media (max-height:760px) {
+  .workspace-page-heading { padding: 6px 16px; }
+  .workspace-page-heading h1 { display: none; }
+}
+.workspace-editor > .workspace-page-heading { display: none; }
+.workspace-editor > .project-workspace-nav { padding: 6px 16px; }
+.workspace-editor > .project-workspace-nav button { height: 46px; }
+.editor-workspace > .workspace-page-heading { display: none; }
+.editor-workspace > .project-workspace-nav { padding: 6px 16px; }
+
+.pro-app .editor-workspace > .project-workspace-nav {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--border-soft);
+  background: color-mix(in srgb, var(--surface) 55%, transparent);
+}
+
+.pro-app .workspace-segments {
+  grid-column: 2;
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--border-soft);
+  border-radius: 13px;
+  background: var(--surface-2);
+  box-shadow: var(--inset-sunken);
+  --indicator-radius: 10px;
+  --indicator-bg: var(--surface);
+}
+
+.pro-app.theme-dark .workspace-segments {
+  background: color-mix(in srgb, var(--surface) 60%, black);
+  --indicator-bg: var(--surface-3);
+}
+.pro-app .workspace-segments span { font-size: 13px; font-weight: 650; }
+
+.pro-app .workspace-segments small {
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--text-3) 12%, transparent);
+  font-size: 10.5px;
+  font-weight: 550;
+  opacity: 1;
+  transition: background-color .25s ease, color .25s ease;
+}
+.pro-app .workspace-segments button.active small { background: var(--accent-soft); color: var(--accent); }
+
+.pro-app .editor-workspace > .project-workspace-nav .workspace-tools-button {
+  grid-column: 3;
+  justify-self: end;
+  max-width: 100%;
+  height: 36px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 14px;
+  border: 1px solid var(--border-soft);
+  border-radius: 11px;
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow-xs);
+}
+
+.pro-app .editor-workspace > .project-workspace-nav .workspace-tools-button::before {
+  content: '';
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--text-3) 60%, transparent);
+}
+.pro-app .editor-workspace > .project-workspace-nav .workspace-tools-button.busy::before { background: var(--accent); }
+
+.pro-app .editor-workspace > .project-workspace-nav .workspace-tools-button:hover {
+  transform: translateY(-1px);
+  border-color: var(--border);
+  box-shadow: 0 4px 12px -4px rgba(0,0,0,.16);
+  background: var(--surface);
+}
+
+.pro-app .editor-workspace > .project-workspace-nav .workspace-tools-button.open {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.pro-app .workspace-tools-button span { font-size: 12px; font-weight: 650; }
+
+.pro-app .workspace-tools-button small {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-3);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  opacity: 1;
+}
+
+@media (max-width: 1180px) {
+  .pro-app .workspace-tools-button small { display: none; }
+}

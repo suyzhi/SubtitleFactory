@@ -10,7 +10,6 @@ import {
   SUBTITLE_VIRTUALIZE_THRESHOLD,
 } from '../subtitleTableVirtualization';
 import { fmtTime } from '../utils/library';
-import './SubtitleTable.css';
 
 function SubtitleTable({
   segments, currentTime, activeIdx, onSeek, onInspect, onUpdate, onReplaceAll, onSplit, onMerge,

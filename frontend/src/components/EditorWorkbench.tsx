@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import './EditorWorkbench.css';
 
 function savedRatio(key: string, fallback: number) {
   const value = Number(localStorage.getItem(key));
