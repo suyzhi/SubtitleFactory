@@ -423,14 +423,7 @@
 .pro-app .app-library .library-skeleton { grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 20px; padding: 0; }
 
 /* 紧凑列表视图 */
-.pro-app .app-library .library-list-view .project-card { border-radius: 14px; }
-.pro-app .app-library .library-list-view .project-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-raised); }
-.pro-app .app-library .library-list-view .project-thumb { min-height: 58px; }
 .pro-app .app-library .library-list-view .project-thumb::after { width: 30px; height: 30px; margin: -15px 0 0 -15px; background-size: 10px; }
-.pro-app .app-library .library-list-view .media-mode-badge { margin-top: 6px; }
-.pro-app .app-library .library-list-view .project-card-copy { padding: 0 14px; }
-.pro-app .app-library .library-list-view .project-more,
-.pro-app .app-library .library-list-view .project-card-shell:hover .project-more { top: 50%; right: 14px; transform: translateY(-50%); }
 
 /* 全文搜索结果 */
 .pro-app .subtitle-search-hits > button { border-radius: 12px; transition: background-color .2s ease, transform .35s var(--ease-spring, ease); }
@@ -596,8 +589,7 @@
   box-shadow: var(--shadow-card);
 }
 .pro-app .editor-workspace .style-controls-page > header { padding: 18px 18px 14px; }
-.pro-app .style-controls-page .subtitle-style-panel section,
-.pro-app .style-controls-page .style-section { transition: border-color .2s ease, box-shadow .3s ease; }
+.pro-app .style-controls-page .subtitle-style-panel section { transition: border-color .2s ease, box-shadow .3s ease; }
 
 /* ── 9. 导出页 ─────────────────────────────────────────────────────────── */
 .pro-app .export-task-page { padding: 36px clamp(20px, 5vw, 64px) 48px; }
@@ -652,10 +644,6 @@
 .pro-app .workspace-tool-panel .tool-panel-tabs button { height: 32px; padding: 0 12px; border-radius: 9px; background: transparent; color: var(--text-2); font-weight: 600; transition: color .2s ease; }
 .pro-app .workspace-tool-panel .tool-panel-tabs button:hover { color: var(--text); background: color-mix(in srgb, var(--text-3) 8%, transparent); }
 .pro-app .workspace-tool-panel .tool-panel-tabs button[aria-pressed="true"] { color: var(--accent); }
-.pro-app .task-step-nav { gap: 6px; padding: 10px 14px; background: transparent; border-bottom-color: var(--border-soft); }
-.pro-app .task-step-nav button { border-radius: 12px; background: var(--surface); box-shadow: var(--shadow-xs); transition: transform .35s var(--ease-spring, ease), border-color .2s ease, background-color .2s ease; }
-.pro-app .task-step-nav button:hover { transform: translateY(-2px); }
-.pro-app .task-step-nav button[aria-pressed="true"] { box-shadow: 0 0 0 3px var(--accent-soft); }
 .pro-app .workspace-tool-panel .inspector-section { border-color: var(--border-soft); border-radius: 16px; background: var(--surface); }
 
 /* ── 11. 浮层 ──────────────────────────────────────────────────────────── */
@@ -750,7 +738,6 @@
 }
 .pro-app .editor-transcript .subtitle-table-header h3 small { margin-left: 6px; color: var(--text-3); font-size: 11px; font-weight: 500; }
 .pro-app .editor-transcript .table-header-right .btn[aria-pressed="true"] { color: var(--accent); background: var(--accent-soft); border-radius: 7px; }
-.pro-app .editor-transcript .subtitle-table th.col-lock { width: 44px; font-size: 10.5px; }
 
 /* 轻量弹出菜单（<details class="popover-menu">） */
 .pro-app .popover-menu { position: relative; }
@@ -920,7 +907,7 @@
 }
 .pro-app .app-library .library-list-view .project-card:hover { transform: none; background: color-mix(in srgb, var(--surface-2) 70%, transparent); box-shadow: none; }
 .pro-app .app-library .library-list-view .project-card.active { box-shadow: inset 3px 0 var(--accent); }
-.pro-app .app-library .library-list-view .project-thumb { width: 96px; height: 54px; min-height: 54px; flex-basis: 96px; border-radius: 10px; }
+.pro-app .app-library .library-list-view .project-thumb { width: 96px; height: 54px; min-height: 54px; flex-basis: 96px; }
 .pro-app .app-library .library-list-view .project-thumb::before { display: none; }
 .pro-app .app-library .library-list-view .project-card-copy { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 12px; padding: 0 0 0 16px; }
 .pro-app .app-library .library-list-view .project-card-copy strong { grid-column: 1; }
@@ -1175,3 +1162,7 @@ html.layout-morphing::view-transition-new(root) { animation: sf-vt-in 360ms cubi
 .pro-app .task-stepper .step-success button[aria-pressed="true"] i,
 .pro-app .task-stepper .step-failed button[aria-pressed="true"] i { color: #fff; border-color: transparent; }
 .pro-app .step-panel .transcription-setup .runtime-hint { display: none; }
+
+/* 封面自带与卡片一致的上圆角：变形动画单独截取封面时也保持圆角，不会先直角再变圆 */
+.pro-app .app-library .project-thumb { border-radius: 17px 17px 0 0; }
+.pro-app .app-library .library-list-view .project-thumb { border-radius: 10px; }
