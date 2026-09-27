@@ -8,6 +8,7 @@ import re
 import shutil
 import socket
 import subprocess
+import time
 import uuid
 from collections.abc import Callable
 from importlib import import_module
@@ -384,6 +385,25 @@ def _resolve_deno_path() -> Optional[Path]:
     return runtime.path if runtime else None
 
 
+# YouTube intermittently rejects an otherwise valid media URL with HTTP 403
+# even though the format was listed; a fresh extraction mints new stream URLs
+# and often succeeds.  Retry with alternate clients that do not need a GVS PO
+# token instead of failing the task, while still never reading browser cookies
+# or loading a third-party PO token provider.
+_MEDIA_RETRY_CLIENTS = ("web_embedded", "mweb")
+
+
+def _with_player_client(options: dict, client: str) -> dict:
+    retried = dict(options)
+    extractor_args = {
+        key: dict(value) for key, value in (retried.get("extractor_args") or {}).items()
+    }
+    youtube_args = extractor_args.setdefault("youtube", {})
+    youtube_args["player_client"] = [client]
+    retried["extractor_args"] = extractor_args
+    return retried
+
+
 def _execute_youtube_operation(
     *,
     task_id: str,
@@ -399,22 +419,37 @@ def _execute_youtube_operation(
     normalized_url = normalize_youtube_url(url)
     attempts = [{"mode": "anonymous", "authenticated": False}]
     anonymous_options = {key: value for key, value in options.items() if key != "cookiesfrombrowser"}
-    try:
-        with yt_dlp.YoutubeDL(anonymous_options) as ydl:
-            info = ydl.extract_info(normalized_url, download=download)
-            task_manager.checkpoint(task_id)
-            result = resolve_result(info, ydl)
-    except TaskCancelled:
-        raise
-    except Exception as exc:
-        classified = _classify_download_error(exc, authenticated=False, stage=stage)
-        classified.details["attempts"] = attempts
-        raise classified from exc
-    return info, result, {
-        "authenticated_attempted": False,
-        "attempts": attempts,
-        "failure_stage": "",
-    }
+    candidate_options = [anonymous_options]
+    for client in _MEDIA_RETRY_CLIENTS:
+        candidate_options.append(_with_player_client(anonymous_options, client))
+        attempts.append({"mode": f"player_client={client}", "authenticated": False})
+
+    last_error: DownloadServiceError | None = None
+    for index, attempt_options in enumerate(candidate_options):
+        try:
+            with yt_dlp.YoutubeDL(attempt_options) as ydl:
+                info = ydl.extract_info(normalized_url, download=download)
+                task_manager.checkpoint(task_id)
+                result = resolve_result(info, ydl)
+            return info, result, {
+                "authenticated_attempted": False,
+                "attempts": attempts[: index + 1],
+                "failure_stage": "",
+            }
+        except TaskCancelled:
+            raise
+        except Exception as exc:
+            classified = _classify_download_error(exc, authenticated=False, stage=stage)
+            last_error = classified
+            if classified.error_code not in {"MEDIA_ACCESS_DENIED", "PO_TOKEN_REQUIRED"}:
+                break
+            if index + 1 < len(candidate_options):
+                # Give YouTube a moment before minting fresh stream URLs.
+                time.sleep(min(4, index + 1))
+    if last_error is None:  # pragma: no cover - the loop always runs once
+        raise RuntimeError("YouTube operation produced no result or error")
+    last_error.details["attempts"] = attempts[: index + 1]
+    raise last_error
 
 
 def extract_youtube_info(
@@ -537,6 +572,13 @@ def _download_options(
             "key": "FFmpegVideoRemuxer",
             "preferedformat": container,
         }],
+        # YouTube now requires a GVS PO token for the media URLs served by the
+        # default (android_vr) client, so downloads die with
+        # "HTTP Error 403: Forbidden" partway through.  The embedded player
+        # exposes the same formats without a PO token, so try it first and keep
+        # yt-dlp's default client order as the fallback for videos that are not
+        # embeddable.
+        "extractor_args": {"youtube": {"player_client": ["web_embedded", "default"]}},
     }
     if thumbnail_template:
         options["writethumbnail"] = True

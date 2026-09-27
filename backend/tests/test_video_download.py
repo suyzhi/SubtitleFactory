@@ -216,6 +216,13 @@ class DownloadQualityTests(unittest.TestCase):
             options["js_runtimes"],
             {"deno": {"path": "/app/bin/deno"}},
         )
+        # YouTube requires a GVS PO token for the default android_vr client's
+        # media URLs (HTTP 403).  The embedded player avoids that requirement,
+        # so it must lead the client order with yt-dlp's default as fallback.
+        self.assertEqual(
+            options["extractor_args"],
+            {"youtube": {"player_client": ["web_embedded", "default"]}},
+        )
 
     def test_media_stream_403_does_not_read_browser_credentials(self):
         captured_options = []
@@ -258,6 +265,7 @@ class DownloadQualityTests(unittest.TestCase):
                 ),
                 patch.object(downloader.task_manager, "update_task"),
                 patch.object(downloader.task_manager, "checkpoint"),
+                patch.object(downloader.time, "sleep"),
                 patch.object(downloader, "_probe_media", return_value={
                     "duration": 60, "container": "mp4", "format_name": "mp4",
                     "video_codec": "av1", "audio_codec": "opus", "file_size": 19,
@@ -269,8 +277,72 @@ class DownloadQualityTests(unittest.TestCase):
                         "project-id", download_dir=folder,
                     )
         self.assertFalse((Path(folder) / "project-id" / ".download-task-id").exists())
-        self.assertEqual(len(captured_options), 1)
-        self.assertNotIn("cookiesfrombrowser", captured_options[0])
+        # The transient 403 is retried with alternate PO-token-free clients,
+        # so every attempt must still be anonymous (no browser cookies).
+        self.assertEqual(len(captured_options), 3)
+        for options in captured_options:
+            self.assertNotIn("cookiesfrombrowser", options)
+
+    def test_transient_media_403_retries_with_another_client(self):
+        captured_clients = []
+
+        class FakeYoutubeDL:
+            def __init__(self, options):
+                self.options = options
+                captured_clients.append(
+                    (options.get("extractor_args") or {}).get("youtube", {}).get("player_client")
+                )
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def extract_info(self, _url, download):
+                # The primary attempt 403s; the web_embedded retry recovers.
+                if len(captured_clients) == 1:
+                    raise downloader.yt_dlp.utils.DownloadError(
+                        "ERROR: unable to download video data: HTTP Error 403: Forbidden"
+                    )
+                project_dir = Path(self.options["outtmpl"]["default"]).parent
+                final_video = project_dir / "recovered.mp4"
+                final_video.write_bytes(b"recovered-video")
+                return {
+                    "id": "video-id",
+                    "title": "Recovered",
+                    "filepath": str(final_video),
+                }
+
+            def prepare_filename(self, info):
+                return info["filepath"]
+
+        with tempfile.TemporaryDirectory() as folder:
+            with (
+                patch.object(downloader.yt_dlp, "YoutubeDL", FakeYoutubeDL),
+                patch.object(
+                    downloader,
+                    "resolve_ffmpeg_path",
+                    return_value=SimpleNamespace(path=Path("/app/bin/ffmpeg"), source="bundled"),
+                ),
+                patch.object(downloader.task_manager, "update_task"),
+                patch.object(downloader.task_manager, "checkpoint"),
+                patch.object(downloader.time, "sleep"),
+                patch.object(downloader, "_probe_media", return_value={
+                    "duration": 60, "container": "mp4", "format_name": "mp4",
+                    "video_codec": "av1", "audio_codec": "opus", "file_size": 15,
+                }),
+            ):
+                result = downloader.download_video(
+                    "task-id", "https://www.youtube.com/watch?v=video-id",
+                    "project-id", download_dir=folder,
+                )
+
+        self.assertTrue(Path(result).name.startswith("video-video-id-"))
+        # Primary attempt plus one web_embedded retry, no cookies required.
+        self.assertEqual(len(captured_clients), 2)
+        self.assertEqual(captured_clients[0], ["web_embedded", "default"])
+        self.assertEqual(captured_clients[1], ["web_embedded"])
 
     def test_quality_limit_and_container_settings_change_yt_dlp_options(self):
         limited = downloader._download_options(
