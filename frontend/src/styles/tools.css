@@ -1184,3 +1184,18 @@
   border-color: transparent;
 }
 .pro-app .step-panel .transcription-setup .runtime-hint { display: none; }
+
+/* 工具面板内的质检与术语：去掉页面级缩进，空状态更紧凑 */
+.pro-app .workspace-tool-panel .quality-task-page { padding: 16px 18px 20px; }
+.pro-app .workspace-tool-panel .quality-panel > header { flex-wrap: wrap; gap: 12px; margin-bottom: 14px; }
+.pro-app .workspace-tool-panel .quality-panel > header h2 { font-size: 19px; }
+.pro-app .workspace-tool-panel .quality-panel > header p { font-size: 12.5px; }
+.pro-app .workspace-tool-panel .quality-summary button { padding: 10px 14px; border-color: var(--border-soft); }
+.pro-app .workspace-tool-panel .quality-summary strong { font-size: 20px; }
+.pro-app .workspace-tool-panel :is(.quality-empty, .glossary-panel .quality-empty) { min-height: 96px; gap: 4px; padding: 18px; }
+.pro-app .workspace-tool-panel .quality-empty strong { font-size: 13.5px; }
+.pro-app .workspace-tool-panel .quality-empty span { font-size: 12px; }
+.pro-app .workspace-tool-panel .glossary-panel { padding: 16px; border-color: var(--border-soft); border-radius: 16px; box-shadow: var(--shadow-card); }
+.pro-app .workspace-tool-panel .quality-page-grid { gap: 14px; }
+.pro-app .workspace-tool-panel .smart-tool-card { border-color: var(--border-soft); box-shadow: var(--shadow-card); }
+.pro-app .workspace-tool-panel .smart-tool-card h2 { font-size: 19px; }

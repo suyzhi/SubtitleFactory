@@ -1,4 +1,3 @@
-import SettingsCenter from './components/SettingsCenter';
 import {AppSelectThemeContext} from './components/AppSelect';
 import {revealTheme} from './themeTransition';
 import OverlayDialog from './components/OverlayDialog';
@@ -89,6 +88,8 @@ const ProductionCenter = lazy(() => import('./components/ProductionCenter'));
 const PlaylistBatchDialog = lazy(() => import('./components/PlaylistBatchDialog'));
 
 const ContentCenter = lazy(() => import('./components/ContentCenter'));
+// Settings are opened occasionally; loading them on demand keeps the startup bundle lean.
+const SettingsCenter = lazy(() => import('./components/SettingsCenter'));
 
 const DEFAULT_CONFIG: ProcessingConfig = {
   model: 'auto', language: 'auto', target_language: 'zh',
@@ -2573,9 +2574,9 @@ function App() {
       {renameProjectState && <div className="modal-backdrop" onMouseDown={() => setRenameProjectState(null)}><form className="rename-dialog" onMouseDown={event => event.stopPropagation()} onSubmit={event => { event.preventDefault(); void saveRename(); }}><header><div><h2>重命名项目</h2><p>媒体与字幕文件不会移动。</p></div><button type="button" aria-label="关闭" onClick={() => setRenameProjectState(null)}>×</button></header><input autoFocus maxLength={120} value={renameDraft} onChange={event => setRenameDraft(event.target.value)} onKeyDown={event => { if (event.key === 'Escape') setRenameProjectState(null); }}/><footer><button type="button" className="button secondary" onClick={() => setRenameProjectState(null)}>取消</button><button className="button primary" disabled={!renameDraft.trim()}>保存</button></footer></form></div>}
       {dragActive && <div className="drop-overlay"><div><span>⇩</span><strong>松开以导入视频</strong><small>支持 MP4、MKV、MOV、WebM 和 AVI</small></div></div>}
       {toast && <div className="studio-toast" role="status" aria-live="polite"><span>✓</span>{toast}</div>}
-      {showAISettings && <>
+      {showAISettings && <Suspense fallback={<DeferredPanel kind="overlay" label="正在打开设置…"/>}>
         <SettingsCenter open onClose={() => setShowAISettings(false)} returnFocusRef={settingsButtonRef} config={config} onConfigChange={setConfig} appSettings={appSettings} onAppSettingsChange={applyAppSettings} onAIProvidersChange={setAIProviderState} theme={theme} onThemeChange={changeTheme} motionEnabled={motionEnabled} onMotionEnabledChange={setMotionEnabled} health={health} onRefreshHealth={refreshHealth} modelStatus={modelStatus} onRefreshModels={refreshModels} onOpenLogs={() => { setToolsTab('process'); setToolsOpen(true); setShowProjectWorkspace(!!activeProject); setInspectorMode(null); }}/>
-      </>}
+      </Suspense>}
     </div></AppSelectThemeContext.Provider>
   );
 }

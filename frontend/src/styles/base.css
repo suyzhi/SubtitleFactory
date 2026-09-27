@@ -423,3 +423,15 @@ html.layout-morphing::view-transition-old(*), html.layout-morphing::view-transit
 html.layout-morphing::view-transition-group(root) { animation: none; }
 html.layout-morphing::view-transition-old(root) { animation: sf-vt-out 180ms ease both; }
 html.layout-morphing::view-transition-new(root) { animation: sf-vt-in 360ms cubic-bezier(.2, .9, .25, 1) 60ms both; }
+
+/* 所有折叠区统一使用居中的 CSS 箭头（替代浏览器原生 ▶）。:where() 让组件自己的样式始终优先。 */
+:where(.pro-app, .settings-backdrop) :where(details:not(.popover-menu, .playlist-batch-more, .provider-card, .model-category)) > summary {
+  display: flex; align-items: center; gap: 8px; list-style: none; cursor: pointer;
+}
+:where(.pro-app, .settings-backdrop) :where(details:not(.popover-menu, .playlist-batch-more, .provider-card, .model-category)) > summary::-webkit-details-marker { display: none; }
+:where(.pro-app, .settings-backdrop) :where(details:not(.popover-menu, .playlist-batch-more, .provider-card, .model-category)) > summary::before {
+  content: ''; flex: none; width: 6px; height: 6px;
+  border: solid currentColor; border-width: 0 1.5px 1.5px 0;
+  transform: translateX(-1px) rotate(-45deg); transition: transform .3s var(--ease-spring, ease);
+}
+:where(.pro-app, .settings-backdrop) :where(details[open]:not(.popover-menu, .playlist-batch-more, .provider-card, .model-category)) > summary::before { transform: translateY(-2px) rotate(45deg); }

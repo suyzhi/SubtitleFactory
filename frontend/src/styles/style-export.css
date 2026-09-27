@@ -322,3 +322,22 @@
 .pro-app .export-options.export-package { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
 .pro-app .export-options.export-package > p { flex: 1 1 100%; }
 .pro-app .export-task-card { max-width: 760px; border-radius: 16px; box-shadow: var(--shadow-card); }
+
+/* 导出格式卡片 */
+.pro-app .export-format-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+.pro-app .export-format-cards button {
+  position: relative; display: grid; gap: 4px; min-height: 84px; padding: 14px 16px 14px 16px;
+  border: 1px solid var(--border-soft); border-radius: 14px; background: var(--surface-2);
+  color: var(--text); text-align: left; cursor: pointer;
+  transition: border-color .2s ease, background-color .2s ease, box-shadow .2s ease, transform .35s var(--ease-spring);
+}
+.pro-app .export-format-cards button:hover { border-color: color-mix(in srgb, var(--accent) 35%, var(--border)); transform: translateY(-1px); }
+.pro-app .export-format-cards button.selected { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 7%, var(--surface)); box-shadow: 0 0 0 3px var(--accent-soft); }
+.pro-app .export-format-cards button::after {
+  content: ''; position: absolute; top: 14px; right: 14px; width: 16px; height: 16px; border-radius: 50%;
+  border: 1.5px solid var(--border); background: var(--surface);
+  transition: border-color .2s ease, box-shadow .2s ease;
+}
+.pro-app .export-format-cards button.selected::after { border-color: var(--accent); box-shadow: inset 0 0 0 4px var(--surface), inset 0 0 0 9px var(--accent); }
+.pro-app .export-format-cards strong { font-size: 15px; font-weight: 700; letter-spacing: .01em; }
+.pro-app .export-format-cards small { padding-right: 18px; color: var(--text-2); font-size: 12px; line-height: 1.5; }
