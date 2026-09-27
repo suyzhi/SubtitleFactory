@@ -6,7 +6,7 @@
     "component": {
       "type": "application",
       "name": "subtitle-factory",
-      "version": "0.6.0"
+      "version": "0.6.1"
     }
   },
   "components": [
@@ -130,8 +130,8 @@
     {
       "type": "library",
       "name": "app",
-      "version": "0.6.0",
-      "purl": "pkg:cargo/app@0.6.0"
+      "version": "0.6.1",
+      "purl": "pkg:cargo/app@0.6.1"
     },
     {
       "type": "library",
