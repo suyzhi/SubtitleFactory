@@ -1032,3 +1032,146 @@ html.layout-morphing::view-transition-new(root) { animation: sf-vt-in 360ms cubi
 .pro-app .library-stats .library-runtime-card strong { font-size: 14px; }
 .pro-app .library-stats .library-runtime-card strong::before { align-self: center; }
 .pro-app .topbar-button .control-icon { width: 15px; height: 15px; color: var(--accent); }
+
+/* ══ 任务与工具面板 ═════════════════════════════════════════════════════ */
+.pro-app .workspace-tool-panel > header { gap: 12px; }
+.pro-app .workspace-panel-actions { display: inline-flex; align-items: center; gap: 6px; }
+.pro-app .panel-link {
+  display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px;
+  border: 0; border-radius: 8px; background: transparent; color: var(--text-2); font-size: 12px; cursor: pointer;
+  transition: background-color .15s ease, color .15s ease;
+}
+.pro-app .panel-link:hover { background: color-mix(in srgb, var(--text-3) 12%, transparent); color: var(--text); }
+.pro-app .panel-link b { min-width: 18px; padding: 1px 6px; border-radius: 999px; background: var(--accent); color: #fff; font-size: 10.5px; text-align: center; }
+.pro-app .panel-close {
+  width: 30px; height: 30px; display: grid; place-items: center; padding: 0;
+  border: 0; border-radius: 50%; background: color-mix(in srgb, var(--text-3) 12%, transparent); color: var(--text-2); cursor: pointer;
+  transition: background-color .15s ease, color .15s ease, transform .3s var(--ease-spring, ease);
+}
+.pro-app .panel-close:hover { background: color-mix(in srgb, var(--text-3) 22%, transparent); color: var(--text); transform: rotate(90deg); }
+.pro-app .panel-close svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; }
+
+/* 步骤条：圆点 + 连接线 */
+.pro-app .task-stepper {
+  position: sticky; top: 0; z-index: 3;
+  display: grid; grid-template-columns: repeat(5, minmax(0, 1fr));
+  margin: 0; padding: 12px 10px 14px; list-style: none;
+  border-bottom: 1px solid var(--border-soft);
+  background: color-mix(in srgb, var(--elevated) 94%, transparent);
+  backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+}
+.pro-app .task-stepper li { position: relative; min-width: 0; }
+.pro-app .task-stepper li + li::before {
+  content: ''; position: absolute; top: 15px; left: calc(-50% + 20px); right: calc(50% + 20px);
+  height: 2px; border-radius: 2px; background: var(--border);
+}
+.pro-app .task-stepper li.step-success + li::before { background: color-mix(in srgb, var(--green) 55%, var(--border)); }
+.pro-app .task-stepper button {
+  width: 100%; display: grid; justify-items: center; gap: 3px; padding: 0 2px;
+  border: 0; background: transparent; color: var(--text-2); cursor: pointer;
+}
+.pro-app .task-stepper i {
+  width: 30px; height: 30px; display: grid; place-items: center; margin-bottom: 3px;
+  border: 1.5px solid var(--border); border-radius: 50%; background: var(--surface);
+  color: var(--text-3); font: 600 12px var(--font); font-style: normal; font-variant-numeric: tabular-nums;
+  transition: transform .35s var(--ease-spring, ease), box-shadow .2s ease, border-color .2s ease, background-color .2s ease;
+}
+.pro-app .task-stepper i svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.pro-app .task-stepper strong { font-size: 12.5px; font-weight: 600; color: var(--text); }
+.pro-app .task-stepper small { font-size: 11px; color: var(--text-3); }
+.pro-app .task-stepper button:hover i { transform: translateY(-1px) scale(1.06); border-color: color-mix(in srgb, var(--accent) 40%, var(--border)); }
+.pro-app .task-stepper button[aria-pressed="true"] i { border-color: var(--accent); box-shadow: 0 0 0 4px var(--accent-soft); color: var(--accent); }
+.pro-app .task-stepper button[aria-pressed="true"] strong { color: var(--accent); }
+.pro-app .task-stepper .step-success i { border-color: transparent; background: var(--green); color: #fff; }
+.pro-app .task-stepper .step-success small { color: var(--green); }
+.pro-app .task-stepper .step-failed i { border-color: transparent; background: var(--red); color: #fff; }
+.pro-app .task-stepper .step-failed small { color: var(--red); }
+.pro-app .task-stepper .step-running i, .pro-app .task-stepper .step-paused i {
+  border-color: color-mix(in srgb, var(--accent) 25%, var(--border)); border-top-color: var(--accent);
+  animation: sf-spin .9s linear infinite;
+}
+.pro-app .task-stepper .step-paused i { animation-play-state: paused; }
+.pro-app .task-stepper .step-running small { color: var(--accent); }
+
+/* 运行中的任务 */
+.pro-app .task-live {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px 12px;
+  margin: 14px 16px 0; padding: 12px 14px;
+  border: 1px solid color-mix(in srgb, var(--accent) 25%, var(--border-soft)); border-radius: 14px;
+  background: color-mix(in srgb, var(--accent) 6%, var(--surface));
+  animation: sf-fade-up .35s var(--ease-out, ease);
+}
+.pro-app .task-live-copy { min-width: 0; display: flex; align-items: baseline; gap: 8px; }
+.pro-app .task-live-copy strong { overflow: hidden; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.pro-app .task-live-copy small { color: var(--accent); font: 600 12px var(--mono); }
+.pro-app .task-live progress { grid-column: 1 / -1; grid-row: 2; width: 100%; height: 6px; appearance: none; border: 0; border-radius: 6px; overflow: hidden; background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.pro-app .task-live progress::-webkit-progress-bar { background: transparent; }
+.pro-app .task-live progress::-webkit-progress-value {
+  border-radius: 6px;
+  background: repeating-linear-gradient(-45deg, var(--accent) 0 8px, color-mix(in srgb, var(--accent) 80%, white) 8px 16px);
+  background-size: 32px 100%;
+  animation: sf-stripes 1s linear infinite;
+}
+.pro-app .task-live.paused progress::-webkit-progress-value { animation: none; background: var(--yellow); }
+.pro-app .task-live-actions { display: inline-flex; gap: 6px; }
+.pro-app .task-live-actions button { height: 28px; padding: 0 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--text); font-size: 12px; cursor: pointer; }
+.pro-app .task-live-actions button.danger { color: var(--red); border-color: color-mix(in srgb, var(--red) 35%, var(--border)); }
+.pro-app .task-inline-status { margin: 12px 16px 0; padding: 9px 12px; border: 0; border-radius: 10px; background: var(--surface-2); color: var(--text-2); }
+.pro-app .task-inline-status.failed { background: color-mix(in srgb, var(--red) 9%, var(--surface)); color: var(--red); }
+.pro-app .task-inline-status.success { background: color-mix(in srgb, var(--green) 10%, var(--surface)); color: var(--green); }
+
+/* 每一步：去掉卡片套卡片，标题 + 表单 + 吸底操作 */
+.pro-app .workspace-tool-panel .task-settings-body { padding: 4px 18px 0; }
+.pro-app .workspace-tool-panel .inspector-section.step-panel {
+  display: grid; gap: 16px; margin: 0; padding: 14px 0 0;
+  border: 0; border-radius: 0; background: transparent; box-shadow: none;
+  animation: sf-fade-up .3s var(--ease-out, ease);
+}
+.pro-app .step-heading h3 { margin: 0 0 4px; font-size: 17px; font-weight: 650; letter-spacing: -.01em; }
+.pro-app .step-heading p { margin: 0; color: var(--text-2); font-size: 12.5px; line-height: 1.55; }
+.pro-app .step-panel > label { display: grid; gap: 7px; color: var(--text); font-size: 12.5px; font-weight: 600; }
+.pro-app .step-panel .transcription-setup > label { margin: 0 0 14px; font-weight: 600; font-size: 12.5px; }
+.pro-app .step-panel .transcription-setup fieldset { margin: 0; padding: 12px; border: 1px solid var(--border-soft); border-radius: 12px; }
+.pro-app .step-panel .transcription-setup legend { padding: 0 6px; color: var(--text-2); font-size: 12px; font-weight: 600; }
+.pro-app .step-panel .transcription-setup > p { margin: 8px 0 0; color: var(--text-3); font-size: 11.5px; }
+.pro-app .step-panel .transcription-setup > .button { justify-self: start; min-height: 30px; margin-bottom: 14px; }
+.pro-app .step-panel .flow-options { padding: 12px 14px; border: 1px solid var(--border-soft); border-radius: 12px; }
+.pro-app .step-panel .flow-options > summary { display: flex; align-items: center; gap: 8px; padding: 0; list-style: none; font-size: 12.5px; font-weight: 600; }
+.pro-app .step-panel .flow-options > summary::-webkit-details-marker { display: none; }
+.pro-app .step-panel .flow-options > summary::before { content: ''; width: 6px; height: 6px; border: solid currentColor; border-width: 0 1.5px 1.5px 0; transform: translateX(-1px) rotate(-45deg); transition: transform .3s var(--ease-spring, ease); }
+.pro-app .step-panel .flow-options[open] > summary::before { transform: translateY(-2px) rotate(45deg); }
+.pro-app .step-panel .flow-options[open] > summary { margin-bottom: 10px; }
+.pro-app .step-panel .flow-options p { margin: 8px 0; color: var(--text-3); font-size: 11.5px; line-height: 1.6; }
+.pro-app .step-panel .flow-options .check-row { margin-right: 16px; font-size: 12.5px; }
+.pro-app .step-panel .ai-summary-row { padding: 12px; border: 1px solid var(--border-soft); border-radius: 12px; }
+.pro-app .step-panel .clean-length-field { grid-template-columns: 1fr auto; }
+.pro-app .step-panel .clean-length-field span { color: var(--accent); font: 600 12px var(--mono); }
+.pro-app .step-panel .clean-length-field input { grid-column: 1 / -1; }
+.pro-app .step-panel .candidate-review { margin: 0; padding: 12px 14px; border: 1px solid var(--border-soft); border-radius: 12px; }
+.pro-app .step-panel .candidate-review h3 { margin: 0 0 4px; font-size: 13px; }
+.pro-app .step-panel .candidate-review p { margin: 0 0 8px; color: var(--text-3); font-size: 11.5px; }
+.pro-app .step-actions {
+  position: sticky; bottom: 0; z-index: 2;
+  display: grid; gap: 8px; margin: 4px -18px 0; padding: 12px 18px 16px;
+  border-top: 1px solid var(--border-soft);
+  background: color-mix(in srgb, var(--elevated) 92%, transparent);
+  backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px);
+}
+.pro-app .step-actions > div { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.pro-app .step-actions .button.primary { min-height: 38px; padding: 0 22px; font-size: 13px; }
+.pro-app .step-blocker { display: flex; align-items: center; gap: 7px; margin: 0; color: var(--text-2); font-size: 12px; }
+.pro-app .step-blocker::before {
+  content: '!'; width: 16px; height: 16px; display: grid; place-items: center; flex: none;
+  border-radius: 50%; background: color-mix(in srgb, var(--yellow) 22%, transparent); color: var(--yellow);
+  font-size: 11px; font-weight: 700;
+}
+.pro-app .step-link { margin-left: auto; padding: 4px 2px; border: 0; background: transparent; color: var(--text-3); font-size: 12px; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; text-decoration-color: color-mix(in srgb, var(--text-3) 40%, transparent); }
+.pro-app .step-link:hover:not(:disabled) { color: var(--text); }
+.pro-app .workspace-tool-panel .media-mode-inspector .runtime-mini { display: flex; flex-wrap: wrap; gap: 6px; }
+.pro-app .workspace-tool-panel .media-mode-inspector .runtime-mini span { padding: 3px 9px; border-radius: 999px; background: color-mix(in srgb, var(--green) 12%, transparent); color: var(--green); font-size: 11px; }
+.pro-app .workspace-tool-panel .media-mode-inspector .runtime-mini span.error { background: color-mix(in srgb, var(--red) 10%, transparent); color: var(--red); }
+.pro-app .workspace-tool-panel .process-diagnostics { margin: 18px 16px 16px; border-color: var(--border-soft); border-radius: 12px; background: transparent; }
+.pro-app .workspace-tool-panel .recovery-card { margin: 0; border-radius: 12px; }
+.pro-app .task-stepper .step-success button[aria-pressed="true"] i,
+.pro-app .task-stepper .step-failed button[aria-pressed="true"] i { color: #fff; border-color: transparent; }
+.pro-app .step-panel .transcription-setup .runtime-hint { display: none; }

@@ -17,7 +17,7 @@ export default function TranscriptionSetup({ models, model, language, recommende
     <label>转写模型<AppSelect value={model} onChange={onModel} label="转写模型" searchable options={[{value:'auto',label:`自动推荐${model === 'auto' && selected ? ` · ${selected.name}` : ''}`,description:'按源语言推荐：自动检测时使用 Whisper Small，指定语言时优先已安装的专用模型'}, ...options.map(item => ({value:item.id,label:item.name,description:`${installed(item) ? '已安装' : '需准备'} · ${item.language_description || item.languages.join('、')}`}))]}/></label>
     <button className="button secondary" aria-expanded={more} onClick={() => setMore(value => !value)}>{more ? '只看已安装模型' : '更多模型'}</button>
     <fieldset><legend>运行设备</legend><div className="runtime-choice-grid">{selected?.runtimes?.map(option => <button key={option.id} type="button" className={runtime === option.id ? 'selected' : ''} aria-pressed={runtime === option.id} disabled={!option.available} onClick={() => onRuntime(resolved,option.id)}><span><strong>{option.name}</strong><small>{option.engine}</small><small>{option.model_ready ? '模型已就绪' : option.download_required ? '首次使用需下载模型' : option.reason}</small></span></button>)}</div></fieldset>
-    {!runtime && <p>请明确选择运行设备后开始。</p>}
+    {!runtime && <p className="runtime-hint">请明确选择运行设备后开始。</p>}
     {selected?.runtime_error && <p role="alert">{selected.runtime_error}</p>}
   </section>;
 }
