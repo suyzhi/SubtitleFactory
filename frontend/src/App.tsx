@@ -2399,7 +2399,7 @@ function App() {
             {youtubeEnabled && <button className="button secondary" disabled={backendStatus !== 'connected'} onClick={() => setShowLinkPopover(true)}>添加链接</button>}
             <button className="button primary" disabled={backendStatus !== 'connected'} onClick={handleImportLocal}>导入视频</button>
           </div></header>
-          <section className="library-overview library-stats" aria-label="项目库概览">
+          {!librarySearch.trim() && (projects.length > 0 || backendStatus !== 'connected') && <section className="library-overview library-stats" aria-label="项目库概览">
             <div title="当前筛选条件下的项目，全部保存在本机"><strong><AnimatedNumber value={libraryTotal} animate={motionEnabled}/></strong><span>个项目</span></div>
             <div title="本页项目的字幕总数，可在上方搜索框全文搜索"><strong><AnimatedNumber value={projects.reduce((total, project) => total + Number(project.segments_count || 0), 0)} animate={motionEnabled}/></strong><span>条字幕</span></div>
             {youtubeEnabled
@@ -2407,7 +2407,7 @@ function App() {
               : <div title="第三方媒体读取已关闭"><strong>本地优先</strong><span>隐私模式</span></div>}
             {trashProjects.length > 0 && <div><strong>{trashProjects.length}</strong><span>个在回收站</span></div>}
             {backendStatus !== 'connected' && <div className={`library-runtime-card ${backendStatus}`}><strong>{backendStatus === 'connecting' ? '引擎启动中' : '引擎需检查'}</strong><span>{backendStatus === 'connecting' ? '正在载入本机运行时' : '本地功能受限，请在设置中查看诊断'}</span></div>}
-          </section>
+          </section>}
           <div ref={libraryTabsRef} className="library-switcher sliding-tabs" role="tablist" aria-label="项目库视图">
             <button role="tab" aria-selected={libraryView === 'projects'} className={libraryView === 'projects' ? 'active' : ''} onClick={() => setLibraryView('projects')}>项目</button>
             <button role="tab" aria-selected={libraryView === 'trash'} className={libraryView === 'trash' ? 'active' : ''} onClick={() => setLibraryView('trash')}>回收站</button>
@@ -2483,7 +2483,20 @@ function App() {
               </section>;
             })}
             {libraryView === 'projects' && backendStatus === 'connecting' && !projects.length && !playlistBatches.length && <div className="library-skeleton" aria-label="正在载入项目"><i/><i/><i/></div>}
-            {libraryView === 'projects' && backendStatus !== 'connecting' && !projects.length && !playlistBatches.length && <div className="project-empty"><span>▱</span><strong>还没有项目</strong><small>{youtubeEnabled ? '导入视频、拖放文件或粘贴链接开始。' : '导入或拖放本地视频开始。'}</small></div>}
+            {libraryView === 'projects' && backendStatus !== 'connecting' && !projects.length && !playlistBatches.length && (librarySearch.trim()
+              ? <div className="search-empty">没有名称匹配的项目</div>
+              : <section className="library-welcome" aria-label="开始第一个项目">
+                <button type="button" className="welcome-drop" onClick={handleImportLocal} disabled={backendStatus !== 'connected'}>
+                  <svg viewBox="0 0 48 48" aria-hidden="true"><rect x="6" y="10" width="36" height="28" rx="6"/><path d="M20 19.5v9l7.5-4.5z" fill="currentColor"/><path d="M6 17h36M6 31h36" opacity=".35"/></svg>
+                  <strong>把视频拖到这里，或点击导入</strong>
+                  <small>支持 MP4、MOV、MKV、WebM 和 AVI，文件只保存在这台 Mac 上{youtubeEnabled ? '；也可以用上方的“添加链接”' : ''}</small>
+                </button>
+                <ol className="welcome-steps">
+                  <li><b>1</b><strong>导入视频</strong><small>本地文件{youtubeEnabled ? '或视频链接' : ''}</small></li>
+                  <li><b>2</b><strong>生成字幕</strong><small>在本机转写，自动对齐时间轴</small></li>
+                  <li><b>3</b><strong>校对与导出</strong><small>SRT、ASS 或带字幕的视频</small></li>
+                </ol>
+              </section>)}
             {libraryView === 'trash' && trashProjects.slice(0,40).map(project => <button className={`project-card trash-card ${removingProjectIds.has(project.id) ? 'removing' : ''}`} key={project.id} onContextMenu={event => openProjectMenu(event, project, true)} onClick={event => openProjectMenu(event, project, true)}>
               <span className="project-thumb"><span className="project-thumb-fallback">♲</span></span><span className="project-card-copy"><strong>{project.title}</strong><small>{project.deleted_at?.slice(0, 10) || '已删除'} · 媒体仍保留</small></span><span className="project-more">•••</span>
             </button>)}

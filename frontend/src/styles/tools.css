@@ -695,6 +695,12 @@
 .clip-candidate-card > header em { margin-left: auto; color: #c66552; font-size: 10px; font-style: normal; }
 .clip-candidate-card > p { margin: 0; color: var(--text-2); font-size: 11px; line-height: 1.5; }
 
+/* 工具面板只有约 600px 宽：发布包列表横向滚动，编辑区独占整行（与窄窗口一致） */
+.workspace-tool-panel .content-pack-layout { grid-template-columns: minmax(0, 1fr); min-height: 0; }
+.workspace-tool-panel .content-collection-list { display: flex; overflow-x: auto; }
+.workspace-tool-panel .content-collection-list > header { min-width: 110px; }
+.workspace-tool-panel .content-collection-list > p { min-width: 250px; }
+
 @media (max-width: 1250px) {
   .content-pack-layout { grid-template-columns: minmax(0, 1fr); }
   .content-collection-list { display: flex; overflow-x: auto; }

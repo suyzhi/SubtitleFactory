@@ -1579,3 +1579,75 @@ html.layout-morphing .app-library *::after {
 
 /* 属于「editor」，为保持层叠顺序放在这里 */
 .pro-app .editor-layout-menu > div { gap: 12px; padding: 14px; min-width: 280px; }
+
+/* ── 导入弹窗 ─────────────────────────────────────────────────────── */
+.pro-app .import-flow { width: min(600px, 94vw); display: grid; gap: 18px; padding: 24px 26px 22px; }
+.pro-app .import-flow > header { align-items: flex-start; }
+.pro-app .import-flow > header small { color: var(--accent); font-size: 11px; font-weight: 700; letter-spacing: .12em; }
+.pro-app .import-flow > header h2 { margin: 4px 0 0; font-size: 21px; font-weight: 650; letter-spacing: -.01em; }
+.pro-app .import-files { display: grid; gap: 8px; max-height: 172px; margin: 0; padding: 0; overflow: auto; list-style: none; }
+.pro-app .import-files li {
+  display: flex; align-items: center; gap: 12px; padding: 10px 12px;
+  border: 1px solid var(--border-soft); border-radius: 12px; background: var(--surface-2);
+}
+.pro-app .import-files svg { width: 34px; height: 34px; flex: none; padding: 6px; border-radius: 9px; background: var(--accent-soft); color: var(--accent); fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linejoin: round; }
+.pro-app .import-files span { min-width: 0; display: grid; gap: 2px; }
+.pro-app .import-files strong { overflow: hidden; font-size: 13.5px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.pro-app .import-files small { color: var(--text-3); font-size: 12px; font-variant-numeric: tabular-nums; }
+.pro-app .import-setup .transcription-setup > label { margin: 0 0 14px; color: var(--text); font-size: 12.5px; font-weight: 600; }
+.pro-app .import-setup .transcription-setup fieldset { margin: 0; padding: 12px; border: 1px solid var(--border-soft); border-radius: 12px; }
+.pro-app .import-setup .transcription-setup legend { padding: 0 6px; color: var(--text-2); font-size: 12px; font-weight: 600; }
+.pro-app .import-setup .transcription-setup > .button { min-height: 30px; margin-bottom: 14px; }
+.pro-app .import-setup .transcription-setup .runtime-hint { display: none; }
+.pro-app .import-setup .transcription-setup > p { margin: 8px 0 0; color: var(--text-3); font-size: 11.5px; }
+.pro-app .import-setup .flow-options { margin-top: 14px; padding: 12px 14px; border: 1px solid var(--border-soft); border-radius: 12px; }
+.pro-app .import-setup .flow-options > summary { display: flex; align-items: center; gap: 8px; padding: 0; list-style: none; font-size: 12.5px; font-weight: 600; cursor: pointer; }
+.pro-app .import-setup .flow-options > summary::-webkit-details-marker { display: none; }
+.pro-app .import-setup .flow-options > summary::before { content: ''; width: 6px; height: 6px; border: solid currentColor; border-width: 0 1.5px 1.5px 0; transform: translateX(-1px) rotate(-45deg); transition: transform .3s var(--ease-spring, ease); }
+.pro-app .import-setup .flow-options[open] > summary::before { transform: translateY(-2px) rotate(45deg); }
+.pro-app .import-setup .flow-options[open] > summary { margin-bottom: 10px; }
+.pro-app .import-setup .flow-options p { margin: 8px 0; color: var(--text-3); font-size: 11.5px; line-height: 1.6; }
+.pro-app .import-remember { color: var(--text-2); font-size: 12.5px; }
+.pro-app .import-error { margin: 0; padding: 9px 12px; border-radius: 10px; background: color-mix(in srgb, var(--red) 9%, var(--surface)); color: var(--red); font-size: 12.5px; }
+.pro-app .import-flow > footer { display: flex; align-items: center; gap: 14px; margin: 2px -26px -22px; padding: 14px 26px 18px; border-top: 1px solid var(--border-soft); }
+.pro-app .import-flow > footer > div { display: flex; gap: 8px; margin-left: auto; }
+.pro-app .import-hint { margin: 0; color: var(--text-3); font-size: 12px; }
+.pro-app .import-flow > footer .button.primary { min-height: 38px; padding: 0 20px; }
+
+/* ── 任务中心 ─────────────────────────────────────────────────────── */
+.pro-app .global-task-drawer { border-color: var(--border-soft); border-radius: 22px; }
+.pro-app .global-task-drawer > header { padding: 18px 20px 14px; border-bottom-color: var(--border-soft); }
+.pro-app .global-task-drawer > header small { font-size: 11px; }
+.pro-app .global-task-drawer > header h2 { font-size: 19px; font-weight: 650; }
+.pro-app .global-task-list { display: grid; gap: 6px; padding: 10px; }
+.pro-app .global-task-list article { gap: 6px 10px; padding: 10px 12px; border: 0; border-radius: 14px; transition: background-color .15s ease; }
+.pro-app .global-task-list article:hover { background: var(--surface-2); }
+.pro-app .global-task-main { grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 4px 12px; }
+.pro-app .task-status-icon {
+  width: 28px; height: 28px; display: grid; place-items: center; grid-row: 1 / span 2; align-self: start;
+  border-radius: 50%; background: var(--surface-3); color: var(--text-3); font-size: 13px; font-style: normal; font-weight: 700;
+}
+.pro-app .global-task-list article.success .task-status-icon { background: color-mix(in srgb, var(--green) 16%, transparent); color: var(--green); }
+.pro-app .global-task-list article.failed .task-status-icon { background: color-mix(in srgb, var(--red) 14%, transparent); color: var(--red); }
+.pro-app .global-task-list article.paused .task-status-icon { background: color-mix(in srgb, var(--yellow) 18%, transparent); color: var(--yellow); }
+.pro-app .global-task-list article:is(.running, .pending) .task-status-icon {
+  border: 2px solid color-mix(in srgb, var(--accent) 22%, transparent); border-top-color: var(--accent); background: transparent;
+  animation: sf-spin .9s linear infinite;
+}
+.pro-app .global-task-main strong { font-size: 13.5px; font-weight: 600; }
+.pro-app .global-task-main small { font-size: 12px; }
+.pro-app .global-task-main em { display: grid; justify-items: end; gap: 2px; color: var(--text-2); font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.pro-app .global-task-list article.failed .global-task-main em { color: var(--red); }
+.pro-app .global-task-list article.success .global-task-main em { color: var(--green); }
+.pro-app .global-task-list article:is(.running, .pending) .global-task-main em { color: var(--accent); }
+.pro-app .global-task-main em time { color: var(--text-3); font-size: 11px; font-weight: 400; }
+.pro-app .global-task-main progress { grid-column: 2 / -1; height: 5px; appearance: none; border: 0; border-radius: 5px; overflow: hidden; background: var(--surface-3); }
+.pro-app .global-task-main progress::-webkit-progress-bar { background: transparent; }
+.pro-app .global-task-main progress::-webkit-progress-value { border-radius: 5px; background: var(--accent); transition: width .4s var(--ease-out, ease); }
+.pro-app .global-task-list article > div:empty { display: none; }
+.pro-app .global-task-list article > div { padding-left: 40px; }
+.pro-app .global-task-list article > div button { height: 28px; padding: 0 11px; border-radius: 8px; font-size: 12px; }
+.pro-app .global-task-failure { margin-left: 40px; }
+.pro-app .global-task-empty { display: grid; gap: 4px; padding: 40px 20px; color: var(--text-3); text-align: center; }
+.pro-app .global-task-empty strong { color: var(--text-2); font-size: 14px; }
+.pro-app .global-task-empty span { font-size: 12px; }

@@ -1246,3 +1246,68 @@ html.layout-morphing .app-library .project-card-shell[data-morph] .project-thumb
   flex-basis: 96px;
   border-radius: 10px;
 }
+
+/* 新用户：可点击、可拖放的导入区 + 三步说明 */
+.pro-app .library-welcome { display: grid; gap: 18px; animation: sf-rise 560ms var(--ease-out) backwards; }
+.pro-app .welcome-drop {
+  min-height: 260px; display: grid; place-content: center; justify-items: center; gap: 10px; padding: 32px;
+  border: 1.5px dashed color-mix(in srgb, var(--accent) 35%, var(--border)); border-radius: 24px;
+  background:
+    radial-gradient(420px 220px at 50% 0%, color-mix(in srgb, var(--accent) 7%, transparent), transparent 70%),
+    color-mix(in srgb, var(--surface) 70%, transparent);
+  color: var(--text); text-align: center; cursor: pointer;
+  transition: border-color .2s ease, background-color .2s ease, transform .4s var(--ease-spring);
+}
+.pro-app .welcome-drop:hover:not(:disabled) { border-color: var(--accent); transform: translateY(-2px); }
+.pro-app .welcome-drop:hover:not(:disabled) svg { transform: translateY(-3px) scale(1.04); }
+.pro-app .welcome-drop svg {
+  width: 64px; height: 64px; margin-bottom: 6px; padding: 12px; border-radius: 20px;
+  background: var(--accent-soft); color: var(--accent);
+  fill: none; stroke: currentColor; stroke-width: 2; stroke-linejoin: round;
+  transition: transform .45s var(--ease-spring);
+}
+.pro-app .welcome-drop strong { font-size: 18px; font-weight: 650; letter-spacing: -.01em; }
+.pro-app .welcome-drop small { max-width: 460px; color: var(--text-2); font-size: 13px; line-height: 1.6; }
+.pro-app .welcome-steps { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 0; padding: 0; list-style: none; }
+.pro-app .welcome-steps li {
+  display: grid; grid-template-columns: auto minmax(0, 1fr); column-gap: 12px; row-gap: 2px; align-items: center;
+  padding: 16px 18px; border: 1px solid var(--border-soft); border-radius: 16px; background: var(--surface); box-shadow: var(--shadow-card);
+}
+.pro-app .welcome-steps b {
+  grid-row: 1 / span 2; width: 30px; height: 30px; display: grid; place-items: center;
+  border-radius: 50%; background: var(--surface-2); color: var(--accent); font-size: 13px; font-weight: 700;
+}
+.pro-app .welcome-steps strong { font-size: 14px; font-weight: 650; }
+.pro-app .welcome-steps small { color: var(--text-3); font-size: 12px; }
+.pro-app .app-library .search-empty { padding: 18px 4px; color: var(--text-3); font-size: 13px; }
+
+/* 搜索框的清除按钮：统一成圆形灰色图标，不用系统蓝色 */
+.pro-app .app-library .library-filters input::-webkit-search-cancel-button {
+  -webkit-appearance: none; appearance: none; width: 18px; height: 18px; border-radius: 50%; cursor: pointer;
+  background: color-mix(in srgb, var(--text-3) 30%, transparent) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 8 8'%3E%3Cpath d='M1.5 1.5l5 5M6.5 1.5l-5 5' stroke='white' stroke-width='1.4' stroke-linecap='round'/%3E%3C/svg%3E") no-repeat center;
+}
+
+/* 全文搜索结果：更易读的层级，“打开”只在悬停时强调 */
+.pro-app .subtitle-search-hits > button {
+  min-height: 0; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: start; gap: 12px;
+  padding: 14px 16px; border: 1px solid var(--border-soft); background: var(--surface); box-shadow: var(--shadow-card);
+  color: var(--text); text-align: left; cursor: pointer;
+}
+.pro-app .subtitle-search-hits > button:hover,
+.pro-app .subtitle-search-hits > button.selected { border-color: color-mix(in srgb, var(--accent) 35%, var(--border)); box-shadow: var(--shadow-raised); }
+.pro-app .subtitle-search-hits .search-hit-time { margin-top: 1px; font: 600 11.5px var(--mono); }
+.pro-app .subtitle-search-hits strong { font-size: 13.5px; font-weight: 650; }
+.pro-app .subtitle-search-hits small { margin-top: 3px; color: var(--text-3); font-size: 11.5px; }
+.pro-app .subtitle-search-hits p { margin-top: 8px; color: var(--text); font-size: 13.5px; }
+.pro-app .subtitle-search-hits em { align-self: start; margin-top: 2px; color: var(--text-3); font-size: 12px; transition: color .15s ease, transform .3s var(--ease-spring); }
+.pro-app .subtitle-search-hits > button:hover em { color: var(--accent); transform: translate(2px, -2px); }
+.pro-app .search-filter-panel { border-color: var(--border-soft); box-shadow: var(--shadow-xs); }
+.pro-app .search-filter-panel > summary { list-style: none; }
+.pro-app .search-filter-panel > summary::-webkit-details-marker { display: none; }
+.pro-app .search-filter-panel > summary::before {
+  content: ''; width: 6px; height: 6px; border: solid currentColor; border-width: 0 1.5px 1.5px 0;
+  transform: translateX(-1px) rotate(-45deg); transition: transform .3s var(--ease-spring);
+}
+.pro-app .search-filter-panel[open] > summary::before { transform: translateY(-2px) rotate(45deg); }
+.pro-app .search-filter-panel label { font-size: 11.5px; }
+.pro-app .search-result-heading strong { font-size: 15px; font-weight: 650; }
