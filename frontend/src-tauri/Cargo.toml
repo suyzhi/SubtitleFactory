@@ -27,3 +27,10 @@ tauri-plugin-dialog = "2.7.1"
 tauri-plugin-log = "2"
 uuid = { version = "1", features = ["v4"] }
 tauri-plugin-opener = "2.5.4"
+
+# Xcode 27's toolchain strips the crate metadata out of proc-macro dylibs when
+# MACOSX_DEPLOYMENT_TARGET is set (as `tauri build` does), so rustc then reports
+# "can't find crate for `ctor_proc_macro`". Build-time crates never ship, so keep
+# them unstripped; the App binary itself is still stripped.
+[profile.release.build-override]
+strip = "none"

@@ -1,19 +1,26 @@
 import { useState } from 'react';
 import * as api from '../api/backend';
 import type { PlaylistBatchDetail, PlaylistBatchItem, Project } from '../types';
+import { isPlaylistBatchActive } from '../utils/playlist';
 
 interface Props {
   batches: PlaylistBatchDetail[];
   search: string;
-  collapsed: Set<string>;
+  /** Explicit open/closed choices; batches without one are open only while they are still working. */
+  open: Record<string, boolean>;
   workflow: Record<string, unknown>;
-  onToggle: (id: string) => void;
+  onToggle: (id: string, open: boolean) => void;
   onOpenProject: (project: Project) => void;
   onChanged: () => void;
   onMessage: (message: string) => void;
 }
 
 const stageLabels = { download: '下载', extract_audio: '音频', transcribe: '转写', clean: '整理', translate: '翻译' } as const;
+const itemStatusLabels: Record<string, string> = {
+  success: '已完成', running: '处理中', pending: '等待中', paused: '已暂停',
+  partial: '部分完成', failed: '失败', cancelled: '已取消', unavailable: '不可用',
+};
+const RETRYABLE = ['failed', 'partial', 'cancelled'];
 
 function visibleItems(batch: PlaylistBatchDetail, search: string) {
   const query = search.trim().toLocaleLowerCase();
@@ -21,7 +28,7 @@ function visibleItems(batch: PlaylistBatchDetail, search: string) {
   return batch.items.filter(item => item.title.toLocaleLowerCase().includes(query));
 }
 
-export default function PlaylistBatchGroups({ batches, search, collapsed, workflow, onToggle, onOpenProject, onChanged, onMessage }: Props) {
+export default function PlaylistBatchGroups({ batches, search, open, workflow, onToggle, onOpenProject, onChanged, onMessage }: Props) {
   const matching = batches.map(detail => ({ detail, items: visibleItems(detail, search) })).filter(value => value.items.length);
   const [deleteTarget, setDeleteTarget] = useState<{ id: string; title: string; itemCount: number } | null>(null);
   const [deletePhrase, setDeletePhrase] = useState('');
@@ -65,21 +72,26 @@ export default function PlaylistBatchGroups({ batches, search, collapsed, workfl
     <div className="playlist-batch-section-title"><span>播放列表批量任务</span><small>{matching.length}</small></div>
     {matching.map(({ detail, items }) => {
       const batch = detail.batch;
-      const isCollapsed = collapsed.has(batch.id) && !search.trim();
+      const isCollapsed = !(open[batch.id] ?? isPlaylistBatchActive(batch.status)) && !search.trim();
+      // The backend's failed_count leaves out cancelled items, which still need a retry.
+      const needsAttention = detail.items.filter(item => item.source_state !== 'removed'
+        && (RETRYABLE.includes(item.status) || item.status === 'unavailable')).length;
+      const retryable = detail.items.filter(item => item.source_state !== 'removed' && RETRYABLE.includes(item.status)).length;
       return <article className={`playlist-batch-group status-${batch.status}`} key={batch.id}>
         <header>
-          <button className="playlist-batch-toggle" aria-expanded={!isCollapsed} onClick={() => onToggle(batch.id)}>
+          <button className="playlist-batch-toggle" aria-expanded={!isCollapsed} onClick={() => onToggle(batch.id, isCollapsed)}>
             <span className="playlist-batch-cover">{batch.thumbnail_url ? <img src={batch.thumbnail_url} alt=""/> : '▶'}</span>
-            <span><strong>{batch.title}</strong><small>{batch.channel || 'YouTube'} · {batch.completed_count}/{batch.item_count} 完成{batch.failed_count ? ` · ${batch.failed_count} 项需处理` : ''}</small><i><b style={{ width: `${batch.progress}%` }}/></i></span>
+            <span><strong>{batch.title}</strong><small>{batch.channel || 'YouTube'} · {batch.completed_count}/{batch.item_count} 完成{needsAttention ? ` · ${needsAttention} 项需处理` : ''}</small><i><b style={{ width: `${batch.progress}%` }}/></i></span>
             <em>{Math.round(batch.progress)}%</em><u className={`chevron ${isCollapsed ? 'collapsed' : ''}`} aria-hidden="true"/>
           </button>
           <div className="playlist-batch-actions">
-            {batch.status === 'paused' ? <button onClick={() => void act('批次已继续', () => api.resumePlaylistBatch(batch.id))}>继续</button> : <button disabled={!['running','pending'].includes(batch.status)} onClick={() => void act('批次已暂停', () => api.pausePlaylistBatch(batch.id))}>暂停</button>}
-            {!!batch.failed_count && <button className="attention" onClick={() => void act('已提交失败项重试', () => api.retryPlaylistBatch(batch.id))}>重试 {batch.failed_count} 项</button>}
+            {batch.status === 'paused' ? <button onClick={() => void act('批次已继续', () => api.resumePlaylistBatch(batch.id))}>继续</button>
+              : isPlaylistBatchActive(batch.status) && <button onClick={() => void act('批次已暂停', () => api.pausePlaylistBatch(batch.id))}>暂停</button>}
+            {!!retryable && <button className="attention" onClick={() => void act('已提交失败项重试', () => api.retryPlaylistBatch(batch.id))}>重试 {retryable} 项</button>}
             <details className="playlist-batch-more">
               <summary aria-label={`更多批量操作：${batch.title}`}>•••</summary>
               <div role="menu" aria-label={`批量操作：${batch.title}`}>
-                {!batch.failed_count && <button role="menuitem" onClick={() => void act('已提交失败项重试', () => api.retryPlaylistBatch(batch.id))}>重试失败项</button>}
+                {!retryable && <button role="menuitem" onClick={() => void act('已提交失败项重试', () => api.retryPlaylistBatch(batch.id))}>重试失败项</button>}
                 <button role="menuitem" onClick={() => void act('播放列表已同步', () => api.syncPlaylistBatch(batch.id))}>同步播放列表</button>
                 <button role="menuitem" onClick={() => void act('已启动批量转写', () => api.runPlaylistStage(batch.id, 'transcribe', workflow))}>批量转写</button>
                 <button role="menuitem" onClick={() => setPendingAction({ title: '确认批量 AI 整理', message: '将把该播放列表中符合条件的字幕发送到当前 AI 整理服务，可能产生费用。', confirmLabel: '授权并开始整理', success: '已启动 AI 整理', action: () => api.runPlaylistStage(batch.id, 'clean', { ...workflow, ai_authorized: true }) })}>AI 整理…</button>
@@ -94,7 +106,7 @@ export default function PlaylistBatchGroups({ batches, search, collapsed, workfl
         {!isCollapsed && <div className="playlist-batch-items">{items.map(item => <div className={`playlist-batch-item ${item.status}`} key={item.id}>
           <button className="playlist-item-main" disabled={!item.project} onClick={() => item.project && onOpenProject(item.project)}>
             <span>{item.thumbnail_url ? <img src={item.thumbnail_url} alt="" loading="lazy"/> : item.position}</span>
-            <span><strong>{item.position}. {item.title}</strong><small>{item.source_state === 'removed' ? '已从源播放列表移除' : item.source_state === 'permission_required' ? '需要账号权限' : item.source_state === 'unavailable' ? '视频不可用' : item.status}</small>{item.error && <small className="playlist-item-error">{item.error}</small>}</span>
+            <span><strong>{item.position}. {item.title}</strong><small>{item.source_state === 'removed' ? '已从源播放列表移除' : item.source_state === 'permission_required' ? '需要账号权限' : item.source_state === 'unavailable' ? '视频不可用' : itemStatusLabels[item.status] ?? item.status}</small>{item.error && <small className="playlist-item-error">{item.error}</small>}</span>
           </button>
           <div className="playlist-stage-pills">{Object.entries(stageLabels).map(([stage, label]) => {
             const state = item.stages[stage as keyof typeof item.stages]?.status || 'skipped';

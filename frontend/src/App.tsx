@@ -71,6 +71,7 @@ import MediaSelectionPanel from './components/MediaSelectionPanel';
 import GlossaryPanel from './components/GlossaryPanel';
 import SmartToolsPanel from './components/SmartToolsPanel';
 import PlaylistBatchGroups from './components/PlaylistBatchGroups';
+import { isPlaylistBatchActive } from './utils/playlist';
 import SubtitleStylePanel from './components/SubtitleStylePanel';
 import {
   recoveryAction,
@@ -178,6 +179,8 @@ function App() {
   const [libraryTotal,setLibraryTotal] = useState(0);
   const [libraryPages,setLibraryPages] = useState(1);
   const [libraryLoading,setLibraryLoading] = useState(false);
+  // False until the first project list arrives, so a slow first load shows a skeleton instead of the empty-library welcome.
+  const [libraryLoaded,setLibraryLoaded] = useState(false);
   const [libraryError,setLibraryError] = useState('');
   const [libraryStatus,setLibraryStatus] = useState('');
   const [libraryRefresh,setLibraryRefresh] = useState(0);
@@ -213,9 +216,14 @@ function App() {
     try { return new Set(JSON.parse(localStorage.getItem('subtitle_factory_collapsed_groups') || '[]')); }
     catch { return new Set(); }
   });
-  const [collapsedPlaylistBatches, setCollapsedPlaylistBatches] = useState<Set<string>>(() => {
-    try { return new Set(JSON.parse(localStorage.getItem('subtitle_factory_collapsed_playlist_batches') || '[]')); }
-    catch { return new Set(); }
+  const [openPlaylistBatches, setOpenPlaylistBatches] = useState<Record<string, boolean>>(() => {
+    try {
+      const saved = localStorage.getItem('subtitle_factory_playlist_batches_open');
+      if (saved) return JSON.parse(saved);
+      // Earlier versions only remembered which batches were collapsed.
+      const legacy: string[] = JSON.parse(localStorage.getItem('subtitle_factory_collapsed_playlist_batches') || '[]');
+      return Object.fromEntries(legacy.map(id => [id, false]));
+    } catch { return {}; }
   });
   const [groupEditorProjectId, setGroupEditorProjectId] = useState<string | null>(null);
   const [groupDraft, setGroupDraft] = useState('');
@@ -405,8 +413,8 @@ function App() {
   }, [collapsedProjectGroups]);
 
   useEffect(() => {
-    localStorage.setItem('subtitle_factory_collapsed_playlist_batches', JSON.stringify([...collapsedPlaylistBatches]));
-  }, [collapsedPlaylistBatches]);
+    try { localStorage.setItem('subtitle_factory_playlist_batches_open', JSON.stringify(openPlaylistBatches)); } catch { /* storage unavailable */ }
+  }, [openPlaylistBatches]);
 
   useEffect(() => {
     const handleTheaterShortcut = (event: KeyboardEvent) => {
@@ -490,6 +498,7 @@ function App() {
     const result = await api.getPlaylistBatches();
     setPlaylistBatches(result.batches);
   }, [backendStatus, youtubeEnabled]);
+  const libraryFirstLoad = backendStatus === 'connected' && !libraryLoaded && !libraryError;
   const hasActivePlaylistBatch = playlistBatches.some(({ batch }) =>
     batch.status === 'running' || batch.status === 'pending');
 
@@ -500,7 +509,7 @@ function App() {
     setLibraryLoading(true); setLibraryError('');
     const timer=window.setTimeout(() => {
       void api.listProjects({deleted:libraryView === 'trash',search:librarySearch.trim(),sort:librarySort,page_size:40,page:libraryPage,readiness:libraryStatus})
-        .then(result => { if (cancelled) return; (libraryView === 'trash' ? setTrashProjects : setProjects)(result.projects); setLibraryTotal(result.total ?? result.projects.length); setLibraryPages(result.pages || 1); if (libraryPage > (result.pages || 1)) setLibraryPage(result.pages || 1); })
+        .then(result => { if (cancelled) return; (libraryView === 'trash' ? setTrashProjects : setProjects)(result.projects); setLibraryTotal(result.total ?? result.projects.length); setLibraryPages(result.pages || 1); if (libraryPage > (result.pages || 1)) setLibraryPage(result.pages || 1); setLibraryLoaded(true); })
         .catch(error => { if (!cancelled) setLibraryError(error.message); })
         .finally(() => { if (!cancelled) setLibraryLoading(false); });
     },200);
@@ -1897,12 +1906,8 @@ function App() {
     });
   }, []);
 
-  const togglePlaylistBatch = useCallback((id: string) => {
-    setCollapsedPlaylistBatches(current => {
-      const next = new Set(current);
-      if (next.has(id)) next.delete(id); else next.add(id);
-      return next;
-    });
+  const togglePlaylistBatch = useCallback((id: string, open: boolean) => {
+    setOpenPlaylistBatches(current => ({ ...current, [id]: open }));
   }, []);
 
   const openProjectGroupEditor = useCallback((project: Project) => {
@@ -2404,7 +2409,11 @@ function App() {
             <div title="当前筛选条件下的项目，全部保存在本机"><strong><AnimatedNumber value={libraryTotal} animate={motionEnabled}/></strong><span>个项目</span></div>
             <div title="本页项目的字幕总数，可在上方搜索框全文搜索"><strong><AnimatedNumber value={projects.reduce((total, project) => total + Number(project.segments_count || 0), 0)} animate={motionEnabled}/></strong><span>条字幕</span></div>
             {youtubeEnabled
-              ? <div title={playlistBatches.length ? `${playlistBatches.length} 个播放列表` : '暂无进行中的队列'}><strong><AnimatedNumber value={playlistBatches.filter(item => ['running', 'pending', 'paused', 'partial', 'failed'].includes(item.batch.status)).length} animate={motionEnabled}/></strong><span>个批量任务进行中</span></div>
+              ? (() => {
+                const active = playlistBatches.filter(item => isPlaylistBatchActive(item.batch.status)).length;
+                const attention = playlistBatches.filter(item => ['partial', 'failed'].includes(item.batch.status)).length;
+                return <div title={playlistBatches.length ? `${playlistBatches.length} 个播放列表` : '暂无进行中的队列'}><strong><AnimatedNumber value={active || attention} animate={motionEnabled}/></strong><span>{active || !attention ? '个批量任务进行中' : '个批量任务需处理'}</span></div>;
+              })()
               : <div title="第三方媒体读取已关闭"><strong>本地优先</strong><span>隐私模式</span></div>}
             {trashProjects.length > 0 && <div><strong>{trashProjects.length}</strong><span>个在回收站</span></div>}
             {backendStatus !== 'connected' && <div className={`library-runtime-card ${backendStatus}`}><strong>{backendStatus === 'connecting' ? '引擎启动中' : '引擎需检查'}</strong><span>{backendStatus === 'connecting' ? '正在载入本机运行时' : '本地功能受限，请在设置中查看诊断'}</span></div>}
@@ -2460,7 +2469,7 @@ function App() {
                 </>}
             </section>}
             {youtubeEnabled && libraryView === 'projects' && <PlaylistBatchGroups
-              batches={playlistBatches} search={librarySearch} collapsed={collapsedPlaylistBatches}
+              batches={playlistBatches} search={librarySearch} open={openPlaylistBatches}
               workflow={playlistWorkflow} onToggle={togglePlaylistBatch}
               onOpenProject={project => void selectProject(project)}
               onChanged={() => void refreshPlaylistBatches()} onMessage={showToast}
@@ -2483,8 +2492,8 @@ function App() {
                 })}</div>}
               </section>;
             })}
-            {libraryView === 'projects' && backendStatus === 'connecting' && !projects.length && !playlistBatches.length && <div className="library-skeleton" aria-label="正在载入项目"><i/><i/><i/></div>}
-            {libraryView === 'projects' && backendStatus !== 'connecting' && !projects.length && !playlistBatches.length && (librarySearch.trim()
+            {libraryView === 'projects' && (backendStatus === 'connecting' || libraryFirstLoad) && !projects.length && !playlistBatches.length && <div className="library-skeleton" aria-label="正在载入项目"><i/><i/><i/></div>}
+            {libraryView === 'projects' && backendStatus !== 'connecting' && !libraryFirstLoad && !projects.length && !playlistBatches.length && (librarySearch.trim()
               ? <div className="search-empty">没有名称匹配的项目</div>
               : <section className="library-welcome" aria-label="开始第一个项目">
                 <button type="button" className="welcome-drop" onClick={handleImportLocal} disabled={backendStatus !== 'connected'}>

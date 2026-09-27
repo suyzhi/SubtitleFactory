@@ -27,7 +27,7 @@ cleanup_build_outputs() {
   done
   while IFS= read -r -d '' cache_dir; do
     find "$cache_dir" -depth -delete
-  done < <(find "$ROOT/backend" "$ROOT/frontend" \
+  done < <(find "$ROOT/backend" "$ROOT/frontend" "$ROOT/scripts" \
     \( -path "$ROOT/backend/.venv" -o -path "$ROOT/frontend/node_modules" \) -prune -o \
     -type d -name __pycache__ -print0)
 }

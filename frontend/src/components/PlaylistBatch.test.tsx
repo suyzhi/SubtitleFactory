@@ -51,11 +51,26 @@ describe('playlist batches', () => {
 
   it('renders child projects inside one batch group and opens the existing editor project', async () => {
     const onOpenProject = vi.fn();
-    render(<PlaylistBatchGroups batches={[detail]} search="" collapsed={new Set()} workflow={{ model: 'small', runtime: 'cpu' }} onToggle={() => undefined} onOpenProject={onOpenProject} onChanged={() => undefined} onMessage={() => undefined}/>);
+    render(<PlaylistBatchGroups batches={[detail]} search="" open={{}} workflow={{ model: 'small', runtime: 'cpu' }} onToggle={() => undefined} onOpenProject={onOpenProject} onChanged={() => undefined} onMessage={() => undefined}/>);
     expect(screen.getByText('播放列表批量任务')).toBeInTheDocument();
     expect(screen.getByText('Piano course')).toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: /1\. Lesson 1/ }));
     await waitFor(() => expect(onOpenProject).toHaveBeenCalledWith(project));
+  });
+
+  it('collapses finished batches by default and counts cancelled items as needing attention', async () => {
+    const cancelled = { ...detail.items[0], id: 'item-2', position: 2, title: 'Lesson 2', status: 'cancelled' };
+    const finished: PlaylistBatchDetail = { batch: { ...detail.batch, status: 'partial', failed_count: 0 }, items: [{ ...detail.items[0], status: 'success' }, cancelled] };
+    const onToggle = vi.fn();
+    const { rerender } = render(<PlaylistBatchGroups batches={[finished]} search="" open={{}} workflow={{}} onToggle={onToggle} onOpenProject={() => undefined} onChanged={() => undefined} onMessage={() => undefined}/>);
+    expect(screen.queryByRole('button', { name: /1\. Lesson 1/ })).not.toBeInTheDocument();
+    expect(screen.getByText(/1 项需处理/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '重试 1 项' })).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: /Piano course/, expanded: false }));
+    expect(onToggle).toHaveBeenCalledWith('batch-1', true);
+    rerender(<PlaylistBatchGroups batches={[finished]} search="" open={{ 'batch-1': true }} workflow={{}} onToggle={onToggle} onOpenProject={() => undefined} onChanged={() => undefined} onMessage={() => undefined}/>);
+    expect(screen.getByText('已取消')).toBeInTheDocument();
+    expect(screen.getByText('已完成')).toBeInTheDocument();
   });
 
   it('permanently deletes a playlist only after explicit confirmation', async () => {
@@ -63,7 +78,7 @@ describe('playlist batches', () => {
     const onChanged = vi.fn();
     const onMessage = vi.fn();
     const user = userEvent.setup();
-    render(<PlaylistBatchGroups batches={[detail]} search="" collapsed={new Set()} workflow={{}} onToggle={() => undefined} onOpenProject={() => undefined} onChanged={onChanged} onMessage={onMessage}/>);
+    render(<PlaylistBatchGroups batches={[detail]} search="" open={{}} workflow={{}} onToggle={() => undefined} onOpenProject={() => undefined} onChanged={onChanged} onMessage={onMessage}/>);
 
     await user.click(screen.getByText('•••'));
     await user.click(screen.getByRole('menuitem', { name: '删除播放列表…' }));
@@ -83,7 +98,7 @@ describe('playlist batches', () => {
   it('requires visible in-app authorization before starting a paid AI stage', async () => {
     vi.mocked(api.runPlaylistStage).mockResolvedValue(detail);
     const user = userEvent.setup();
-    render(<PlaylistBatchGroups batches={[detail]} search="" collapsed={new Set()} workflow={{ model: 'small' }} onToggle={() => undefined} onOpenProject={() => undefined} onChanged={() => undefined} onMessage={() => undefined}/>);
+    render(<PlaylistBatchGroups batches={[detail]} search="" open={{}} workflow={{ model: 'small' }} onToggle={() => undefined} onOpenProject={() => undefined} onChanged={() => undefined} onMessage={() => undefined}/>);
 
     await user.click(screen.getByText('•••'));
     await user.click(screen.getByRole('menuitem', { name: 'AI 整理…' }));
