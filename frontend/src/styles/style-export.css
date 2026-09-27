@@ -341,3 +341,9 @@
 .pro-app .export-format-cards button.selected::after { border-color: var(--accent); box-shadow: inset 0 0 0 4px var(--surface), inset 0 0 0 9px var(--accent); }
 .pro-app .export-format-cards strong { font-size: 15px; font-weight: 700; letter-spacing: .01em; }
 .pro-app .export-format-cards small { padding-right: 18px; color: var(--text-2); font-size: 12px; line-height: 1.5; }
+
+/* 样式检查器：下拉与输入统一宽度，左右边缘对齐 */
+.pro-app .style-controls-page .style-label:has(> .app-select-anchor) { grid-template-columns: minmax(0, 1fr) 176px; align-items: center; }
+.pro-app .style-controls-page .style-label > .app-select-anchor { grid-column: 2; width: 100%; }
+.pro-app .style-controls-page .style-label > .app-select-anchor :is(.app-select-trigger, input) { width: 100%; min-height: 38px; }
+.pro-app .style-template-bar label { color: var(--text-2); font-size: 12px; font-weight: 600; }

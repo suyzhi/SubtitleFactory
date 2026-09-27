@@ -770,3 +770,12 @@
 }
 .subtitle-findbar label input { min-width: 0; width: auto; flex: none; }
 .subtitle-draft-bar button, .replace-preview button { flex: none; white-space: nowrap; }
+
+/* 字幕内搜索：与项目库搜索框同一风格 */
+.pro-app .editor-transcript .subtitle-findbar { border-bottom-color: var(--border-soft); }
+.pro-app .editor-transcript .subtitle-findbar > input {
+  height: 34px; padding: 0 12px 0 34px; border: 1px solid var(--border-soft); border-radius: 10px;
+  background: var(--surface) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 16 16'%3E%3Ccircle cx='7' cy='7' r='5.25' fill='none' stroke='%238a7e70' stroke-width='1.6'/%3E%3Cpath d='M11 11l3.5 3.5' stroke='%238a7e70' stroke-width='1.6' stroke-linecap='round'/%3E%3C/svg%3E") no-repeat 12px center;
+  box-shadow: var(--shadow-xs); font-size: 13px;
+}
+.pro-app .editor-transcript .subtitle-findbar > input:hover { border-color: var(--border); }

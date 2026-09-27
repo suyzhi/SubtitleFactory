@@ -366,3 +366,5 @@
 .pro-app .pro-player .player-icon-btn:hover { transform: none; box-shadow: none; background: rgba(255,255,255,.14); }
 .pro-app .pro-player .player-icon-btn.active { background: color-mix(in srgb, var(--accent) 85%, #000); box-shadow: none; }
 .pro-app .topbar-button .control-icon { width: 15px; height: 15px; color: var(--accent); }
+.pro-app .rate-select .app-select-trigger { justify-content: center; gap: 4px; }
+.pro-app .app-select-anchor.rate-select { width: 56px; flex-basis: 56px; }
