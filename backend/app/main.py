@@ -274,6 +274,7 @@ def health_check():
         "status": "ok",
         "service": "subtitle-factory-backend",
         "version": VERSION,
+        "platform": sys.platform,
         "distribution": distribution_capabilities().as_dict(),
         "runtime": settings.get_runtime_health(),
     }

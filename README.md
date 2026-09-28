@@ -30,25 +30,53 @@
 
 ### Windows 运行方式
 
-Windows 系统下原生支持一键运行（已自动管理 Python 虚拟环境与前后端依赖）：
+Windows 10/11 原生支持，支持 Windows PowerShell 5.1（系统自带）与 PowerShell 7。
 
-- **浏览器模式一键启动**：
-  双击根目录下的 `start.bat`，或在 PowerShell 中执行：
-  ```powershell
-  .\start.ps1
-  ```
-  该命令将自动启动后端服务（:8000）和 Vite 前端（:5173），并自动打开默认浏览器访问。按下 `Ctrl+C` 即可优雅关闭所有进程。
+**环境要求**
 
-- **单独启动后端**：
-  双击 `backend/run.bat` 或在 PowerShell 中执行：
-  ```powershell
-  .\backend\run.ps1
-  ```
+- Python 3.10+（推荐 3.11）或 [uv](https://docs.astral.sh/uv/)：首次运行会自动创建 `backend/.venv` 并在 `requirements.txt` 更新后重新同步依赖。
+- Node.js 18+：首次运行会自动执行 `npm install`。
+- 可选：`winget install Gyan.FFmpeg`（音频提取、预览与视频导出）与 `winget install DenoLand.Deno`（YouTube 下载）。未安装时脚本只提示，不阻断启动。
 
-- **Tauri 桌面模式**（需安装 Rust 环境）：
-  ```powershell
-  .\start-desktop.ps1
-  ```
+若直接运行 `.ps1` 被默认执行策略拦下，请改用下文的 `.bat`，或显式绕过：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File .\start.ps1
+```
+
+如果 `python` 命令打开的是 Microsoft Store，说明命中了「应用执行别名」：请关闭
+「设置 → 应用 → 高级应用设置 → 应用执行别名」中的 python 别名，或安装官方 Python 3.11。
+
+**浏览器模式一键启动**
+
+双击根目录下的 `start.bat`，或在 PowerShell 中执行：
+
+```powershell
+.\start.ps1
+```
+
+该命令会启动后端（:8000）与 Vite 前端（:5173）并打开默认浏览器；`Ctrl+C` 会结束前后端整棵进程树。
+脚本遇到 8000/5173 被占用会退出，不会杀死既有进程。
+
+**单独启动后端**
+
+双击 `backend/run.bat`，或在 PowerShell 中执行：
+
+```powershell
+.\backend\run.ps1
+```
+
+**Tauri 桌面模式**（需 Rust 工具链，参见 <https://win.rustup.rs/>）
+
+```powershell
+.\start-desktop.ps1
+```
+
+**Windows 与 macOS 的能力差异**
+
+- CPU 转写（faster-whisper / sherpa-onnx）与说话人识别完全可用；Apple GPU（MLX）与 Core ML 仅在 macOS 上可用。
+- 硬字幕 OCR 依赖 macOS Vision：Windows 上设置中心会显示「当前系统不可用」，不会引导到必然失败的流程。
+- 仓库内的 `start.ps1` / `start-desktop.ps1` / `backend/run.ps1` 均以 UTF-8 带 BOM 保存，请勿另存为无 BOM 的 UTF-8（Windows PowerShell 5.1 会按本地代码页解码并报语法错误）。
 
 
 v0.6.1 已提供 Apple Silicon App、DMG、App ZIP 与 SHA-256 校验文件，最低支持 macOS 14.0；同时提供 Windows 10/11 一键启动脚本。下载见 [GitHub 发布页](https://github.com/suyzhi/SubtitleFactory/releases/tag/v0.6.1)。

@@ -8,6 +8,7 @@ import logging
 import os
 import re
 import shutil
+import sys
 import time
 import uuid
 import wave
@@ -170,7 +171,16 @@ def _runtime_ids(model_id: str, imported: dict | None = None) -> list[str]:
     if model_id == PARAKEET_ONNX_MODEL_ID: return ["cpu", "coreml"]
     return ["cpu"]
 
+# MLX 与 ONNX Runtime 的 Core ML provider 是纯 macOS 能力，靠 import/Provider 探测即可判定；
+# external_coreml 的可用性由实际发现的 Core ML 运行时决定，故不在此集合内。
+APPLE_ONLY_RUNTIMES = {"mlx", "coreml"}
+
+
 def _runtime_available(runtime_id: str, model_id: str = "") -> tuple[bool, str]:
+    # MLX / Core ML 只存在于 macOS。这里显式判定，避免非 Darwin 平台依赖
+    # import 探测失败这种间接信号，也让界面能给出准确原因。
+    if runtime_id in APPLE_ONLY_RUNTIMES and sys.platform != "darwin":
+        return False, "Apple GPU / Core ML 运行时仅在 macOS 上可用"
     if runtime_id == "mlx":
         module = "mlx_qwen3_asr" if model_id in QWEN_ASR_MODEL_IDS else "mlx_whisper"
         ok = importlib.util.find_spec(module) is not None
@@ -907,6 +917,15 @@ def prepare_transcription_model(model_id: str, request: ModelPrepareRequest):
             )
     elif model_id in QWEN_ASR_CATALOG_BY_ID:
         runtime = runtime or "mlx"
+        if runtime == "mlx" and sys.platform != "darwin":
+            # 否则会在 Windows 上下载数 GB 的 MLX 权重，而运行时永远不可用。
+            raise HTTPException(
+                400,
+                detail={
+                    "code": "RUNTIME_UNSUPPORTED",
+                    "message": "Qwen3-ASR 需要 Apple GPU（MLX），当前系统不支持",
+                },
+            )
         if runtime != "mlx":
             raise HTTPException(
                 400,
@@ -927,6 +946,14 @@ def prepare_transcription_model(model_id: str, request: ModelPrepareRequest):
             )
     else:
         runtime = "external_coreml"
+        if sys.platform != "darwin":
+            raise HTTPException(
+                400,
+                detail={
+                    "code": "RUNTIME_UNSUPPORTED",
+                    "message": "Parakeet Core ML 运行时仅在 macOS 上可用",
+                },
+            )
     task_id = task_manager.create_task(None, "prepare_model")
     task_manager.update_task(
         task_id,

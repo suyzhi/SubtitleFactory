@@ -36,6 +36,8 @@ class RestoreRequest(BaseModel):
 
 def _redact(value: str) -> str:
     value = re.sub(r"(?i)(authorization:\s*bearer|api[_ -]?key[=: ]+)\s*\S+", r"\1 [REDACTED]", value)
+    # 同时覆盖 POSIX 与 Windows 的家目录形式，避免诊断包泄露用户名与目录结构。
+    value = re.sub(r"[A-Za-z]:\\[Uu]sers\\[^\\\s]+", "~/", value)
     value = re.sub(r"/(?:Users|home)/[^/\s]+", "~/", value)
     return value
 

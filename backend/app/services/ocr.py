@@ -84,7 +84,11 @@ def run_ocr(
         frames = sorted(Path(folder).glob("frame-*.jpg")); observations = []
         for index, frame in enumerate(frames):
             task_manager.checkpoint(task_id)
-            result = subprocess.run([str(helper), str(frame)], capture_output=True, text=True, check=True, timeout=30)
+            result = subprocess.run(
+                [str(helper), str(frame)],
+                capture_output=True, text=True, encoding="utf-8", errors="replace",
+                check=True, timeout=30,
+            )
             lines = json.loads(result.stdout or "[]")
             text = _normalize(" ".join(item["text"] for item in lines if float(item.get("confidence", 0)) >= .25))
             confidence = sum(float(item.get("confidence", 0)) for item in lines) / max(1, len(lines))

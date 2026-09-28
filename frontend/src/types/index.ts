@@ -515,6 +515,7 @@ export interface RuntimeCheck {
 }
 
 export interface RuntimeHealth {
+  ocr?: RuntimeCheck;
   ffmpeg?: RuntimeCheck;
   ffprobe?: RuntimeCheck;
   yt_dlp?: RuntimeCheck;
@@ -530,6 +531,8 @@ export interface HealthStatus {
   status: string;
   service: string;
   version: string;
+  /** Node-style platform id reported by the backend, e.g. "win32" or "darwin". */
+  platform?: string;
   runtime?: RuntimeHealth;
 }
 

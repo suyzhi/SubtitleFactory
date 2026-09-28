@@ -415,6 +415,33 @@ def _fallback_model_status(settings: dict[str, Any]) -> dict[str, Any]:
     )
 
 
+def _ocr_runtime_item() -> dict[str, Any]:
+    """Report hard-subtitle OCR availability without compiling the helper.
+
+    The Vision helper only exists on macOS.  Surface that here so the UI can hide
+    the OCR panel instead of letting the user hit an error after clicking it.
+    """
+    try:
+        from ..services.ocr import _bundled_helper_candidates
+        helper = next((item for item in _bundled_helper_candidates() if item.is_file()), None)
+    except Exception:
+        helper = None
+    if helper is not None:
+        return _runtime_item(
+            ok=True, status="ready", path=str(helper), source="bundled",
+            message="硬字幕 OCR 组件已就绪",
+        )
+    if sys.platform == "darwin":
+        return _runtime_item(
+            ok=True, status="ready", path=None, source="system_toolchain",
+            message="使用 macOS Vision（首次使用时在本机编译 helper）",
+        )
+    return _runtime_item(
+        ok=False, status="unsupported", path=None, source="platform",
+        message="硬字幕 OCR 依赖 macOS Vision，当前系统不可用",
+    )
+
+
 def get_runtime_health() -> dict[str, Any]:
     """Return a failure-tolerant preflight snapshot for Settings and health API."""
     settings, warnings = read_validated_app_settings()
@@ -506,6 +533,7 @@ def get_runtime_health() -> dict[str, Any]:
     )
     models = _fallback_model_status(settings)
     return _redact_local_paths({
+        "ocr": _ocr_runtime_item(),
         "ffmpeg": ffmpeg,
         "ffprobe": ffprobe,
         "yt_dlp": yt_dlp_status,

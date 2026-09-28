@@ -1,13 +1,21 @@
-<#
+﻿<#
 .SYNOPSIS
     字幕工厂 - Windows 桌面应用启动脚本 (Tauri 桌面端)
+.DESCRIPTION
+    准备 Rust / Python / Node 环境后以开发模式启动 Tauri 桌面端。
+    退出时按仓库约定清理可重建的构建产物。
+.NOTES
+    请在 Windows PowerShell 5.1 或 PowerShell 7 下运行。脚本以 UTF-8 (带 BOM) 保存，
+    以便 Windows PowerShell 5.1 正确解码其中的中文与 emoji。
 #>
 
 $ErrorActionPreference = "Stop"
 $ScriptDir = $PSScriptRoot
 $BackendDir = Join-Path $ScriptDir "backend"
 $FrontendDir = Join-Path $ScriptDir "frontend"
-$VenvPython = Join-Path $BackendDir ".venv\Scripts\python.exe"
+$TauriDir = Join-Path $FrontendDir "src-tauri"
+
+. (Join-Path $ScriptDir "scripts\windows\common.ps1")
 
 Write-Host "🎬 字幕工厂 - Windows 桌面端启动" -ForegroundColor Cyan
 Write-Host "====================================" -ForegroundColor DarkGray
@@ -27,20 +35,18 @@ if (-not $cargo) {
     }
 }
 
-# 2. 检查 Python 虚拟环境
-if (-not (Test-Path $VenvPython)) {
-    Write-Host "📦 创建 Python 虚拟环境..." -ForegroundColor Yellow
-    $uv = Get-Command uv -ErrorAction SilentlyContinue
-    if ($uv) {
-        & uv venv --python 3.11 (Join-Path $BackendDir ".venv")
-        & uv pip install -r (Join-Path $BackendDir "requirements.txt") --python $VenvPython
-    } else {
-        & python -m venv (Join-Path $BackendDir ".venv")
-        & $VenvPython -m pip install -r (Join-Path $BackendDir "requirements.txt")
-    }
+# 2. 检查或创建 backend/.env
+$EnvFile = Join-Path $BackendDir ".env"
+$EnvExample = Join-Path $BackendDir ".env.example"
+if (-not (Test-Path $EnvFile) -and (Test-Path $EnvExample)) {
+    Write-Host "ℹ️ 未找到 backend/.env，正在从模板创建..." -ForegroundColor Yellow
+    Copy-Item $EnvExample $EnvFile
 }
 
-# 3. 检查前端依赖
+# 3. 检查 Python 虚拟环境与依赖
+$VenvPython = Ensure-BackendVenv -BackendDir $BackendDir
+
+# 4. 检查前端依赖
 if (-not (Test-Path (Join-Path $FrontendDir "node_modules"))) {
     Write-Host "📦 安装前端依赖..." -ForegroundColor Yellow
     Push-Location $FrontendDir
@@ -51,11 +57,50 @@ if (-not (Test-Path (Join-Path $FrontendDir "node_modules"))) {
     }
 }
 
-# 4. 启动 Tauri 桌面端
+# 5. 确保 Tauri 的 resources 目录存在。
+#    tauri.conf.json 的 bundle.resources 引用了 frontend/src-tauri/backend-runtime，
+#    该目录被 .gitignore 忽略、只能由 scripts/build-sidecar.sh (macOS) 产出。
+#    Tauri 在编译期解析 resources 清单，目录缺失会导致 cargo/tauri 直接失败，
+#    因此这里先建出空目录（与 .github/workflows/ci.yml 的做法一致）。
+$RuntimeDir = Join-Path $TauriDir "backend-runtime"
+if (-not (Test-Path $RuntimeDir)) {
+    Write-Host "ℹ️ 创建 Tauri resources 占位目录 backend-runtime..." -ForegroundColor DarkGray
+    New-Item -ItemType Directory -Force -Path $RuntimeDir | Out-Null
+}
+
+function Cleanup-BuildProducts {
+    <#
+    .SYNOPSIS
+        按 AGENTS.md 的约定清理可重建产物（不触碰项目数据、.venv 与 node_modules）。
+    #>
+    $targets = @(
+        (Join-Path $FrontendDir "dist"),
+        (Join-Path $TauriDir "target"),
+        (Join-Path $TauriDir "backend-runtime"),
+        (Join-Path $BackendDir "build"),
+        (Join-Path $BackendDir "dist"),
+        (Join-Path $BackendDir ".pytest_cache")
+    )
+    foreach ($target in $targets) {
+        if (Test-Path $target) {
+            Remove-Item -Recurse -Force -Path $target -ErrorAction SilentlyContinue
+        }
+    }
+    Get-ChildItem -Path $BackendDir -Recurse -Directory -Filter "__pycache__" -ErrorAction SilentlyContinue |
+        Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
+}
+
+# 6. 启动 Tauri 桌面端
 Write-Host "🚀 启动 Tauri 桌面应用..." -ForegroundColor Green
 Push-Location $FrontendDir
 try {
-    npx tauri dev
+    # 使用 npx.cmd：npm 的 npx.ps1 垫片会被默认的 Restricted 执行策略拦下。
+    & npx.cmd tauri dev
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "❌ tauri dev 退出码：$LASTEXITCODE" -ForegroundColor Red
+    }
 } finally {
     Pop-Location
+    Write-Host "🧹 清理构建产物..." -ForegroundColor DarkGray
+    Cleanup-BuildProducts
 }

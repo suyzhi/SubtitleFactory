@@ -24,6 +24,18 @@ const BACKEND_SHUTDOWN_GRACE: Duration = Duration::from_secs(15);
 #[cfg(unix)]
 use std::os::unix::process::CommandExt;
 
+/// Windows console programs spawned from this GUI process would otherwise open
+/// a console window of their own, so every child is started without one.
+#[cfg(windows)]
+fn hide_console_window(command: &mut Command) {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    command.creation_flags(CREATE_NO_WINDOW);
+}
+
+#[cfg(not(windows))]
+fn hide_console_window(_command: &mut Command) {}
+
 #[cfg(unix)]
 fn process_group_exists(group: i32) -> bool {
     unsafe { libc::kill(-group, 0) == 0 }
@@ -154,13 +166,13 @@ fn reveal_path(path: String, managed_files: State<'_, ManagedFiles>) -> Result<(
     }
     #[cfg(target_os = "windows")]
     {
-        Command::new("explorer")
-            .arg(&candidate)
-            .status()
-            .map_err(|error| error.to_string())?
-            .success()
-            .then_some(())
-            .ok_or_else(|| "无法在资源管理器中打开路径".into())
+        // explorer.exe reports exit code 1 even when it opens the path
+        // successfully, so only a failed spawn counts as an error here.
+        let mut command = Command::new("explorer");
+        command.arg(&candidate);
+        hide_console_window(&mut command);
+        command.status().map_err(|error| error.to_string())?;
+        Ok(())
     }
     #[cfg(not(any(target_os = "macos", target_os = "windows")))]
     {
@@ -565,6 +577,7 @@ fn start_backend(
         .stderr(Stdio::from(error_file));
     #[cfg(unix)]
     command.process_group(0);
+    hide_console_window(&mut command);
 
     let child = command
         .spawn()

@@ -11,13 +11,13 @@ ROOT = Path(__file__).resolve().parents[1]
 OUTPUT = ROOT / "artifacts"
 OUTPUT.mkdir(exist_ok=True)
 components = []
-app_version = json.loads((ROOT / "frontend/package.json").read_text())["version"]
+app_version = json.loads((ROOT / "frontend/package.json").read_text(encoding="utf-8"))["version"]
 
-lock = (ROOT / "backend/requirements-release.lock").read_text()
+lock = (ROOT / "backend/requirements-release.lock").read_text(encoding="utf-8")
 for name, version in re.findall(r"^([A-Za-z0-9_.-]+)==([^\s\\]+)", lock, re.MULTILINE):
     components.append({"type": "library", "name": name, "version": version, "purl": f"pkg:pypi/{name}@{version}"})
 
-npm = json.loads((ROOT / "frontend/package-lock.json").read_text())
+npm = json.loads((ROOT / "frontend/package-lock.json").read_text(encoding="utf-8"))
 for path, item in npm.get("packages", {}).items():
     if not path.startswith("node_modules/") or not item.get("version"): continue
     name = path.removeprefix("node_modules/")

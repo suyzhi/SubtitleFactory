@@ -3,6 +3,13 @@
 ## 0.6.1 — 2026-09-27
 
 - 修复 YouTube 下载失败（“YouTube 拒绝了媒体流访问”，HTTP 403）。YouTube 现在要求默认客户端的媒体链接携带 PO Token；下载改为优先使用无需 PO Token 的内嵌播放器客户端，仍被拒绝时自动换用其他客户端重试。全程匿名，不读取浏览器 Cookie。0.6.0 打包时遗漏了这一修复。
+- Windows 10/11 兼容（`windows` 分支）：把 Windows 支持从 0.5.x 基线移植到 0.6.1，并覆盖此后新增的模块。
+  - 启动脚本改为 UTF-8 带 BOM 保存：此前为无 BOM 的 UTF-8，Windows PowerShell 5.1 会按本地代码页解码，中文与 emoji 直接导致**语法错误、脚本无法运行**（`The string is missing the terminator`）。
+  - 抽出 `scripts/windows/common.ps1`：Python 解释器改为 `py -3.11` → `py -3` → `python` 逐级真实执行校验（避开 Microsoft Store 的 python 别名），依赖在 `requirements.txt` 更新后重新同步（此前 venv 一旦存在就永不重装），并补充 FFmpeg/Deno 安装提示。
+  - 修复 `start.ps1` 就绪轮询：`Start-Sleep` 原先只在请求异常分支里执行，非 200 响应会让 60 次重试瞬间跑完并误报超时；前端退出改用 `taskkill /T` 结束子树（避免残留 esbuild）；端口探测在 `NetTCPIP` 不可用时回退 `netstat`。
+  - `start-desktop.ps1`：补齐 `backend/.env` 创建、Tauri `resources` 占位目录（缺失会让 cargo/tauri 在编译期失败）、退出时的构建产物清理，并改用 `npx.cmd` 绕过 `npx.ps1` 的执行策略限制。
+  - Tauri：`bundle.targets` 拆分为平台配置（新增 `tauri.windows.conf.json`，Windows 产出 NSIS 安装包），后端进程以 `CREATE_NO_WINDOW` 启动避免弹黑窗，“在资源管理器中显示”不再因 explorer 退出码 1 误报失败。
+  - 后端：字幕字体回退改为确定性选择；`/api/health` 增加 `platform` 与 `runtime.ocr` 能力上报，Windows 上界面不再引导用户点击必然失败的 OCR 流程。
 
 ## 0.6.0 — 2026-09-27
 

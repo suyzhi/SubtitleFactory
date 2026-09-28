@@ -45,7 +45,7 @@ def _extract_audio(task_id, video_path, project_id, track_index, range_start, ra
     identity = {"version": 1, "source": _identity(Path(video_path)), "track": track_index,
                 "start": start, "end": end}
     try:
-        metadata = json.loads(metadata_path.read_text())
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
         if metadata.get("input") == identity and metadata.get("output") == _identity(audio_path):
             task_manager.update_task(task_id, step="audio_ready", progress=progress_end,
                                      message="复用已准备的音频", details={"audio_cache_hit": True, "audio_path": str(audio_path)})
@@ -107,7 +107,9 @@ def _extract_audio(task_id, video_path, project_id, track_index, range_start, ra
             raise RuntimeError("音频文件未生成或所选范围为空")
         os.replace(temporary_path, audio_path)
         try:
-            metadata_temporary.write_text(json.dumps({"input": identity, "output": _identity(audio_path)}))
+            metadata_temporary.write_text(
+                json.dumps({"input": identity, "output": _identity(audio_path)}), encoding="utf-8"
+            )
             os.replace(metadata_temporary, metadata_path)
         except OSError:
             logger.warning("音频已保存，但未能写入缓存索引", exc_info=True)

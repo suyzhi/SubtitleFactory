@@ -7,35 +7,35 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-tauri_config = json.loads((ROOT / "frontend/src-tauri/tauri.conf.json").read_text())
-app_store_metadata = json.loads((ROOT / "app-store/metadata.zh-Hans.json").read_text())
+tauri_config = json.loads((ROOT / "frontend/src-tauri/tauri.conf.json").read_text(encoding="utf-8"))
+app_store_metadata = json.loads((ROOT / "app-store/metadata.zh-Hans.json").read_text(encoding="utf-8"))
 versions = {
-    "backend": re.search(r'VERSION\s*=\s*"([^"]+)"', (ROOT / "backend/app/version.py").read_text()).group(1),
-    "frontend": json.loads((ROOT / "frontend/package.json").read_text())["version"],
-    "frontend_lock": json.loads((ROOT / "frontend/package-lock.json").read_text())["version"],
+    "backend": re.search(r'VERSION\s*=\s*"([^"]+)"', (ROOT / "backend/app/version.py").read_text(encoding="utf-8")).group(1),
+    "frontend": json.loads((ROOT / "frontend/package.json").read_text(encoding="utf-8"))["version"],
+    "frontend_lock": json.loads((ROOT / "frontend/package-lock.json").read_text(encoding="utf-8"))["version"],
     "tauri": tauri_config["version"],
-    "cargo": re.search(r'^version\s*=\s*"([^"]+)"', (ROOT / "frontend/src-tauri/Cargo.toml").read_text(), re.MULTILINE).group(1),
+    "cargo": re.search(r'^version\s*=\s*"([^"]+)"', (ROOT / "frontend/src-tauri/Cargo.toml").read_text(encoding="utf-8"), re.MULTILINE).group(1),
     "package_script": re.search(
         r'^VERSION="([^"]+)"',
-        (ROOT / "scripts/package-app.sh").read_text(),
+        (ROOT / "scripts/package-app.sh").read_text(encoding="utf-8"),
         re.MULTILINE,
     ).group(1),
     "app_store_package_script": re.search(
         r'^VERSION="([^"]+)"',
-        (ROOT / "scripts/package-app-store.sh").read_text(),
+        (ROOT / "scripts/package-app-store.sh").read_text(encoding="utf-8"),
         re.MULTILINE,
     ).group(1),
     "readme": re.search(
         r'^# 字幕工厂 ([^\s]+)',
-        (ROOT / "README.md").read_text(),
+        (ROOT / "README.md").read_text(encoding="utf-8"),
         re.MULTILINE,
     ).group(1),
     "changelog": re.search(
         r'^## ([^\s]+)',
-        (ROOT / "CHANGELOG.md").read_text(),
+        (ROOT / "CHANGELOG.md").read_text(encoding="utf-8"),
         re.MULTILINE,
     ).group(1),
-    "sbom": json.loads((ROOT / "artifacts/sbom.cdx.json").read_text())[
+    "sbom": json.loads((ROOT / "artifacts/sbom.cdx.json").read_text(encoding="utf-8"))[
         "metadata"
     ]["component"]["version"],
     "app_store_metadata": app_store_metadata["app"]["version"],

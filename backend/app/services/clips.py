@@ -539,9 +539,11 @@ def _font_path(font_family: str, needs_cjk: bool) -> str:
     for token in candidates:
         if token in fonts:
             return fonts[token]
-    # If no preferred font matched, return any available font found in system roots
+    # Last resort: fall back to a system font so rendering never hard-fails on
+    # machines without the preferred families.  Pick it deterministically so
+    # repeated renders of the same project stay byte-identical.
     if fonts:
-        return next(iter(fonts.values()))
+        return fonts[sorted(fonts)[0]]
     raise RuntimeError("找不到可用的字幕字体，请安装 Arial 或系统黑体")
 
 
@@ -753,6 +755,11 @@ def _filter_graph(
     return graph
 
 
+# Windows 的 signal 模块没有 SIGSTOP/SIGCONT，暂停只能退化为“worker 阻塞在 checkpoint”
+# 而不是冻结 FFmpeg 进程；否则 os.kill 会抛 AttributeError 让整次渲染失败。
+POSIX_JOB_CONTROL = hasattr(signal, "SIGSTOP") and hasattr(signal, "SIGCONT")
+
+
 def _run_process(task_id: str, command: list[str], duration: float) -> None:
     del duration
     with tempfile.TemporaryFile(mode="w+", encoding="utf-8") as error_log:
@@ -763,13 +770,13 @@ def _run_process(task_id: str, command: list[str], duration: float) -> None:
         try:
             while process.poll() is None:
                 state = task_manager.get_task(task_id) or {}
-                if state.get("status") == "paused" and not stopped:
+                if state.get("status") == "paused" and not stopped and POSIX_JOB_CONTROL:
                     os.kill(process.pid, signal.SIGSTOP)
                     stopped = True
                 try:
                     task_manager.checkpoint(task_id)
                 except TaskCancelled:
-                    if stopped:
+                    if stopped and POSIX_JOB_CONTROL:
                         os.kill(process.pid, signal.SIGCONT)
                     process.terminate()
                     try:
@@ -777,7 +784,7 @@ def _run_process(task_id: str, command: list[str], duration: float) -> None:
                     except subprocess.TimeoutExpired:
                         process.kill()
                     raise
-                if stopped:
+                if stopped and POSIX_JOB_CONTROL:
                     os.kill(process.pid, signal.SIGCONT)
                     stopped = False
                 time.sleep(.2)
@@ -803,7 +810,7 @@ def _probe(path: Path, width: int, height: int, expected_duration: float) -> dic
             str(ffprobe.path), "-v", "error", "-show_streams", "-show_format",
             "-of", "json", str(path),
         ],
-        capture_output=True, text=True, timeout=60,
+        capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60,
     )
     if result.returncode:
         raise ClipError("FFprobe 无法读取短片输出", error_code="CLIP_VALIDATION_FAILED")

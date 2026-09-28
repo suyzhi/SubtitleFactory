@@ -18,6 +18,8 @@ export default function SmartToolsPanel({ projectId, revision, duration, onEdito
   const externalPathsEnabled = api.externalRuntimePathsEnabled();
   const speakers = useQuery({ queryKey: ['speakers', projectId], queryFn: () => api.getSpeakers(projectId) });
   const authorizations = useQuery({ queryKey: ['cloud-authorizations'], queryFn: api.getCloudAuthorizations });
+  // 硬字幕 OCR 依赖 macOS Vision：让后端报告能力，Windows 上不再引导用户去点一个必然失败的按钮。
+  const runtimeHealth = useQuery({ queryKey: ['runtime-health'], queryFn: api.checkHealth, staleTime: 60_000 });
   const managedModels = useQuery({ queryKey: ['speaker-models'], queryFn: api.getSpeakerModelStatus });
   const [speakerName, setSpeakerName] = useState('说话人');
   const [sourceSpeaker, setSourceSpeaker] = useState('');
@@ -49,6 +51,10 @@ export default function SmartToolsPanel({ projectId, revision, duration, onEdito
 
   const list = speakers.data?.speakers || [];
   const canMerge = sourceSpeaker && targetSpeaker && sourceSpeaker !== targetSpeaker;
+  const ocrSupport = runtimeHealth.data?.runtime?.ocr;
+  const ocrUnsupported = ocrSupport?.ok === false
+    ? (ocrSupport.message || '硬字幕 OCR 依赖 macOS Vision，当前系统不可用。')
+    : '';
   const averageConfidence = useMemo(() => ocrCues.length
     ? ocrCues.reduce((sum, cue) => sum + Number(cue.confidence || 0), 0) / ocrCues.length
     : 0, [ocrCues]);
@@ -153,6 +159,12 @@ export default function SmartToolsPanel({ projectId, revision, duration, onEdito
       <button className="button primary" disabled={!segmentationModel || !embeddingModel || task?.status === 'running'} onClick={() => void startDiarization()}>开始本地识别</button>
     </section>
 
+      {ocrUnsupported ? (
+        <section className="smart-tool-card" aria-labelledby="ocr-tools-title">
+          <header><div><small>当前系统不可用</small><h2 id="ocr-tools-title">硬字幕 OCR</h2></div></header>
+          <p>{ocrUnsupported}</p>
+        </section>
+      ) : (
     <section className="smart-tool-card" aria-labelledby="ocr-tools-title">
       <header><div><small>macOS Vision · 预览后确认</small><h2 id="ocr-tools-title">硬字幕 OCR</h2></div><span>{ocrCues.length ? `${ocrCues.length} 条预览` : '预览不会改动字幕'}</span></header>
       <div className="ocr-region-grid">{(['x', 'y', 'width', 'height'] as const).map(key => <label key={key}>{({x:'左',y:'上',width:'宽',height:'高'} as const)[key]}（%）<input type="number" min="0" max="100" value={ocrRegion[key]} onChange={event => setOcrRegion(current => ({ ...current, [key]: Number(event.target.value) }))}/></label>)}</div>
@@ -162,6 +174,7 @@ export default function SmartToolsPanel({ projectId, revision, duration, onEdito
       {ocrCues.length > 0 && <div className="ocr-preview-list"><header><strong>识别预览</strong><small>平均置信度 {Math.round(averageConfidence * 100)}%</small></header>{ocrCues.slice(0, 100).map((cue, index) => <div key={`${cue.start}-${index}`}><time>{cue.start.toFixed(2)}–{cue.end.toFixed(2)}</time><span>{cue.text}</span><em>{Math.round(Number(cue.confidence || 0) * 100)}%</em></div>)}</div>}
       {ocrCues.length > 0 && <button className="button" onClick={() => void commitOCR()}>替换当前字幕（可撤销）</button>}
     </section>
+      )}
     <section className="cloud-consent-card"><header><div><small>默认关闭</small><h3>云端增强授权</h3></div><p>本地能力不会读取这些授权。开启后，也只有主动使用对应云端增强操作时才会上传所说明的范围。</p></header><div>{(['ocr','speaker','quality'] as const).map(capability => { const record = authorizations.data?.authorizations.find(item => item.capability === capability); const granted = Boolean(record?.granted); const label = capability === 'ocr' ? 'OCR' : capability === 'speaker' ? '说话人增强' : 'AI 质检'; return <label key={capability}><span><strong>{label}</strong><small>{granted ? `已授权 · ${record?.granted_at || ''}` : '仅本地运行'}</small></span><input type="checkbox" checked={granted} onChange={event => { const next = event.target.checked; if (next && !window.confirm(`启用${label}云端授权后，只有在你主动选择云端增强时才会上传相关${capability === 'speaker' ? '音频片段' : '内容'}。继续吗？`)) return; void api.setCloudAuthorization(capability, next).then(() => client.invalidateQueries({ queryKey: ['cloud-authorizations'] })); }}/></label>; })}</div></section>
     {(message || task) && <aside className={`smart-task-status ${task?.status || ''}`} role="status"><strong>{task?.message || message}</strong>{task && <span>{Math.round(task.progress || 0)}%</span>}{task?.error && <small>{task.error}</small>}</aside>}
   </div>;
