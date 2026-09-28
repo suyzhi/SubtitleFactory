@@ -5,9 +5,13 @@ use std::{
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
     sync::Mutex,
-    thread,
-    time::{Duration, Instant},
 };
+
+// 进程组、优雅关闭窗口与等待都只存在于 POSIX 分支；Windows 上由 child.kill() 结束进程。
+#[cfg(unix)]
+use std::thread;
+#[cfg(unix)]
+use std::time::{Duration, Instant};
 
 use serde::Serialize;
 use tauri::{Manager, RunEvent, State, WindowEvent};
@@ -19,6 +23,7 @@ const LIBRARY_WORKSPACE_UI_MARKER: &str = "subtitle-factory-ui:library-workspace
 const DIRECT_DISTRIBUTION_CHANNEL: &str = "direct";
 const APP_STORE_DISTRIBUTION_CHANNEL: &str = "app_store";
 const BACKEND_STARTUP_ERROR_FILE: &str = "backend-startup-error.txt";
+#[cfg(unix)]
 const BACKEND_SHUTDOWN_GRACE: Duration = Duration::from_secs(15);
 
 #[cfg(unix)]
@@ -43,6 +48,8 @@ fn process_group_exists(group: i32) -> bool {
 
 struct BackendProcess {
     child: Mutex<Option<Child>>,
+    // Windows 没有进程组语义，该字段只在 POSIX 的优雅关闭路径中读取。
+    #[cfg_attr(not(unix), allow(dead_code))]
     process_group: Option<i32>,
     pid_file: PathBuf,
 }

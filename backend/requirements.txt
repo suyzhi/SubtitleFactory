@@ -13,8 +13,14 @@ python-dotenv>=1.0.0
 aiofiles>=24.1.0
 httpx>=0.28.0
 pysubs2>=1.8.0
+# sidecar_main 的冻结运行时自检与云端模型的 token 计数都直接 import tiktoken；
+# 此前它只出现在 macOS 的 release lock 中，Windows 上按 requirements.txt 安装会缺失。
+tiktoken>=0.13.0
 Pillow>=11.3.0
 python-multipart>=0.0.22
 keyring>=25.7.0
 av>=11.0.0
 numpy>=1.26.0
+# sidecar_main 的冻结运行时自检直接 import scipy.signal；此前只在 macOS 的
+# release lock 中锁定，按 requirements.txt 安装会缺失。
+scipy>=1.14.0

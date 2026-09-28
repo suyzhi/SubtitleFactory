@@ -10,6 +10,11 @@
   - `start-desktop.ps1`：补齐 `backend/.env` 创建、Tauri `resources` 占位目录（缺失会让 cargo/tauri 在编译期失败）、退出时的构建产物清理，并改用 `npx.cmd` 绕过 `npx.ps1` 的执行策略限制。
   - Tauri：`bundle.targets` 拆分为平台配置（新增 `tauri.windows.conf.json`，Windows 产出 NSIS 安装包），后端进程以 `CREATE_NO_WINDOW` 启动避免弹黑窗，“在资源管理器中显示”不再因 explorer 退出码 1 误报失败。
   - 后端：字幕字体回退改为确定性选择；`/api/health` 增加 `platform` 与 `runtime.ocr` 能力上报，Windows 上界面不再引导用户点击必然失败的 OCR 流程。
+  - **修复冻结后端在 Windows 上启动即卡死**：父进程看门狗用线程阻塞在 stdin 管道读取，而主线程同时加载 C 扩展 DLL，二者在 Windows 上互锁——后端进程常驻但永不监听端口，桌面窗口一直停在启动画面。改为用 `PeekNamedPipe` 轮询（不阻塞、不进入 loader lock），实测启动时间从「永不就绪」恢复到 5 秒内绑定端口。
+  - **补齐缺失依赖**：`tiktoken` 与 `scipy` 此前只出现在 macOS 的 `requirements-release.lock`，按 `requirements.txt` 安装会缺失，冻结后端的运行时自检直接失败；两者已加入跨平台依赖清单（与 release lock 同版本）。
+  - **新增 Windows 原生发布链**：`scripts/fetch-ffmpeg-windows.ps1`（下载 FFmpeg 9 / Deno 并缓存）、`scripts/build-sidecar.ps1`（PyInstaller 冻结后端 + 装配 `backend-runtime`，构建后真跑 `--verify-runtime` 自检）、`scripts/package-app.ps1`（发布界面标记校验 → 前端构建 → sidecar → `tauri build --bundles nsis`）。
+  - Tauri Windows 配置补齐：`mainBinaryName` 让可执行文件为 `SubtitleFactory.exe` 而非 `app.exe`，窗口设置原生标题（macOS 专有的 `titleBarStyle`/`hiddenTitle` 在 Windows 上会让标题栏与任务栏标题为空），`bundle.resources` 只打包 `backend-runtime`。
+  - 产出并实机验证 `字幕工厂_0.6.1_x64-setup.exe`（根目录，附 SHA-256）：安装到 `%LOCALAPPDATA%\字幕工厂`，启动后 5 秒内后端就绪、界面完成鉴权并拉取 `/api/health` 与 `/api/tasks`。
 
 ## 0.6.0 — 2026-09-27
 

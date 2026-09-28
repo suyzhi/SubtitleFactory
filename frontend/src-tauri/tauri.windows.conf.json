@@ -1,7 +1,22 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
+  "mainBinaryName": "SubtitleFactory",
+  "app": {
+    "windows": [
+      {
+        "title": "字幕工厂",
+        "width": 1400,
+        "height": 900,
+        "minWidth": 1000,
+        "minHeight": 700,
+        "resizable": true,
+        "fullscreen": false
+      }
+    ]
+  },
   "bundle": {
     "targets": ["nsis"],
+    "resources": ["backend-runtime"],
     "windows": {
       "nsis": {
         "installMode": "currentUser",

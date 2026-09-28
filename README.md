@@ -32,7 +32,33 @@
 
 Windows 10/11 原生支持，支持 Windows PowerShell 5.1（系统自带）与 PowerShell 7。
 
-**环境要求**
+**直接安装（推荐）**
+
+Windows 提供现成安装包，已内置冻结后端与 FFmpeg/FFprobe/Deno，安装后不需要 Python、Node 或 Rust：
+
+```text
+字幕工厂_0.6.1_x64-setup.exe
+```
+
+双击安装（按当前用户安装到 `%LOCALAPPDATA%\字幕工厂`），开始菜单会出现「字幕工厂」。
+卸载请用「设置 → 应用」，或安装目录下的 `uninstall.exe`。
+
+若 SmartScreen 提示「未知发布者」，是因为安装包未购买商业代码签名证书；选择
+「更多信息 → 仍要运行」即可。安装包与 SHA-256 校验文件都在仓库根目录。
+
+**从源码构建安装包**
+
+需要 Rust 工具链（<https://win.rustup.rs/>）、Node.js 18+ 与 Python 3.11（或 uv）：
+
+```powershell
+# 下载 Windows FFmpeg/Deno → PyInstaller 冻结后端 → Vite 构建 → NSIS 安装包
+.\scripts\package-app.ps1
+```
+
+产物位于 `frontend\src-tauri\target\release\bundle\nsis\`。增量重建时可加
+`-SkipSidecar` 复用已有的 `backend-runtime`。
+
+**环境要求（源码运行）**
 
 - Python 3.10+（推荐 3.11）或 [uv](https://docs.astral.sh/uv/)：首次运行会自动创建 `backend/.venv` 并在 `requirements.txt` 更新后重新同步依赖。
 - Node.js 18+：首次运行会自动执行 `npm install`。

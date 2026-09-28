@@ -32,10 +32,14 @@ frontend/src-tauri/binaries/
 backend/runtime/bin/
 backend/runtime/parakeet-coreml/.build/
 vendor/ffmpeg/darwin-arm64/
+vendor/win-x64/
 vendor/ffmpeg/build/
 vendor/ffmpeg/source/
 *.app/
 *.dmg
+# Windows 发布产物同样不入库（由 scripts/package-app.ps1 生成）
+*.exe
+*.exe.sha256
 *.pkg
 *.zip
 *.sha256

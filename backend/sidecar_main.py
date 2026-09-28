@@ -6,6 +6,7 @@ import os
 import signal
 import sys
 import threading
+import time
 from typing import BinaryIO, Callable
 
 import uvicorn
@@ -104,11 +105,53 @@ def _terminate_managed_process_group() -> None:
         sys.exit(0)
 
 
+def _watch_parent_pipe_win32(
+    stream: BinaryIO,
+    terminate: Callable[[], None],
+) -> None:
+    """Watch the stdin pipe without a blocking read.
+
+    A thread parked inside ReadFile deadlocks on Windows as soon as the main
+    thread loads a C extension DLL: the frozen backend then never reached
+    uvicorn and never bound a port, so the desktop window sat on its startup
+    screen forever.  PeekNamedPipe returns immediately, which keeps the
+    watchdog clear of the loader lock.
+    """
+    import ctypes
+    import msvcrt
+
+    try:
+        handle = msvcrt.get_osfhandle(stream.fileno())
+    except (OSError, ValueError, AttributeError):
+        # The pipe cannot be inspected; leaving the backend alive is safer than
+        # terminating a healthy process.
+        return
+    kernel32 = ctypes.windll.kernel32
+    if kernel32.GetFileType(ctypes.c_void_p(handle)) != 3:  # FILE_TYPE_PIPE
+        # stdin is a console or a file, so the parent cannot be observed here.
+        return
+    available = ctypes.c_ulong(0)
+    while True:
+        try:
+            still_open = kernel32.PeekNamedPipe(
+                ctypes.c_void_p(handle), None, 0, None, ctypes.byref(available), None
+            )
+        except (OSError, AttributeError):
+            return
+        if not still_open:
+            terminate()
+            return
+        time.sleep(0.25)
+
+
 def _watch_parent_pipe(
     stream: BinaryIO,
     terminate: Callable[[], None] = _terminate_managed_process_group,
 ) -> None:
     """Block until Tauri's private stdin pipe closes, then terminate safely."""
+    if os.name == "nt":
+        _watch_parent_pipe_win32(stream, terminate)
+        return
     try:
         while stream.read(1):
             # The parent deliberately never writes. Reading remains useful if
