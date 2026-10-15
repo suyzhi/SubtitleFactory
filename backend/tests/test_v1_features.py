@@ -302,6 +302,19 @@ class V1FeatureTests(unittest.TestCase):
         self.assertEqual(parse_subtitle(vtt, "a.vtt")[0]["text"], "Hello")
         self.assertEqual(parse_subtitle(ass, "a.ass")[0]["text"], "Hello\nworld")
 
+    def test_vtt_accepts_timestamps_without_hours(self):
+        vtt = (
+            b"WEBVTT\n\n00:01.000 --> 00:04.500 align:start\nShort form\n\n"
+            b"01:02:03.250 --> 01:02:04.000\nLong form\n"
+        )
+        cues = parse_subtitle(vtt, "a.vtt")
+        self.assertEqual([(cue["start"], cue["end"]) for cue in cues], [(1.0, 4.5), (3723.25, 3724.0)])
+        self.assertEqual([cue["text"] for cue in cues], ["Short form", "Long form"])
+        srt = b"1\n01:02:03,004 --> 01:02:05,000\nSRT keeps hours\n"
+        cue = parse_subtitle(srt, "a.srt")[0]
+        self.assertAlmostEqual(cue["start"], 3723.004)
+        self.assertEqual(cue["end"], 3725.0)
+
     def test_prepared_exports_stay_inside_the_managed_exports_directory(self):
         glossary_id = str(uuid.uuid4())
         db = database.get_db()

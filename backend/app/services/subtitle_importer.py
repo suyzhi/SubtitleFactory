@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import re
 
-TIME_RE = re.compile(r"(?P<h>\d{1,2}):(?P<m>\d{2}):(?P<s>\d{2})[,.](?P<ms>\d{1,3})")
+# Hours are optional: WebVTT allows short "mm:ss.ttt" timestamps.
+TIME_RE = re.compile(r"(?:(?P<h>\d{1,2}):)?(?P<m>\d{2}):(?P<s>\d{2})[,.](?P<ms>\d{1,3})")
 
 
 def _seconds(value: str) -> float:
@@ -13,7 +14,8 @@ def _seconds(value: str) -> float:
         raise ValueError(f"无法识别时间码：{value}")
     parts = match.groupdict()
     milliseconds = int(parts["ms"].ljust(3, "0"))
-    return int(parts["h"]) * 3600 + int(parts["m"]) * 60 + int(parts["s"]) + milliseconds / 1000
+    hours = int(parts["h"]) if parts["h"] is not None else 0
+    return hours * 3600 + int(parts["m"]) * 60 + int(parts["s"]) + milliseconds / 1000
 
 
 def _clean_text(value: str) -> str:
