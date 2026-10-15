@@ -224,13 +224,16 @@ def _apply_replace(conn, project_id: str, request: SegmentOperationRequest) -> t
         raise EditorServiceError(422, "EMPTY_SEARCH", "查找内容不能为空")
     affected = 0
     pattern = re.compile(re.escape(request.search), 0 if request.match_case else re.IGNORECASE)
+    # Search is literal, so the replacement is too: a function result is
+    # inserted verbatim, keeping text such as "\N" or "C:\temp" intact.
+    replacement = request.replacement
     for row in _rows(conn, project_id):
         if row["locked"] and not request.include_locked:
             continue
         updates = {}
         for field in request.fields:
             value = row[field] or ""
-            replaced = pattern.sub(request.replacement, value)
+            replaced = pattern.sub(lambda _match: replacement, value)
             if replaced != value:
                 updates[field] = replaced
         if updates:

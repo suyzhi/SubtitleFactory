@@ -92,6 +92,18 @@ class EditorAPITests(unittest.TestCase):
         self.assertEqual(conflict.status_code, 409)
         self.assertEqual(conflict.json()["detail"]["code"], "EDIT_REVISION_CONFLICT")
 
+    def test_bulk_replace_inserts_replacement_text_literally(self):
+        # ASS line breaks, Windows paths and regex-looking group references
+        # must not be interpreted as re.sub escapes.
+        replacement = r"C:\temp\Users\N\1\g<0>"
+        response = self.operate(
+            operation="replace", search="world", replacement=replacement,
+            fields=["clean_text"], match_case=False,
+        )
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["affected_count"], 1)
+        self.assertEqual(self.segments()[0]["clean_text"], "Hello " + replacement)
+
     def test_split_merge_and_persistent_undo_redo(self):
         split = self.operate(
             operation="split", split_index=1, split_at=0.5, text_offset=5,
