@@ -10,9 +10,12 @@ import zipfile
 from pathlib import Path
 from unittest.mock import patch
 
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app.api import maintenance, terminology
+from app.api import maintenance, packages, terminology
 from app.models import database, migrations
 from app.services import project_packages, waveform
 from app.services.backups import (
@@ -168,6 +171,23 @@ class V1FeatureTests(unittest.TestCase):
         )
         self.assertEqual(imported["project_id"], fresh_id)
         self.assertTrue((projects_dir / fresh_id / "media" / "video.mp4").is_file())
+
+    def test_package_import_reports_unreadable_packages_as_invalid(self):
+        app = FastAPI()
+        app.include_router(packages.router)
+        with TestClient(app) as client:
+            not_zip = client.post(
+                "/api/project-packages/import",
+                files={"file": ("broken.sfproject", b"not a zip archive")},
+            )
+            with patch.object(packages, "import_project_package", side_effect=KeyError("id")):
+                missing_key = client.post(
+                    "/api/project-packages/import",
+                    files={"file": ("missing.sfproject", b"placeholder")},
+                )
+        for response in (not_zip, missing_key):
+            self.assertEqual(response.status_code, 422, response.text)
+            self.assertEqual(response.json()["detail"]["code"], "PROJECT_PACKAGE_INVALID")
 
     def test_backup_restore_is_verified_staged_and_applied_before_restart(self):
         backup = create_backup("manual")
