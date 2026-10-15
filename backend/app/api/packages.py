@@ -2,6 +2,7 @@
 
 import os
 import tempfile
+import zipfile
 from pathlib import Path
 
 from fastapi import APIRouter, File, HTTPException, UploadFile
@@ -54,5 +55,9 @@ async def import_package(file: UploadFile = File(...)):
         return import_project_package(temporary)
     except ValueError as error:
         raise HTTPException(422, detail={"code": "PROJECT_PACKAGE_INVALID", "message": str(error), "recoverable": True}) from error
+    except zipfile.BadZipFile as error:
+        raise HTTPException(422, detail={"code": "PROJECT_PACKAGE_INVALID", "message": "项目包不是有效的压缩文件", "recoverable": True}) from error
+    except KeyError as error:
+        raise HTTPException(422, detail={"code": "PROJECT_PACKAGE_INVALID", "message": f"项目包缺少必要字段：{error}", "recoverable": True}) from error
     finally:
         Path(temporary).unlink(missing_ok=True)

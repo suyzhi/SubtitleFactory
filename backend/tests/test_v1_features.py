@@ -1,3 +1,4 @@
+import hashlib
 import json
 import stat
 import sys
@@ -5,12 +6,16 @@ import tempfile
 import unittest
 import uuid
 import wave
+import zipfile
 from pathlib import Path
 from unittest.mock import patch
 
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app.api import maintenance, terminology
+from app.api import maintenance, packages, terminology
 from app.models import database, migrations
 from app.services import project_packages, waveform
 from app.services.backups import (
@@ -127,6 +132,62 @@ class V1FeatureTests(unittest.TestCase):
         db.close()
         self.assertEqual(copied, 2)
         self.assertEqual(copied_style["fontSize"], 24)
+
+    def _repack_with_project_id(self, package: Path, project_id) -> Path:
+        with zipfile.ZipFile(package) as source:
+            files = {name: source.read(name) for name in source.namelist() if name != "manifest.json"}
+            manifest = json.loads(source.read("manifest.json"))
+        project = json.loads(files["data/project.json"])
+        project["id"] = project_id
+        files["data/project.json"] = json.dumps(project).encode("utf-8")
+        files["media/video.mp4"] = b"video"
+        manifest["checksums"] = {name: hashlib.sha256(content).hexdigest() for name, content in files.items()}
+        crafted = package.with_name(f"crafted-{uuid.uuid4()}.sfproject")
+        with zipfile.ZipFile(crafted, "w") as archive:
+            archive.writestr("manifest.json", json.dumps(manifest))
+            for name, content in files.items():
+                archive.writestr(name, content)
+        return crafted
+
+    def test_project_package_only_reuses_a_canonical_uuid_as_project_folder(self):
+        package = project_packages.export_project_package(self.project_id)
+        projects_dir = (self.root / "projects").resolve()
+        for unsafe in ("../escaped", "", "x/..", str(uuid.uuid4()).upper(), 42):
+            imported = project_packages.import_project_package(
+                str(self._repack_with_project_id(package, unsafe))
+            )
+            project_id = imported["project_id"]
+            self.assertNotEqual(project_id, unsafe)
+            self.assertEqual(str(uuid.UUID(project_id)), project_id)
+            db = database.get_db()
+            video_path = db.execute("SELECT video_path FROM projects WHERE id=?", (project_id,)).fetchone()[0]
+            db.close()
+            self.assertEqual(Path(video_path).resolve().parent, projects_dir / project_id / "media")
+        self.assertFalse((self.root / "escaped").exists())
+
+        fresh_id = str(uuid.uuid4())
+        imported = project_packages.import_project_package(
+            str(self._repack_with_project_id(package, fresh_id))
+        )
+        self.assertEqual(imported["project_id"], fresh_id)
+        self.assertTrue((projects_dir / fresh_id / "media" / "video.mp4").is_file())
+
+    def test_package_import_reports_unreadable_packages_as_invalid(self):
+        app = FastAPI()
+        app.include_router(packages.router)
+        with TestClient(app) as client:
+            not_zip = client.post(
+                "/api/project-packages/import",
+                files={"file": ("broken.sfproject", b"not a zip archive")},
+            )
+            with patch.object(packages, "import_project_package", side_effect=KeyError("id")):
+                missing_key = client.post(
+                    "/api/project-packages/import",
+                    files={"file": ("missing.sfproject", b"placeholder")},
+                )
+        for response in (not_zip, missing_key):
+            self.assertEqual(response.status_code, 422, response.text)
+            self.assertEqual(response.json()["detail"]["code"], "PROJECT_PACKAGE_INVALID")
 
     def test_backup_restore_is_verified_staged_and_applied_before_restart(self):
         backup = create_backup("manual")
@@ -261,6 +322,19 @@ class V1FeatureTests(unittest.TestCase):
         self.assertEqual(parse_subtitle(vtt, "a.vtt")[0]["text"], "Hello")
         self.assertEqual(parse_subtitle(ass, "a.ass")[0]["text"], "Hello\nworld")
 
+    def test_vtt_accepts_timestamps_without_hours(self):
+        vtt = (
+            b"WEBVTT\n\n00:01.000 --> 00:04.500 align:start\nShort form\n\n"
+            b"01:02:03.250 --> 01:02:04.000\nLong form\n"
+        )
+        cues = parse_subtitle(vtt, "a.vtt")
+        self.assertEqual([(cue["start"], cue["end"]) for cue in cues], [(1.0, 4.5), (3723.25, 3724.0)])
+        self.assertEqual([cue["text"] for cue in cues], ["Short form", "Long form"])
+        srt = b"1\n01:02:03,004 --> 01:02:05,000\nSRT keeps hours\n"
+        cue = parse_subtitle(srt, "a.srt")[0]
+        self.assertAlmostEqual(cue["start"], 3723.004)
+        self.assertEqual(cue["end"], 3725.0)
+
     def test_prepared_exports_stay_inside_the_managed_exports_directory(self):
         glossary_id = str(uuid.uuid4())
         db = database.get_db()
@@ -285,6 +359,41 @@ class V1FeatureTests(unittest.TestCase):
             self.assertEqual(prepared["size"], path.stat().st_size)
 
         self.assertTrue(Path(glossary["path"]).read_bytes().startswith(b"\xef\xbb\xbf"))
+
+    def test_glossary_import_reads_the_flag_columns_that_export_writes(self):
+        source_id, copy_id = str(uuid.uuid4()), str(uuid.uuid4())
+        db = database.get_db()
+        for glossary_id in (source_id, copy_id):
+            db.execute(
+                "INSERT INTO glossaries VALUES (?,?,'Flags','en','zh','now','now')",
+                (glossary_id, self.project_id),
+            )
+        db.commit()
+        db.close()
+
+        def flags(glossary_id):
+            return {
+                term["source_text"]: (term["case_sensitive"], term["whole_word"], term["do_not_translate"])
+                for term in terminology.list_terms(glossary_id)["terms"]
+            }
+
+        content = (
+            "source_text,target_text,case_sensitive,whole_word,do_not_translate,note\n"
+            "OpenAI,OpenAI,1,0,1,brand\n"
+            "Timeline,时间线,TRUE,no,Yes,\n"
+            "subtitle,字幕,,,,\n"
+        )
+        terminology.import_terms(source_id, terminology.TermImport(content=content, commit=True))
+        expected = {
+            "OpenAI": (True, False, True),
+            "Timeline": (True, False, True),
+            "subtitle": (False, True, False),
+        }
+        self.assertEqual(flags(source_id), expected)
+
+        exported = terminology._export_terms_content(source_id, "tsv")
+        terminology.import_terms(copy_id, terminology.TermImport(content=exported, delimiter="\t", commit=True))
+        self.assertEqual(flags(copy_id), expected)
 
     def test_failed_migration_restores_pre_migration_database(self):
         def fail_after_ddl(conn):

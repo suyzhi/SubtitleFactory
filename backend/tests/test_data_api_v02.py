@@ -208,6 +208,27 @@ class ProjectTrashAPITests(unittest.TestCase):
         self.assertEqual(emptied.status_code, 200)
         self.assertEqual(emptied.json()["deleted_count"], 1)
 
+    def test_empty_trash_never_removes_a_storage_root(self):
+        # Ids like these can arrive via an imported .sfproject; joined to a
+        # storage root they resolve to the root itself.
+        self.insert_project("", "2026-01-01 00:00:00")
+        self.insert_project("escape/..", "2026-01-01 00:00:00")
+        kept = [
+            self.root / name / "other-project" / "keep.txt"
+            for name in ("projects", "downloads", "audio", "subtitles", "exports")
+        ]
+        for path in kept:
+            path.parent.mkdir()
+            path.write_text("keep", encoding="utf-8")
+        emptied = self.client.delete("/api/projects/trash?confirm=true")
+        self.assertEqual(emptied.status_code, 200, emptied.text)
+        self.assertEqual(emptied.json()["deleted_count"], 2)
+        for path in kept:
+            self.assertTrue(path.is_file(), path)
+        self.assertFalse(projects._path_is_managed(self.root))
+        self.assertFalse(projects._path_is_managed(self.root / "projects" / "escape" / ".."))
+        self.assertTrue(projects._path_is_managed(self.root / "projects" / "other-project"))
+
     def test_model_validation_matches_model_list_contract(self):
         response = self.client.get("/api/transcription/models/small/validate")
         self.assertEqual(response.status_code, 200)
