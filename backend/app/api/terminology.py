@@ -178,6 +178,16 @@ def _parse_terms(content: str, delimiter: str) -> list[dict]:
     return rows
 
 
+def _csv_flag(item: dict, name: str) -> int:
+    """Read a flag column written by export; blank or unknown keeps the TermInput default."""
+    value = str(item.get(name) or "").strip().lower()
+    if value in {"1", "true", "yes"}:
+        return 1
+    if value in {"0", "false", "no"}:
+        return 0
+    return int(TermInput.model_fields[name].default)
+
+
 @router.post("/glossaries/{glossary_id}/import")
 def import_terms(glossary_id: str, request: TermImport):
     parsed = _parse_terms(request.content, request.delimiter)
@@ -192,8 +202,10 @@ def import_terms(glossary_id: str, request: TermImport):
                 db.execute(
                     """INSERT INTO glossary_terms
                        (id,glossary_id,source_text,target_text,case_sensitive,whole_word,do_not_translate,note,created_at,updated_at)
-                       VALUES (?,?,?,?,0,1,0,?,?,?)""",
-                    (str(uuid.uuid4()), glossary_id, item["source_text"], item.get("target_text", ""), item.get("note", ""), now, now),
+                       VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                    (str(uuid.uuid4()), glossary_id, item["source_text"], item.get("target_text", ""),
+                     _csv_flag(item, "case_sensitive"), _csv_flag(item, "whole_word"),
+                     _csv_flag(item, "do_not_translate"), item.get("note", ""), now, now),
                 )
             db.commit()
         return {"rows": parsed, "new_count": len(fresh), "conflicts": conflicts, "committed": request.commit}

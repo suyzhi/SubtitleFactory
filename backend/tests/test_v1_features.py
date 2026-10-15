@@ -340,6 +340,41 @@ class V1FeatureTests(unittest.TestCase):
 
         self.assertTrue(Path(glossary["path"]).read_bytes().startswith(b"\xef\xbb\xbf"))
 
+    def test_glossary_import_reads_the_flag_columns_that_export_writes(self):
+        source_id, copy_id = str(uuid.uuid4()), str(uuid.uuid4())
+        db = database.get_db()
+        for glossary_id in (source_id, copy_id):
+            db.execute(
+                "INSERT INTO glossaries VALUES (?,?,'Flags','en','zh','now','now')",
+                (glossary_id, self.project_id),
+            )
+        db.commit()
+        db.close()
+
+        def flags(glossary_id):
+            return {
+                term["source_text"]: (term["case_sensitive"], term["whole_word"], term["do_not_translate"])
+                for term in terminology.list_terms(glossary_id)["terms"]
+            }
+
+        content = (
+            "source_text,target_text,case_sensitive,whole_word,do_not_translate,note\n"
+            "OpenAI,OpenAI,1,0,1,brand\n"
+            "Timeline,时间线,TRUE,no,Yes,\n"
+            "subtitle,字幕,,,,\n"
+        )
+        terminology.import_terms(source_id, terminology.TermImport(content=content, commit=True))
+        expected = {
+            "OpenAI": (True, False, True),
+            "Timeline": (True, False, True),
+            "subtitle": (False, True, False),
+        }
+        self.assertEqual(flags(source_id), expected)
+
+        exported = terminology._export_terms_content(source_id, "tsv")
+        terminology.import_terms(copy_id, terminology.TermImport(content=exported, delimiter="\t", commit=True))
+        self.assertEqual(flags(copy_id), expected)
+
     def test_failed_migration_restores_pre_migration_database(self):
         def fail_after_ddl(conn):
             conn.executescript("CREATE TABLE partial_upgrade(value TEXT); INSERT INTO partial_upgrade VALUES ('bad');")
