@@ -1,3 +1,4 @@
+import hashlib
 import json
 import stat
 import sys
@@ -5,6 +6,7 @@ import tempfile
 import unittest
 import uuid
 import wave
+import zipfile
 from pathlib import Path
 from unittest.mock import patch
 
@@ -127,6 +129,45 @@ class V1FeatureTests(unittest.TestCase):
         db.close()
         self.assertEqual(copied, 2)
         self.assertEqual(copied_style["fontSize"], 24)
+
+    def _repack_with_project_id(self, package: Path, project_id) -> Path:
+        with zipfile.ZipFile(package) as source:
+            files = {name: source.read(name) for name in source.namelist() if name != "manifest.json"}
+            manifest = json.loads(source.read("manifest.json"))
+        project = json.loads(files["data/project.json"])
+        project["id"] = project_id
+        files["data/project.json"] = json.dumps(project).encode("utf-8")
+        files["media/video.mp4"] = b"video"
+        manifest["checksums"] = {name: hashlib.sha256(content).hexdigest() for name, content in files.items()}
+        crafted = package.with_name(f"crafted-{uuid.uuid4()}.sfproject")
+        with zipfile.ZipFile(crafted, "w") as archive:
+            archive.writestr("manifest.json", json.dumps(manifest))
+            for name, content in files.items():
+                archive.writestr(name, content)
+        return crafted
+
+    def test_project_package_only_reuses_a_canonical_uuid_as_project_folder(self):
+        package = project_packages.export_project_package(self.project_id)
+        projects_dir = (self.root / "projects").resolve()
+        for unsafe in ("../escaped", "", "x/..", str(uuid.uuid4()).upper(), 42):
+            imported = project_packages.import_project_package(
+                str(self._repack_with_project_id(package, unsafe))
+            )
+            project_id = imported["project_id"]
+            self.assertNotEqual(project_id, unsafe)
+            self.assertEqual(str(uuid.UUID(project_id)), project_id)
+            db = database.get_db()
+            video_path = db.execute("SELECT video_path FROM projects WHERE id=?", (project_id,)).fetchone()[0]
+            db.close()
+            self.assertEqual(Path(video_path).resolve().parent, projects_dir / project_id / "media")
+        self.assertFalse((self.root / "escaped").exists())
+
+        fresh_id = str(uuid.uuid4())
+        imported = project_packages.import_project_package(
+            str(self._repack_with_project_id(package, fresh_id))
+        )
+        self.assertEqual(imported["project_id"], fresh_id)
+        self.assertTrue((projects_dir / fresh_id / "media" / "video.mp4").is_file())
 
     def test_backup_restore_is_verified_staged_and_applied_before_restart(self):
         backup = create_backup("manual")

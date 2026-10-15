@@ -334,16 +334,12 @@ def _path_is_managed(path: Path) -> bool:
     if custom_download_root:
         roots.add(Path(custom_download_root))
     resolved = path.resolve(strict=False)
-    for root in roots:
-        resolved_root = root.expanduser().resolve(strict=False)
-        if resolved == resolved_root:
-            continue
-        try:
-            resolved.relative_to(resolved_root)
-            return True
-        except ValueError:
-            continue
-    return False
+    resolved_roots = {root.expanduser().resolve(strict=False) for root in roots}
+    # A storage root itself is never deletable, even when it also lies below
+    # another root (e.g. PROJECTS_DIR inside DATA_DIR).
+    if resolved in resolved_roots:
+        return False
+    return any(resolved.is_relative_to(root) for root in resolved_roots)
 
 
 def _remove_managed_path(path: Path) -> None:

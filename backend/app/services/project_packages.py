@@ -33,6 +33,17 @@ def _digest(content: bytes) -> str:
     return hashlib.sha256(content).hexdigest()
 
 
+def _is_canonical_uuid(value) -> bool:
+    # The package id later becomes a folder name under PROJECTS_DIR, so only
+    # the exact form the App itself generates may be reused.
+    if not isinstance(value, str):
+        return False
+    try:
+        return str(uuid.UUID(value)) == value
+    except ValueError:
+        return False
+
+
 def export_project_package(project_id: str, include_media: bool = False) -> Path:
     db = get_db()
     try:
@@ -188,11 +199,13 @@ def import_project_package(path: str) -> dict:
             if start < 0 or end <= start or start < previous_end - 1e-6:
                 raise ValueError("项目包包含非法或重叠时间码")
             previous_end = end
-        db = get_db()
-        try:
-            exists = db.execute("SELECT 1 FROM projects WHERE id=?", (old_id,)).fetchone()
-        finally:
-            db.close()
+        exists = True
+        if _is_canonical_uuid(old_id):
+            db = get_db()
+            try:
+                exists = db.execute("SELECT 1 FROM projects WHERE id=?", (old_id,)).fetchone() is not None
+            finally:
+                db.close()
         project_id = str(uuid.uuid4()) if exists else old_id
         destination = Path(PROJECTS_DIR) / project_id / "media"
         media_paths = {}
@@ -241,8 +254,9 @@ def import_project_package(path: str) -> dict:
             db.execute("INSERT INTO speakers(id,project_id,name,color,external_key,created_at,updated_at) VALUES (?,?,?,?,?,?,?)", [item.get(key) for key in ("id","project_id","name","color","external_key","created_at","updated_at")])
         for item in history:
             item.update({"id": str(uuid.uuid4()), "project_id": project_id})
-            for field in ("before_json", "after_json"):
-                item[field] = item[field].replace(old_id, project_id)
+            if isinstance(old_id, str) and old_id and old_id != project_id:
+                for field in ("before_json", "after_json"):
+                    item[field] = item[field].replace(old_id, project_id)
             db.execute("""INSERT INTO edit_operations(id,project_id,operation,before_json,after_json,base_revision,result_revision,undone,created_at)
                           VALUES (?,?,?,?,?,?,?,?,?)""", [item.get(key) for key in ("id","project_id","operation","before_json","after_json","base_revision","result_revision","undone","created_at")])
         for item in glossaries:
