@@ -80,6 +80,14 @@ def _fix_operation(project_id: str, issue_id: str, expected_revision: int):
             return SegmentOperationRequest(expected_revision=expected_revision, operation="update_many", items=[SegmentOperationItem(index=issue["idx"], translated_text=replacement)]), {"before": target, "after": replacement}
         if issue["rule_id"] == "duplicate" and issue["idx"] > 1:
             return SegmentOperationRequest(expected_revision=expected_revision, operation="merge", indices=[issue["idx"] - 1, issue["idx"]]), {"before": "两条重复字幕", "after": "合并为一条"}
+        if issue["rule_id"] == "empty_text":
+            # Deleting is destructive: re-check the current text so a stale
+            # issue never removes a subtitle that has been filled in since.
+            if (issue["clean_text"] or issue["raw_text"] or "").strip():
+                raise HTTPException(409, detail={"code": "QUALITY_ISSUE_STALE", "message": "该字幕已有正文，请重新检查"})
+            translation = (issue["translated_text"] or "").strip()
+            before = f"第 {issue['idx']} 条空字幕" + (f"（译文：{translation}）" if translation else "")
+            return SegmentOperationRequest(expected_revision=expected_revision, operation="delete", indices=[issue["idx"]]), {"before": before, "after": "删除该条，后续字幕自动重新编号"}
         raise HTTPException(409, detail={"code": "NO_DETERMINISTIC_FIX", "message": "该问题需要人工确认或 AI 预览修复"})
     finally: db.close()
 

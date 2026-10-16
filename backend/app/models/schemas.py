@@ -119,7 +119,7 @@ class SegmentOperationRequest(BaseModel):
 
     expected_revision: int = Field(ge=0)
     operation: Literal[
-        "update_many", "replace", "shift", "split", "merge", "assign_speaker"
+        "update_many", "replace", "shift", "split", "merge", "assign_speaker", "delete"
     ]
     items: List[SegmentOperationItem] = Field(default_factory=list)
     indices: List[int] = Field(default_factory=list)

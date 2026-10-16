@@ -13,7 +13,7 @@ import { fmtTime } from '../utils/library';
 
 function SubtitleTable({
   segments, currentTime, activeIdx, onSeek, onInspect, onUpdate, onReplaceAll, onSplit, onMerge,
-  onUndo, onRedo, saveState, draftCount, draftIsStale, onPreviewDraft,
+  onDelete, onUndo, onRedo, saveState, draftCount, draftIsStale, onPreviewDraft,
   onCommitDraft, onDiscardDraft,
   onAutoScrollChange, autoScroll, entryFocusIdx, entryFocusRequest, disabled
 }: {
@@ -28,6 +28,7 @@ function SubtitleTable({
   onReplaceAll: (search: string, replacement: string, fields: Array<'clean_text' | 'translated_text'>, options: {matchCase: boolean; includeLocked: boolean}) => Promise<void>;
   onSplit: (index: number, splitAt: number) => Promise<void>;
   onMerge: (indices: number[]) => Promise<void>;
+  onDelete: (indices: number[]) => Promise<void>;
   onUndo: () => void | Promise<void>;
   onRedo: () => void | Promise<void>;
   saveState: 'idle' | 'saving' | 'saved' | 'error';
@@ -289,6 +290,12 @@ function SubtitleTable({
   const canSplit = !!selectedSegment && currentTime > selectedSegment.start && currentTime < selectedSegment.end;
   const canMerge = selected.length >= 2 && selected.every((value, index) => index === 0 || value === selected[index - 1] + 1);
 
+  const deleteSelected = () => {
+    if (!selected.length) return;
+    if (selected.length > 1 && !window.confirm(`删除所选 ${selected.length} 条字幕？后续字幕会重新编号，此操作可撤销。`)) return;
+    void onDelete(selected).then(() => setSelectedIndices(new Set())).catch(() => undefined);
+  };
+
   const toggleSelected = (index: number) => setSelectedIndices(current => {
     const next = new Set(current);
     if (next.has(index)) next.delete(index); else next.add(index);
@@ -310,6 +317,7 @@ function SubtitleTable({
               .catch(() => undefined);
           }} title="在播放头处拆分所选字幕（⌘↩ 可直接拆分播放头所在字幕）">拆分</button>
           <button className="btn btn-ghost btn-xs" disabled={disabled || !canMerge} onClick={() => void onMerge(selected).then(() => setSelectedIndices(new Set())).catch(() => undefined)}>合并</button>
+          <button className="btn btn-ghost btn-xs" disabled={disabled || !selected.length} onClick={deleteSelected} title="删除所选字幕，可撤销；锁定字幕需先解锁">删除</button>
           <button className={`btn btn-ghost btn-xs ${autoScroll ? '' : 'inactive'}`}
             aria-pressed={!!autoScroll}
             onClick={() => onAutoScrollChange?.(!autoScroll)}

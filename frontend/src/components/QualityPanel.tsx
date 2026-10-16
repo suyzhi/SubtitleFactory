@@ -84,7 +84,7 @@ export default function QualityPanel({ projectId, segments, onSeek, revision, on
       {visible.map(issue => <article key={issue.id} className={`quality-issue ${issue.severity}`}>
         <i aria-hidden="true">{issue.severity === 'error' ? '!' : issue.severity === 'warning' ? '△' : 'i'}</i>
         <div><small>{LABELS[issue.rule_id] || issue.rule_id}{issue.segment_index ? ` · 第 ${issue.segment_index} 条` : ''}</small><strong>{issue.message}</strong><p>{issue.suggestion}</p></div>
-        <div className="quality-actions">{issue.segment_index && <button onClick={() => locate(issue)}>定位</button>}{['line_length', 'number_mismatch', 'duplicate'].includes(issue.rule_id) && <button onClick={() => void previewFix(issue)}>预览修复</button>}{qualityCloudGranted && issue.segment_index && <button onClick={() => void previewAIFix(issue)}>AI 预览</button>}<button onClick={() => markMutation.mutate({ issue, status: 'resolved' })}>标为已处理</button><button onClick={() => markMutation.mutate({ issue, status: 'ignored' })}>忽略</button></div>
+        <div className="quality-actions">{issue.segment_index && <button onClick={() => locate(issue)}>定位</button>}{['line_length', 'number_mismatch', 'duplicate', 'empty_text'].includes(issue.rule_id) && <button onClick={() => void previewFix(issue)}>预览修复</button>}{qualityCloudGranted && issue.segment_index && <button onClick={() => void previewAIFix(issue)}>AI 预览</button>}<button onClick={() => markMutation.mutate({ issue, status: 'resolved' })}>标为已处理</button><button onClick={() => markMutation.mutate({ issue, status: 'ignored' })}>忽略</button></div>
       </article>)}
     </div>
   </section>;
