@@ -5,8 +5,8 @@
 """
 
 import logging
+import math
 import os
-from datetime import timedelta
 
 from ..utils.config import EXPORTS_DIR
 from ..utils.task_manager import task_manager
@@ -227,8 +227,8 @@ def export_ass(segments: list, output_path: str, bilingual: bool = False,
     )
 
     for seg in segments:
-        start_ms = int(seg["start"] * 1000)
-        end_ms = int(seg["end"] * 1000)
+        start_ms = _ass_milliseconds(seg["start"])
+        end_ms = _ass_milliseconds(seg["end"])
 
         text = ass_text(seg.get("clean_text") or seg["raw_text"])
         translated = ass_text(seg.get("translated_text", ""))
@@ -284,10 +284,28 @@ def get_subtitle_path(project_id: str, fmt: str) -> str:
 
 # ── 时间格式化工具 ──
 
+def _rounded_units(seconds: float, units_per_second: int) -> int:
+    """把秒四舍五入为整数个时间单位（毫秒或厘秒），负值按 0 处理。
+
+    多数毫秒值无法用浮点秒精确表示（1.001 实际是 1.000999…），直接截断会让
+    这类时间码提前一个单位。先取整、再拆分时/分/秒，进位也随之正确
+    （59.9996 秒 → 00:01:00,000）。
+    """
+    return max(0, math.floor(float(seconds) * units_per_second + 0.5))
+
+
+def _milliseconds(seconds: float) -> int:
+    return _rounded_units(seconds, 1000)
+
+
+def _ass_milliseconds(seconds: float) -> int:
+    """ASS 时间码精度为厘秒：直接按厘秒四舍五入后交给 pysubs2，避免二次舍入。"""
+    return _rounded_units(seconds, 100) * 10
+
+
 def _format_srt_time(seconds: float) -> str:
     """将秒转换为 SRT 时间格式: HH:MM:SS,mmm"""
-    td = timedelta(seconds=seconds)
-    total_ms = int(td.total_seconds() * 1000)
+    total_ms = _milliseconds(seconds)
     h = total_ms // 3600000
     m = (total_ms % 3600000) // 60000
     s = (total_ms % 60000) // 1000
@@ -297,8 +315,7 @@ def _format_srt_time(seconds: float) -> str:
 
 def _format_vtt_time(seconds: float) -> str:
     """将秒转换为 VTT 时间格式: HH:MM:SS.mmm"""
-    td = timedelta(seconds=seconds)
-    total_ms = int(td.total_seconds() * 1000)
+    total_ms = _milliseconds(seconds)
     h = total_ms // 3600000
     m = (total_ms % 3600000) // 60000
     s = (total_ms % 60000) // 1000
