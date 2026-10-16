@@ -14,6 +14,16 @@ from ..utils.task_manager import task_manager
 logger = logging.getLogger(__name__)
 
 
+def _cue_text(value: str) -> str:
+    """SRT/VTT 以空行分隔字幕块，正文里的空行会把一条字幕截断。
+
+    编辑器中连按两次 Shift+Enter 即可写入空行；导出时只去掉空行与仅含空白的行，
+    其余换行保持不变（ASS 使用 \\N，不受影响）。
+    """
+    lines = str(value or "").replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    return "\n".join(line for line in lines if line.strip())
+
+
 def export_srt(segments: list, output_path: str, bilingual: bool = False,
                primary_lang: str = "original", task_id: str = None):
     """
@@ -39,7 +49,7 @@ def export_srt(segments: list, output_path: str, bilingual: bool = False,
 
         lines.append(f"{idx}")
         lines.append(f"{start} --> {end}")
-        lines.append(subtitle_text)
+        lines.append(_cue_text(subtitle_text))
         lines.append("")
 
     content = "\n".join(lines)
@@ -87,7 +97,7 @@ def export_vtt(segments: list, output_path: str, bilingual: bool = False,
             subtitle_text = text
 
         lines.append(f"{start} --> {end}")
-        lines.append(subtitle_text)
+        lines.append(_cue_text(subtitle_text))
         lines.append("")
 
     content = "\n".join(lines)

@@ -891,6 +891,29 @@ class PersistenceAndExportTests(unittest.TestCase):
                 [(6000 + index, 6001 + index) for index in range(2, 200)],
             )
 
+    def test_blank_lines_inside_a_cue_do_not_split_srt_or_vtt(self):
+        # A blank line is the SRT/VTT cue separator; re-importing used to keep
+        # only "line one" and drop the rest of the subtitle.
+        segments = [
+            {"index": 1, "start": 0.0, "end": 1.0, "raw_text": "",
+             "clean_text": "line one\n\nline two\r\n  \nline three",
+             "translated_text": "译文\n\n第二行"},
+            {"index": 2, "start": 1.5, "end": 2.0,
+             "raw_text": "next cue", "clean_text": "", "translated_text": ""},
+        ]
+        for extension, export in (("srt", export_srt), ("vtt", export_vtt)):
+            for bilingual in (False, True):
+                with self.subTest(extension=extension, bilingual=bilingual), \
+                        tempfile.TemporaryDirectory() as folder:
+                    path = Path(folder) / f"out.{extension}"
+                    export(segments, str(path), bilingual=bilingual)
+                    cues = parse_subtitle(path.read_bytes(), path.name)
+                    first = "line one\nline two\nline three"
+                    if bilingual:
+                        first += "\n译文\n第二行"
+                    self.assertEqual([cue["text"] for cue in cues], [first, "next cue"])
+                    self.assertEqual([(cue["start"], cue["end"]) for cue in cues], [(0.0, 1.0), (1.5, 2.0)])
+
     def test_video_renderer_supports_mp4_and_mkv_containers(self):
         with tempfile.TemporaryDirectory() as folder:
             video = Path(folder) / "input.mp4"; video.write_bytes(b"video")
