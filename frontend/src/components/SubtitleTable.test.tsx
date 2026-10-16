@@ -76,6 +76,7 @@ function tableProps(segments: SubtitleSegment[]) {
     onReplaceAll: vi.fn().mockResolvedValue(undefined),
     onSplit: vi.fn().mockResolvedValue(undefined),
     onMerge: vi.fn().mockResolvedValue(undefined),
+    onDelete: vi.fn().mockResolvedValue(undefined),
     onUndo: vi.fn(),
     onRedo: vi.fn(),
     saveState: 'idle' as const,
@@ -197,6 +198,49 @@ describe('subtitle table layout and positioning', () => {
     rerender(<SubtitleTable {...props} entryFocusIdx={400} entryFocusRequest={2}/>);
     await waitFor(() => expect(screen.getByText('Original subtitle 400')).toBeInTheDocument());
     expect(scrollTo).toHaveBeenCalled();
+  });
+});
+
+describe('deleting selected subtitles', () => {
+  it('deletes a single selected row immediately and clears the selection', async () => {
+    const confirm = vi.spyOn(window, 'confirm');
+    const props = tableProps([makeSegment(1), makeSegment(2), makeSegment(3)]);
+    render(<SubtitleTable {...props}/>);
+    const deleteButton = screen.getByRole('button', { name: '删除' });
+    expect(deleteButton).toBeDisabled();
+
+    fireEvent.click(screen.getByRole('checkbox', { name: '选择第 2 条字幕' }));
+    expect(deleteButton).toBeEnabled();
+    fireEvent.click(deleteButton);
+
+    expect(confirm).not.toHaveBeenCalled();
+    expect(props.onDelete).toHaveBeenCalledWith([2]);
+    await waitFor(() => expect(deleteButton).toBeDisabled());
+    confirm.mockRestore();
+  });
+
+  it('asks for confirmation before deleting several rows', () => {
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
+    const props = tableProps([makeSegment(1), makeSegment(2), makeSegment(3)]);
+    render(<SubtitleTable {...props}/>);
+    fireEvent.click(screen.getByRole('checkbox', { name: '选择第 3 条字幕' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: '选择第 1 条字幕' }));
+
+    fireEvent.click(screen.getByRole('button', { name: '删除' }));
+    expect(confirm).toHaveBeenCalledWith(expect.stringContaining('2 条字幕'));
+    expect(props.onDelete).not.toHaveBeenCalled();
+
+    confirm.mockReturnValue(true);
+    fireEvent.click(screen.getByRole('button', { name: '删除' }));
+    expect(props.onDelete).toHaveBeenCalledWith([1, 3]);
+    confirm.mockRestore();
+  });
+
+  it('keeps the delete button unavailable while editing is disabled', () => {
+    const props = tableProps([makeSegment(1)]);
+    render(<SubtitleTable {...props} disabled/>);
+    fireEvent.click(screen.getByRole('checkbox', { name: '选择第 1 条字幕' }));
+    expect(screen.getByRole('button', { name: '删除' })).toBeDisabled();
   });
 });
 

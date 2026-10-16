@@ -427,7 +427,7 @@ export interface SegmentUpdate {
 }
 
 export type SegmentOperationKind =
-  | 'update_many' | 'replace' | 'shift' | 'split' | 'merge' | 'assign_speaker';
+  | 'update_many' | 'replace' | 'shift' | 'split' | 'merge' | 'assign_speaker' | 'delete';
 
 export interface SegmentOperationRequest {
   expected_revision: number;

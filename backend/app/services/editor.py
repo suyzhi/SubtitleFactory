@@ -338,6 +338,29 @@ def _apply_merge(conn, project_id: str, request: SegmentOperationRequest) -> tup
     return len(rows), True
 
 
+def _apply_delete(conn, project_id: str, request: SegmentOperationRequest) -> tuple[int, bool]:
+    indices = sorted(set(request.indices))
+    if not indices:
+        raise EditorServiceError(422, "SEGMENTS_REQUIRED", "请选择要删除的字幕")
+    placeholders = ",".join("?" for _ in indices)
+    rows = conn.execute(
+        f"SELECT * FROM segments WHERE project_id=? AND idx IN ({placeholders}) ORDER BY idx",
+        [project_id, *indices],
+    ).fetchall()
+    if len(rows) != len(indices):
+        raise EditorServiceError(404, "SEGMENT_NOT_FOUND", "部分待删除字幕不存在")
+    if any(row["locked"] for row in rows) and not request.include_locked:
+        raise EditorServiceError(409, "SEGMENT_LOCKED", "锁定字幕不能删除")
+    conn.execute(
+        f"DELETE FROM segments WHERE project_id=? AND idx IN ({placeholders})",
+        [project_id, *indices],
+    )
+    _renumber(conn, project_id)
+    # Removing cues cannot create an overlap, so the remaining timeline is not
+    # revalidated (an imported track with old overlaps stays deletable).
+    return len(rows), False
+
+
 def _apply_assign_speaker(conn, project_id: str, request: SegmentOperationRequest) -> tuple[int, bool]:
     speaker_id, name = _speaker(conn, project_id, request.speaker_id)
     selected = set(request.indices)
@@ -362,6 +385,7 @@ APPLIERS = {
     "split": _apply_split,
     "merge": _apply_merge,
     "assign_speaker": _apply_assign_speaker,
+    "delete": _apply_delete,
 }
 
 

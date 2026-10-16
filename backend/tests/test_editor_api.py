@@ -17,7 +17,7 @@ if "SUBTITLE_FACTORY_DATA_DIR" not in os.environ:
         prefix="subtitle-factory-editor-tests-",
     )
 
-from app.api import editor, projects
+from app.api import editor, projects, quality
 from app.models import database, migrations
 
 
@@ -31,6 +31,7 @@ class EditorAPITests(unittest.TestCase):
         app = FastAPI()
         app.include_router(projects.router)
         app.include_router(editor.router)
+        app.include_router(quality.router)
         self.client = TestClient(app)
         self.project_id = "editor-project"
         db = database.get_db()
@@ -71,6 +72,27 @@ class EditorAPITests(unittest.TestCase):
 
     def segments(self):
         return self.client.get(f"/api/projects/{self.project_id}/segments").json()["segments"]
+
+    def add_segment(self, index, start, end, text, locked=0):
+        db = database.get_db()
+        db.execute(
+            """INSERT INTO segments
+               (id,project_id,idx,start,end,raw_text,clean_text,translated_text,
+                speaker,locked,is_draft,source_stage)
+               VALUES (?,?,?,?,?,?,?,'','',?,0,'final')""",
+            (str(uuid.uuid4()), self.project_id, index, start, end, text, text, locked),
+        )
+        db.commit()
+        db.close()
+
+    def search_rows(self):
+        db = database.get_db()
+        try:
+            return db.execute(
+                "SELECT COUNT(*) FROM segment_search WHERE project_id=?", (self.project_id,)
+            ).fetchone()[0]
+        finally:
+            db.close()
 
     def test_bulk_replace_is_atomic_skips_locked_and_detects_conflicts(self):
         response = self.operate(
@@ -274,6 +296,152 @@ class EditorAPITests(unittest.TestCase):
         ).json()["draft"]
         self.assertTrue(corrupt_draft["invalid"])
         self.assertEqual(corrupt_draft["items"], [])
+
+    def test_delete_one_segment_renumbers_and_is_undoable(self):
+        self.assertEqual(self.search_rows(), 3)
+        deleted = self.operate(operation="delete", indices=[1])
+        self.assertEqual(deleted.status_code, 200, deleted.text)
+        body = deleted.json()
+        self.assertEqual(body["operation"], "delete")
+        self.assertEqual(body["affected_count"], 1)
+        self.assertEqual(body["revision"], 1)
+        self.assertEqual(
+            [(item["index"], item["clean_text"]) for item in self.segments()],
+            [(1, "Second line"), (2, "Locked world")],
+        )
+        self.assertTrue(self.segments()[1]["locked"])
+        self.assertEqual(self.search_rows(), 2)
+
+        undone = self.client.post(
+            f"/api/projects/{self.project_id}/editor/undo",
+            json={"expected_revision": self.revision()},
+        )
+        self.assertEqual(undone.status_code, 200, undone.text)
+        self.assertEqual(
+            [(item["index"], item["clean_text"]) for item in self.segments()],
+            [(1, "Hello world"), (2, "Second line"), (3, "Locked world")],
+        )
+        self.assertEqual(self.search_rows(), 3)
+
+        redone = self.client.post(
+            f"/api/projects/{self.project_id}/editor/redo",
+            json={"expected_revision": self.revision()},
+        )
+        self.assertEqual(redone.status_code, 200, redone.text)
+        self.assertEqual(
+            [item["clean_text"] for item in redone.json()["segments"]],
+            ["Second line", "Locked world"],
+        )
+
+    def test_delete_several_non_adjacent_segments_in_one_operation(self):
+        self.add_segment(4, 3.2, 4.0, "Fourth line")
+        self.add_segment(5, 4.2, 5.0, "Fifth line")
+        deleted = self.operate(operation="delete", indices=[4, 1, 4])
+        self.assertEqual(deleted.status_code, 200, deleted.text)
+        self.assertEqual(deleted.json()["affected_count"], 2)
+        self.assertEqual(
+            [(item["index"], item["clean_text"], item["locked"]) for item in self.segments()],
+            [(1, "Second line", False), (2, "Locked world", True), (3, "Fifth line", False)],
+        )
+
+        undone = self.client.post(
+            f"/api/projects/{self.project_id}/editor/undo",
+            json={"expected_revision": self.revision()},
+        )
+        self.assertEqual(undone.status_code, 200, undone.text)
+        self.assertEqual(len(self.segments()), 5)
+
+    def test_delete_refuses_locked_segments_unless_explicitly_included(self):
+        refused = self.operate(operation="delete", indices=[2, 3])
+        self.assertEqual(refused.status_code, 409, refused.text)
+        self.assertEqual(refused.json()["detail"]["code"], "SEGMENT_LOCKED")
+        # Atomic: the unlocked row in the same request is kept as well.
+        self.assertEqual(len(self.segments()), 3)
+        self.assertEqual(self.revision(), 0)
+
+        allowed = self.operate(operation="delete", indices=[2, 3], include_locked=True)
+        self.assertEqual(allowed.status_code, 200, allowed.text)
+        self.assertEqual(
+            [(item["index"], item["clean_text"]) for item in self.segments()],
+            [(1, "Hello world")],
+        )
+
+    def test_delete_validates_selection_and_revision(self):
+        empty = self.operate(operation="delete", indices=[])
+        self.assertEqual(empty.status_code, 422, empty.text)
+        self.assertEqual(empty.json()["detail"]["code"], "SEGMENTS_REQUIRED")
+
+        missing = self.operate(operation="delete", indices=[2, 9])
+        self.assertEqual(missing.status_code, 404, missing.text)
+        self.assertEqual(missing.json()["detail"]["code"], "SEGMENT_NOT_FOUND")
+        self.assertEqual(len(self.segments()), 3)
+
+        stale = self.operate(operation="delete", indices=[1], expected_revision=5)
+        self.assertEqual(stale.status_code, 409, stale.text)
+        self.assertEqual(stale.json()["detail"]["code"], "EDIT_REVISION_CONFLICT")
+        self.assertEqual(len(self.segments()), 3)
+        self.assertEqual(self.revision(), 0)
+
+    def test_quality_fix_previews_and_deletes_empty_subtitle(self):
+        db = database.get_db()
+        db.execute(
+            "UPDATE segments SET raw_text='',clean_text='' WHERE project_id=? AND idx=2",
+            (self.project_id,),
+        )
+        db.commit()
+        db.close()
+
+        def empty_text_issue():
+            scanned = self.client.post(
+                f"/api/projects/{self.project_id}/quality/scan", json={"rules": {}},
+            )
+            self.assertEqual(scanned.status_code, 200, scanned.text)
+            matches = [item for item in scanned.json()["issues"] if item["rule_id"] == "empty_text"]
+            self.assertEqual([item["segment_index"] for item in matches], [2])
+            return matches[0]["id"]
+
+        issue_id = empty_text_issue()
+        fix_url = f"/api/projects/{self.project_id}/quality/issues/{issue_id}/fix"
+        preview = self.client.post(fix_url, json={"expected_revision": 0, "apply": False})
+        self.assertEqual(preview.status_code, 200, preview.text)
+        self.assertFalse(preview.json()["applied"])
+        self.assertEqual(preview.json()["operation"]["operation"], "delete")
+        self.assertEqual(preview.json()["operation"]["indices"], [2])
+        self.assertEqual(len(self.segments()), 3)
+        self.assertEqual(self.revision(), 0)
+
+        applied = self.client.post(fix_url, json={"expected_revision": 0, "apply": True})
+        self.assertEqual(applied.status_code, 200, applied.text)
+        self.assertTrue(applied.json()["applied"])
+        self.assertEqual(
+            [(item["index"], item["clean_text"]) for item in applied.json()["editor"]["segments"]],
+            [(1, "Hello world"), (2, "Locked world")],
+        )
+        remaining = self.client.get(
+            f"/api/projects/{self.project_id}/quality/issues", params={"status": "all"},
+        ).json()["issues"]
+        self.assertNotIn("empty_text", {item["rule_id"] for item in remaining})
+
+        undone = self.client.post(
+            f"/api/projects/{self.project_id}/editor/undo",
+            json={"expected_revision": self.revision()},
+        )
+        self.assertEqual(undone.status_code, 200, undone.text)
+        self.assertEqual(self.segments()[1]["clean_text"], "")
+
+        # A stale issue must never delete a subtitle that has been filled in.
+        issue_id = empty_text_issue()
+        filled = self.operate(
+            operation="update_many", items=[{"index": 2, "clean_text": "Filled in"}],
+        )
+        self.assertEqual(filled.status_code, 200, filled.text)
+        stale = self.client.post(
+            f"/api/projects/{self.project_id}/quality/issues/{issue_id}/fix",
+            json={"expected_revision": self.revision(), "apply": True},
+        )
+        self.assertEqual(stale.status_code, 409, stale.text)
+        self.assertEqual(stale.json()["detail"]["code"], "QUALITY_ISSUE_STALE")
+        self.assertEqual(len(self.segments()), 3)
 
 
 class VersionedMigrationTests(unittest.TestCase):
