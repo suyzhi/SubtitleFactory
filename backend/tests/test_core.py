@@ -1,4 +1,5 @@
 import os
+import re
 import sys
 import tempfile
 import threading
@@ -42,7 +43,14 @@ from app.services.subtitle_cleaner import (
     retry_clean_batch,
     undo_last_clean,
 )
-from app.services.subtitle_exporter import export_ass, export_srt
+from app.services.subtitle_exporter import (
+    _format_srt_time,
+    _format_vtt_time,
+    export_ass,
+    export_srt,
+    export_vtt,
+)
+from app.services.subtitle_importer import parse_subtitle
 from app.services.subtitle_translator import _call_llm_translate
 from app.services.transcriber import _post_process_segments
 from app.services.video_renderer import burn_subtitles
@@ -822,6 +830,89 @@ class PersistenceAndExportTests(unittest.TestCase):
             self.assertIn(r"Hello\NWorld", content)
             self.assertIn(r"你好\N世界", content)
             self.assertNotIn("Hello\nWorld", content)
+
+    def test_srt_and_vtt_timestamps_round_trip_without_losing_a_millisecond(self):
+        # Every millisecond of two seconds plus hour-scale values. Float
+        # seconds such as 1.001 used to be truncated to 00:00:01,000.
+        milliseconds = [*range(1000, 2000), *range(59000, 60001), 3723004, 39599999]
+
+        def stamp(value, separator):
+            hours, rest = divmod(value, 3600000)
+            minutes, rest = divmod(rest, 60000)
+            seconds, millis = divmod(rest, 1000)
+            return f"{hours:02d}:{minutes:02d}:{seconds:02d}{separator}{millis:03d}"
+
+        for extension, separator, export in (("srt", ",", export_srt), ("vtt", ".", export_vtt)):
+            with self.subTest(extension=extension), tempfile.TemporaryDirectory() as folder:
+                timings = [
+                    f"{stamp(start, separator)} --> {stamp(end, separator)}"
+                    for start, end in zip(milliseconds, milliseconds[1:], strict=False)
+                ]
+                header = "WEBVTT\n\n" if extension == "vtt" else ""
+                source = header + "\n\n".join(
+                    f"{index}\n{timing}\nCue {index}" for index, timing in enumerate(timings, 1)
+                )
+                cues = parse_subtitle(source.encode("utf-8"), f"in.{extension}")
+                path = Path(folder) / f"out.{extension}"
+                export([
+                    {"index": index, "start": cue["start"], "end": cue["end"],
+                     "raw_text": cue["text"], "clean_text": cue["text"], "translated_text": ""}
+                    for index, cue in enumerate(cues, 1)
+                ], str(path))
+                exported = re.findall(r"^\S+ --> \S+$", path.read_text(encoding="utf-8"), re.M)
+                self.assertEqual(exported, timings)
+
+    def test_timestamp_rounding_carries_into_seconds_minutes_and_hours(self):
+        self.assertEqual(_format_srt_time(1.001), "00:00:01,001")
+        self.assertEqual(_format_srt_time(1.0004), "00:00:01,000")
+        self.assertEqual(_format_srt_time(59.9996), "00:01:00,000")
+        self.assertEqual(_format_vtt_time(3599.9996), "01:00:00.000")
+        self.assertEqual(_format_vtt_time(-0.0004), "00:00:00.000")
+
+    def test_ass_rounds_centiseconds_once_and_round_trips(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "out.ass"
+            # 1.0049 s is 100.49 cs: one rounding step gives 1.00, while
+            # rounding to 1005 ms first and to centiseconds again gave 1.01.
+            export_ass([
+                {"index": 1, "start": 1.0049, "end": 59.9996,
+                 "raw_text": "Carry", "clean_text": "", "translated_text": ""},
+                *[
+                    {"index": index, "start": 60 + index / 100, "end": 60 + (index + 1) / 100,
+                     "raw_text": f"Cue {index}", "clean_text": "", "translated_text": ""}
+                    for index in range(2, 200)
+                ],
+            ], str(path))
+            content = path.read_text(encoding="utf-8-sig")
+            self.assertIn("0:00:01.00,0:01:00.00,", content)
+            cues = parse_subtitle(content.encode("utf-8"), "out.ass")
+            self.assertEqual(
+                [(round(cue["start"] * 100), round(cue["end"] * 100)) for cue in cues[1:]],
+                [(6000 + index, 6001 + index) for index in range(2, 200)],
+            )
+
+    def test_blank_lines_inside_a_cue_do_not_split_srt_or_vtt(self):
+        # A blank line is the SRT/VTT cue separator; re-importing used to keep
+        # only "line one" and drop the rest of the subtitle.
+        segments = [
+            {"index": 1, "start": 0.0, "end": 1.0, "raw_text": "",
+             "clean_text": "line one\n\nline two\r\n  \nline three",
+             "translated_text": "译文\n\n第二行"},
+            {"index": 2, "start": 1.5, "end": 2.0,
+             "raw_text": "next cue", "clean_text": "", "translated_text": ""},
+        ]
+        for extension, export in (("srt", export_srt), ("vtt", export_vtt)):
+            for bilingual in (False, True):
+                with self.subTest(extension=extension, bilingual=bilingual), \
+                        tempfile.TemporaryDirectory() as folder:
+                    path = Path(folder) / f"out.{extension}"
+                    export(segments, str(path), bilingual=bilingual)
+                    cues = parse_subtitle(path.read_bytes(), path.name)
+                    first = "line one\nline two\nline three"
+                    if bilingual:
+                        first += "\n译文\n第二行"
+                    self.assertEqual([cue["text"] for cue in cues], [first, "next cue"])
+                    self.assertEqual([(cue["start"], cue["end"]) for cue in cues], [(0.0, 1.0), (1.5, 2.0)])
 
     def test_video_renderer_supports_mp4_and_mkv_containers(self):
         with tempfile.TemporaryDirectory() as folder:

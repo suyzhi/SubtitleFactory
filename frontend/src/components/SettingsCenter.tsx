@@ -683,7 +683,7 @@ export default function SettingsCenter(props: Props) {
                   ? <div className="about-data-row"><span><strong>第三方媒体</strong><small>直装版可按用户指令连接 YouTube；仅应处理拥有明确权利的内容，Chrome 登录状态最多在权限挑战时读取一次。</small></span></div>
                   : <div className="about-data-row"><span><strong>App Store 保护</strong><small>此发行版不提供第三方网站媒体读取、Cookie 访问、持久监听文件夹或外部运行时路径。</small></span></div>}
                 <div className="inline-actions"><button className="button secondary" onClick={() => void openPrivacyPolicy()}>查看完整隐私政策</button></div>
-                <p className="settings-help">API Key 保存在 macOS 钥匙串。诊断包不包含密钥、媒体、字幕正文或完整用户目录路径。</p>
+                <p className="settings-help">API Key 以明文保存在本机数据库（App 数据目录）中，数据库备份也会包含。诊断包不包含密钥、媒体、字幕正文或完整用户目录路径。</p>
               </SettingsSection>
             </>}
           </div>
