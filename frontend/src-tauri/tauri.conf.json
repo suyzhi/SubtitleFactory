@@ -15,10 +15,10 @@
         "title": "",
         "hiddenTitle": true,
         "titleBarStyle": "Transparent",
-        "width": 1400,
-        "height": 900,
-        "minWidth": 1000,
-        "minHeight": 700,
+        "width": 1100,
+        "height": 760,
+        "minWidth": 820,
+        "minHeight": 560,
         "resizable": true,
         "fullscreen": false
       }

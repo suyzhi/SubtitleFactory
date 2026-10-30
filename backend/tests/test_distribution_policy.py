@@ -19,9 +19,8 @@ from app.main import app
 from app.models.database import get_db
 from app.services import (
     app_settings,
-    project_packages,
     runtime_diagnostics,
-    watch_runtime,
+    workflow_recovery,
 )
 from app.services.distribution import (
     APP_STORE_CHANNEL,
@@ -93,7 +92,7 @@ class DistributionPolicyTests(unittest.TestCase):
             patch.dict(os.environ, {CHANNEL_ENV: APP_STORE_CHANNEL}),
             patch.object(task_manager, "create_task") as create_task,
         ):
-            resumed = watch_runtime.resume_interrupted_workflows(interrupted)
+            resumed = workflow_recovery.resume_interrupted_workflows(interrupted)
         self.assertEqual(resumed, 0)
         create_task.assert_not_called()
 
@@ -122,7 +121,7 @@ class DistributionPolicyTests(unittest.TestCase):
             patch.dict(os.environ, {CHANNEL_ENV: DIRECT_CHANNEL}),
             patch.object(task_manager, "create_task") as create_task,
         ):
-            resumed = watch_runtime.resume_interrupted_workflows(interrupted)
+            resumed = workflow_recovery.resume_interrupted_workflows(interrupted)
         self.assertEqual(resumed, 0)
         create_task.assert_not_called()
 
@@ -163,7 +162,7 @@ class DistributionPolicyTests(unittest.TestCase):
             patch.object(task_manager, "update_task") as update_task,
             patch.object(task_manager, "run_background") as run_background,
         ):
-            resumed = watch_runtime.resume_interrupted_workflows(interrupted)
+            resumed = workflow_recovery.resume_interrupted_workflows(interrupted)
         self.assertEqual(resumed, 1)
         create_task.assert_called_once_with(project_id, "workflow")
         update_task.assert_called_once()
@@ -190,9 +189,6 @@ class DistributionPolicyTests(unittest.TestCase):
                     "source_type": "youtube",
                     "source_url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
                 }),
-                self.client.post("/api/batches/playlist/preview", json={
-                    "url": "https://www.youtube.com/playlist?list=PL-test",
-                }),
             ]
         for response in responses:
             self.assertEqual(response.status_code, 403, response.text)
@@ -201,25 +197,6 @@ class DistributionPolicyTests(unittest.TestCase):
             self.assertEqual(payload["details"]["feature"], "youtube")
             self.assertFalse(payload["recoverable"])
 
-    def test_app_store_rejects_persistent_path_automation(self):
-        with patch.dict(os.environ, {CHANNEL_ENV: APP_STORE_CHANNEL}):
-            batch = self.client.post("/api/batches", json={
-                "name": "blocked",
-                "paths": ["/tmp/example.mp4"],
-                "configuration": {},
-            })
-            watch = self.client.get("/api/watch-folders")
-            batch_history = self.client.get("/api/batches")
-            custom_path = self.client.post("/api/settings/app/validate-path", json={
-                "kind": "download_directory",
-                "path": "/tmp",
-            })
-        for response in (batch, watch, batch_history, custom_path):
-            self.assertEqual(response.status_code, 403, response.text)
-            self.assertEqual(
-                response.json()["error"]["code"],
-                "DISTRIBUTION_FEATURE_UNAVAILABLE",
-            )
 
     def test_app_store_projects_settings_without_erasing_direct_preferences(self):
         original = app_settings.get_app_settings()
@@ -297,13 +274,6 @@ class DistributionPolicyTests(unittest.TestCase):
                 self.client.put("/api/settings/app", json={
                     "default_model": "local:external-model",
                 }),
-                self.client.post(
-                    "/api/projects/not-needed/speakers/diarize",
-                    json={
-                        "segmentation_model": "/tmp/external-segmentation.onnx",
-                        "embedding_model": "/tmp/external-embedding.onnx",
-                    },
-                ),
             ]
         self.assertEqual(catalog.status_code, 200, catalog.text)
         model_ids = {item["id"] for item in catalog.json()["models"]}
@@ -339,20 +309,14 @@ class DistributionPolicyTests(unittest.TestCase):
             db.commit()
         finally:
             db.close()
-        direct_search = self.client.get("/api/search/segments?q=legacyneedle")
-        self.assertEqual(direct_search.status_code, 200, direct_search.text)
-        self.assertEqual(direct_search.json()["total"], 1)
         with patch.dict(os.environ, {CHANNEL_ENV: APP_STORE_CHANNEL}):
             listing = self.client.get("/api/projects")
             detail = self.client.get(f"/api/projects/{project_id}")
             youtube_filter = self.client.get("/api/projects?source_type=youtube")
-            hidden_search = self.client.get("/api/search/segments?q=legacyneedle")
         self.assertEqual(listing.status_code, 200, listing.text)
         self.assertNotIn(
             project_id, {item["id"] for item in listing.json()["projects"]},
         )
-        self.assertEqual(hidden_search.status_code, 200, hidden_search.text)
-        self.assertEqual(hidden_search.json()["total"], 0)
         for response in (detail, youtube_filter):
             self.assertEqual(response.status_code, 403, response.text)
             self.assertEqual(
@@ -368,34 +332,6 @@ class DistributionPolicyTests(unittest.TestCase):
         self.assertEqual(persisted["source_type"], "youtube")
         self.assertIn("youtube.com", persisted["source_url"])
 
-    def test_app_store_sanitizes_imported_project_package_to_local(self):
-        created = self.client.post("/api/projects", json={
-            "title": "portable legacy project",
-            "source_type": "youtube",
-            "source_url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
-            "media_mode": "local",
-        })
-        self.assertEqual(created.status_code, 201, created.text)
-        package = project_packages.export_project_package(
-            created.json()["project_id"], include_media=False,
-        )
-        try:
-            with patch.dict(os.environ, {CHANNEL_ENV: APP_STORE_CHANNEL}):
-                imported = project_packages.import_project_package(str(package))
-            db = get_db()
-            try:
-                project = db.execute(
-                    "SELECT source_type,source_url,media_mode,media_status "
-                    "FROM projects WHERE id=?", (imported["project_id"],),
-                ).fetchone()
-            finally:
-                db.close()
-            self.assertEqual(project["source_type"], "local")
-            self.assertIsNone(project["source_url"])
-            self.assertEqual(project["media_mode"], "local")
-            self.assertEqual(project["media_status"], "relink_required")
-        finally:
-            package.unlink(missing_ok=True)
 
 
 if __name__ == "__main__":

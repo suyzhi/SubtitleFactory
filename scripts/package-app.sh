@@ -3,8 +3,8 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 VERSION="0.6.1"
-UI_MARKER="subtitle-factory-ui:professional-v2"
-UI_LAYOUT_MARKER="subtitle-factory-ui:library-workspace-v2"
+UI_MARKER="subtitle-factory-ui:simple-v1"
+UI_LAYOUT_MARKER="subtitle-factory-ui:single-page-v1"
 OLD_UI_MARKER="ai-settings-dialog"
 
 # A direct release must not inherit an App Store channel from the caller's
@@ -66,11 +66,11 @@ fi
 
 npm run build
 if ! rg -F "$UI_MARKER" "$ROOT/frontend/dist" >/dev/null; then
-  echo "Vite 产物缺少 professional-v2 标记。" >&2
+  echo "Vite 产物缺少 simple-v1 标记。" >&2
   exit 1
 fi
 if ! rg -F "$UI_LAYOUT_MARKER" "$ROOT/frontend/dist" >/dev/null; then
-  echo "Vite 产物缺少 library-workspace-v2 标记。" >&2
+  echo "Vite 产物缺少 single-page-v1 标记。" >&2
   exit 1
 fi
 if rg -F "$OLD_UI_MARKER" "$ROOT/frontend/dist" >/dev/null; then
@@ -113,13 +113,6 @@ codesign --force --options runtime --sign - "$APP_PATH"
 
 PACKAGED_RUNTIME="$PACKAGED_RUNTIME_ROOT/bin"
 "$ROOT/scripts/verify-release-runtime.sh" "$PACKAGED_RUNTIME"
-if [ ! -x "$PACKAGED_RUNTIME/vision-ocr" ] \
-  || [ "$(lipo -archs "$PACKAGED_RUNTIME/vision-ocr" 2>/dev/null || true)" != "arm64" ] \
-  || ! "$PACKAGED_RUNTIME/vision-ocr" "$ROOT/frontend/src-tauri/icons/32x32.png" \
-    | "$ROOT/backend/.venv/bin/python" -c 'import json,sys; value=json.load(sys.stdin); assert isinstance(value,list)'; then
-  echo "最终 App 的 Vision OCR helper 缺失、架构错误或无法运行。" >&2
-  exit 1
-fi
 codesign --verify --deep --strict "$APP_PATH"
 APP_EXECUTABLE="$APP_PATH/Contents/MacOS/app"
 if ! file "$APP_EXECUTABLE" | rg -F "arm64" >/dev/null; then
@@ -127,11 +120,11 @@ if ! file "$APP_EXECUTABLE" | rg -F "arm64" >/dev/null; then
   exit 1
 fi
 if ! strings "$APP_EXECUTABLE" | rg -F "$UI_MARKER" >/dev/null; then
-  echo "最终 App 可执行文件缺少 professional-v2 标记。" >&2
+  echo "最终 App 可执行文件缺少 simple-v1 标记。" >&2
   exit 1
 fi
 if ! strings "$APP_EXECUTABLE" | rg -F "$UI_LAYOUT_MARKER" >/dev/null; then
-  echo "最终 App 可执行文件缺少 library-workspace-v2 标记。" >&2
+  echo "最终 App 可执行文件缺少 single-page-v1 标记。" >&2
   exit 1
 fi
 if strings "$APP_EXECUTABLE" | rg -F "$OLD_UI_MARKER" >/dev/null; then
@@ -171,11 +164,11 @@ codesign --verify --deep --strict "$FINAL_APP"
 "$ROOT/scripts/verify-macos-deployment-target.sh" \
   "$FINAL_APP" "$MINIMUM_MACOS_VERSION"
 if ! strings "$FINAL_APP/Contents/MacOS/app" | rg -F "$UI_MARKER" >/dev/null; then
-  echo "根目录最终 App 缺少 professional-v2 标记。" >&2
+  echo "根目录最终 App 缺少 simple-v1 标记。" >&2
   exit 1
 fi
 if ! strings "$FINAL_APP/Contents/MacOS/app" | rg -F "$UI_LAYOUT_MARKER" >/dev/null; then
-  echo "根目录最终 App 缺少 library-workspace-v2 标记。" >&2
+  echo "根目录最终 App 缺少 single-page-v1 标记。" >&2
   exit 1
 fi
 "$ROOT/backend/.venv/bin/python" "$ROOT/scripts/verify-dmg-app.py" \

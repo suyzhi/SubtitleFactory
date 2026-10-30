@@ -27,7 +27,6 @@ from app.services.ai_providers import (
     prepare_chat_payload,
     save_provider,
 )
-from app.services.ai_quality import generate_quality_preview
 from app.services.ai_settings import get_ai_settings, save_ai_settings
 from app.services.ffmpeg_encoding import select_h264_encoder_args
 from app.services.subtitle_cleaner import (
@@ -45,7 +44,6 @@ from app.services.subtitle_cleaner import (
 from app.services.subtitle_exporter import export_ass, export_srt
 from app.services.subtitle_translator import _call_llm_translate
 from app.services.transcriber import _post_process_segments
-from app.services.video_renderer import burn_subtitles
 from app.utils.task_manager import TaskManager, task_manager
 
 
@@ -324,28 +322,6 @@ class AIResultValidationTests(unittest.TestCase):
         self.assertEqual(supplied["context_after"][0]["id"], "3")
         self.assertEqual(result, [{"id": "2", "translated_text": "当前句"}])
 
-    def test_quality_preview_uses_deepseek_v4_structured_non_thinking_request(self):
-        response = SimpleNamespace(
-            raise_for_status=lambda: None,
-            json=lambda: {"choices": [{"message": {
-                "content": '{"clean_text":"Fixed.","translated_text":"已修复。"}'
-            }}]},
-        )
-        provider = {
-            "provider": "deepseek", "model": "deepseek-v4-flash",
-            "base_url": "http://example.test/v1", "api_key": "secret",
-        }
-        with patch("app.services.ai_quality.assigned_provider", return_value=provider), patch(
-            "app.services.ai_quality.httpx.post", return_value=response,
-        ) as post:
-            result = generate_quality_preview({
-                "rule_id": "punctuation", "message": "missing punctuation",
-                "clean_text": "Fixed", "translated_text": "已修复",
-            })
-        payload = post.call_args.kwargs["json"]
-        self.assertEqual(payload["thinking"], {"type": "disabled"})
-        self.assertEqual(payload["response_format"], {"type": "json_object"})
-        self.assertEqual(result["after"]["clean_text"], "Fixed.")
 
     def test_reorders_valid_ai_results_to_input_order(self):
         batch = [{"id": "1"}, {"id": "2"}]
@@ -810,6 +786,18 @@ class PersistenceAndExportTests(unittest.TestCase):
             self.assertIn("00:00:01,234 --> 00:00:03,456", content)
             self.assertIn("你好！\nHello!", content)
 
+    def test_translated_srt_uses_translation_and_falls_back_to_original(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "out.srt"
+            export_srt([
+                {"index": 1, "start": 0.0, "end": 1.0, "raw_text": "Hello", "clean_text": "Hello!", "translated_text": "你好！"},
+                {"index": 2, "start": 1.0, "end": 2.0, "raw_text": "Bye", "clean_text": "Bye.", "translated_text": ""},
+            ], str(path), bilingual=False, primary_lang="translated")
+            content = path.read_text(encoding="utf-8")
+            self.assertIn("00:00:00,000 --> 00:00:01,000\n你好！\n", content)
+            self.assertNotIn("Hello!", content)
+            self.assertIn("00:00:01,000 --> 00:00:02,000\nBye.\n", content)
+
     def test_ass_export_works_with_installed_pysubs2_api(self):
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / "out.ass"
@@ -823,30 +811,6 @@ class PersistenceAndExportTests(unittest.TestCase):
             self.assertIn(r"你好\N世界", content)
             self.assertNotIn("Hello\nWorld", content)
 
-    def test_video_renderer_supports_mp4_and_mkv_containers(self):
-        with tempfile.TemporaryDirectory() as folder:
-            video = Path(folder) / "input.mp4"; video.write_bytes(b"video")
-            subtitle = Path(folder) / "sub.ass"; subtitle.write_text("subtitle", encoding="utf-8")
-            commands = []
-
-            def fake_run(command, **_kwargs):
-                commands.append(command)
-                Path(command[-1]).write_bytes(b"rendered")
-                return SimpleNamespace(returncode=0, stderr="")
-
-            with patch(
-                "app.services.video_renderer.resolve_ffmpeg_path",
-                return_value=SimpleNamespace(path=Path("/app/bin/ffmpeg"), source="bundled"),
-            ), patch(
-                "app.services.video_renderer.select_h264_encoder_args",
-                return_value=(["-c:v", "libx264", "-preset", "fast", "-crf", "22"], "libx264"),
-            ), patch("app.services.video_renderer.subprocess.run", side_effect=fake_run):
-                burn_subtitles("test-mp4", str(video), str(subtitle), str(Path(folder) / "out.mp4"))
-                burn_subtitles("test-mkv", str(video), str(subtitle), str(Path(folder) / "out.mkv"))
-            self.assertIn("+faststart", commands[0])
-            self.assertNotIn("+faststart", commands[1])
-            self.assertEqual(commands[0][-1], str(Path(folder) / "out.mp4"))
-            self.assertEqual(commands[1][-1], str(Path(folder) / "out.mkv"))
 
     def test_encoder_probe_uses_videotoolbox_without_x264_options(self):
         probe = SimpleNamespace(
@@ -860,68 +824,7 @@ class PersistenceAndExportTests(unittest.TestCase):
         self.assertNotIn("-preset", arguments)
         self.assertNotIn("-crf", arguments)
 
-    def test_video_renderer_falls_back_to_embedded_subtitles_without_libass(self):
-        with tempfile.TemporaryDirectory() as folder:
-            video = Path(folder) / "input.mp4"; video.write_bytes(b"video")
-            subtitle = Path(folder) / "sub.ass"; subtitle.write_text("subtitle", encoding="utf-8")
-            output = Path(folder) / "out.mp4"
-            commands = []
 
-            def fake_run(command, **_kwargs):
-                commands.append(command)
-                if len(commands) == 1:
-                    return SimpleNamespace(returncode=1, stderr="No such filter: 'subtitles'")
-                Path(command[-1]).write_bytes(b"embedded")
-                return SimpleNamespace(returncode=0, stderr="")
-
-            with patch(
-                "app.services.video_renderer.resolve_ffmpeg_path",
-                return_value=SimpleNamespace(path=Path("/app/bin/ffmpeg"), source="bundled"),
-            ), patch(
-                "app.services.video_renderer.select_h264_encoder_args",
-                return_value=(["-c:v", "h264_videotoolbox", "-b:v", "6M"], "h264_videotoolbox"),
-            ), patch("app.services.video_renderer.subprocess.run", side_effect=fake_run):
-                rendered = burn_subtitles("test-fallback", str(video), str(subtitle), str(output))
-
-            self.assertEqual(rendered, str(output))
-            self.assertNotIn("-preset", commands[0])
-            self.assertIn("mov_text", commands[1])
-            self.assertIn("copy", commands[1])
-
-    def test_video_renderer_uses_image_overlays_for_real_hardsubs_without_libass(self):
-        with tempfile.TemporaryDirectory() as folder:
-            video = Path(folder) / "input.mp4"; video.write_bytes(b"video")
-            subtitle = Path(folder) / "sub.ass"; subtitle.write_text("subtitle", encoding="utf-8")
-            output = Path(folder) / "out.mp4"
-            commands = []
-
-            def fake_run(command, **_kwargs):
-                commands.append(command)
-                if len(commands) == 1:
-                    return SimpleNamespace(returncode=1, stderr="No such filter: 'subtitles'")
-                Path(command[-1]).write_bytes(b"burned")
-                return SimpleNamespace(returncode=0, stderr="")
-
-            with patch(
-                "app.services.video_renderer.resolve_ffmpeg_path",
-                return_value=SimpleNamespace(path=Path("/app/bin/ffmpeg"), source="bundled"),
-            ), patch(
-                "app.services.video_renderer.select_h264_encoder_args",
-                return_value=(["-c:v", "h264_videotoolbox", "-b:v", "6M"], "h264_videotoolbox"),
-            ), patch(
-                "app.services.video_renderer._burn_with_image_overlays",
-                side_effect=lambda **kwargs: fake_run([
-                    "/app/bin/ffmpeg", "-filter_complex", "image-overlays", "-y", kwargs["output_path"]
-                ]),
-            ), patch("app.services.video_renderer.subprocess.run", side_effect=fake_run):
-                rendered = burn_subtitles(
-                    "test-image-fallback", str(video), str(subtitle), str(output),
-                    project_id="project-one", bilingual=True,
-                )
-
-            self.assertEqual(rendered, str(output))
-            self.assertEqual(len(commands), 2)
-            self.assertIn("image-overlays", commands[1])
 
 
 if __name__ == "__main__":

@@ -204,14 +204,6 @@ def test_library_readiness_uses_files_and_pagination_is_stable(project, tmp_path
     assert list_projects(readiness='subtitles')['projects'][0]['id'] == project
 
 
-def test_font_fallback_does_not_match_signpainter():
-    import sys
-    if sys.platform != 'darwin': pytest.skip('macOS system font regression')
-    from PIL import ImageFont
-
-    from app.services.clips import _font_path
-    path = _font_path('Inter, "Helvetica Neue", sans-serif', False)
-    assert ImageFont.truetype(path,22).getname()[0] == 'Helvetica Neue'
 
 
 def test_cancelled_worker_finalizes_run_and_flushes_drafts(project):

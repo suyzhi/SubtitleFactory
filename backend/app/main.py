@@ -5,7 +5,6 @@
 import logging
 import os
 import sys
-import threading
 from contextlib import asynccontextmanager
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
@@ -27,33 +26,14 @@ from .utils.config import DATA_DIR, LOGS_DIR, is_frozen_app
 # then watch the database file get replaced underneath its connection.
 applied_restore = apply_pending_restore()
 
-from .api import (
-    batches,
-    clips,
-    content,
-    editor,
-    maintenance,
-    media,
-    ocr,
-    packages,
-    projects,
-    quality,
-    search,
-    settings,
-    speakers,
-    tasks,
-    templates,
-    terminology,
-    watch_folders,
-)
+from .api import projects, settings, tasks
 from .security import ALLOWED_ORIGINS, require_local_origin
 from .services.distribution import (
     DistributionPolicyError,
     distribution_capabilities,
     require_project_distribution,
 )
-from .services.playlist_batches import recover_playlist_batches
-from .services.watch_runtime import resume_interrupted_workflows, watch_loop
+from .services.workflow_recovery import resume_interrupted_workflows
 from .utils.task_manager import TaskCreationBlocked, task_manager
 from .version import VERSION
 
@@ -87,31 +67,9 @@ except Exception:
 # ── 运行期服务 ──
 @asynccontextmanager
 async def lifespan(application: FastAPI):
+    del application
     resume_interrupted_workflows(interrupted_tasks)
-    capabilities = distribution_capabilities()
-    # This is local database reconciliation, not a YouTube network action.
-    # Run it in every distribution so legacy rows cannot remain falsely live
-    # after a direct-build database is opened by the App Store build.
-    recover_playlist_batches(interrupted_tasks)
-    stop_event = None
-    worker = None
-    if capabilities.filesystem_automation:
-        stop_event = threading.Event()
-        worker = threading.Thread(
-            target=watch_loop,
-            args=(stop_event,),
-            name="watch-folders",
-            daemon=True,
-        )
-        worker.start()
-        application.state.watch_stop_event = stop_event
-        application.state.watch_worker = worker
-    try:
-        yield
-    finally:
-        if stop_event is not None and worker is not None:
-            stop_event.set()
-            worker.join(timeout=2)
+    yield
 
 
 # ── 创建 FastAPI 应用 ──
@@ -137,8 +95,7 @@ app.add_middleware(
 @app.middleware("http")
 async def block_writes_during_database_restore(request: Request, call_next):
     mutating = request.method.upper() not in {"GET", "HEAD", "OPTIONS"}
-    restore_request = request.url.path == "/api/maintenance/backups/restore"
-    if not mutating or restore_request:
+    if not mutating:
         return await call_next(request)
     if not task_manager.begin_api_mutation():
         return JSONResponse(status_code=409, content={"error": {
@@ -231,7 +188,7 @@ async def structured_unexpected_error(request: Request, exc: Exception):
     if request.url.path.startswith("/api"):
         return JSONResponse(status_code=500, content={"error": {
             "code": "INTERNAL_ERROR", "message": "本地引擎处理失败",
-            "suggestion": "请重试；若问题持续，请导出脱敏诊断包", "details": {},
+            "suggestion": "请重试；若问题持续，请重启 App", "details": {},
             "recoverable": True,
         }})
     raise exc
@@ -241,20 +198,6 @@ project_distribution_dependency = [Depends(require_project_distribution)]
 app.include_router(projects.router, dependencies=project_distribution_dependency)
 app.include_router(tasks.router, dependencies=project_distribution_dependency)
 app.include_router(settings.router)
-app.include_router(editor.router, dependencies=project_distribution_dependency)
-app.include_router(media.router, dependencies=project_distribution_dependency)
-app.include_router(quality.router, dependencies=project_distribution_dependency)
-app.include_router(terminology.router)
-app.include_router(maintenance.router)
-app.include_router(packages.router, dependencies=project_distribution_dependency)
-app.include_router(templates.router, dependencies=project_distribution_dependency)
-app.include_router(watch_folders.router)
-app.include_router(batches.router)
-app.include_router(speakers.router, dependencies=project_distribution_dependency)
-app.include_router(ocr.router, dependencies=project_distribution_dependency)
-app.include_router(search.router, dependencies=project_distribution_dependency)
-app.include_router(content.router, dependencies=project_distribution_dependency)
-app.include_router(clips.router, dependencies=project_distribution_dependency)
 
 
 # ── 根路径 / 健康检查 ──

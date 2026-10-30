@@ -1,60 +1,13 @@
-"""Runtime watch-folder ingestion and interrupted workflow restoration."""
+"""Restart interrupted subtitle workflows after the App relaunches."""
 
 from __future__ import annotations
 
 import json
 import logging
-import threading
-import time
 
 from ..models.database import get_db
 
 logger = logging.getLogger(__name__)
-
-
-def process_watch_folders_once() -> int:
-    # Imports stay local to avoid coupling service initialization to FastAPI's
-    # route import order.
-    from ..api.batches import BatchCreate, create_batch
-    from ..api.projects import WorkflowRequest, start_workflow
-    from ..api.watch_folders import WatchImportMark, mark_watch_file_imported, scan_watch_folders
-
-    ready = scan_watch_folders()["ready"]
-    imported = 0
-    for item in ready:
-        try:
-            workflow = dict(item.get("workflow") or {})
-            batch = create_batch(BatchCreate(
-                name="监听文件夹自动导入", paths=[item["path"]], configuration=workflow,
-            ))
-            project_id = batch["items"][0]["project_id"]
-            template_id = workflow.get("style_template_id")
-            if template_id:
-                db = get_db()
-                template = db.execute("SELECT settings_json FROM style_templates WHERE id=?", (template_id,)).fetchone()
-                if template:
-                    db.execute("INSERT OR REPLACE INTO project_styles(project_id,settings_json,updated_at) VALUES (?,?,?)", (project_id, template["settings_json"], time.strftime("%Y-%m-%d %H:%M:%S")))
-                    db.commit()
-                db.close()
-            mark_watch_file_imported(item["watch_folder_id"], WatchImportMark(path=item["path"], project_id=project_id))
-            start_workflow(project_id, WorkflowRequest(
-                model=str(workflow.get("model") or "auto"),
-                language=str(workflow.get("language") or "auto"),
-                runtime=str(workflow.get("runtime") or "") or None,
-            ))
-            imported += 1
-        except Exception:
-            logger.exception("监听文件自动入队失败: %s", item.get("path"))
-    return imported
-
-
-def watch_loop(stop_event: threading.Event, interval_seconds: float = 15.0) -> None:
-    while not stop_event.is_set():
-        try:
-            process_watch_folders_once()
-        except Exception:
-            logger.exception("监听文件夹周期扫描失败")
-        stop_event.wait(interval_seconds)
 
 
 def resume_interrupted_workflows(interrupted: list[dict]) -> int:

@@ -174,7 +174,7 @@ class TaskResponse(BaseModel):
 # ── Export ──────────────────────────────────────────────
 
 class ExportRequest(BaseModel):
-    format: str = Field(default="srt", pattern="^(srt|vtt|ass|srt-bilingual|mp4|mkv)$")
+    format: str = Field(default="srt", pattern="^(srt|vtt|ass|srt-bilingual)$")
     bilingual: bool = False
     primary_language: str = "original"  # original | translated
     style: Optional[dict[str, Any]] = None

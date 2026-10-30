@@ -1,45 +1,30 @@
-import json
 import stat
 import sys
 import tempfile
 import unittest
 import uuid
-import wave
 from pathlib import Path
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app.api import maintenance, terminology
 from app.models import database, migrations
-from app.services import project_packages, waveform
 from app.services.backups import (
     apply_pending_restore,
     create_backup,
     last_restore,
-    list_backups,
     pending_restore,
     restore_backup,
 )
-from app.services.editor import history_step, import_segment_snapshot
-from app.services.quality import scan
 from app.services.subtitle_importer import parse_subtitle
-from app.utils.task_manager import TaskManager
 
 
 class V1FeatureTests(unittest.TestCase):
     def setUp(self):
-        maintenance.task_manager.end_exclusive_maintenance("database_restore")
         self.folder = tempfile.TemporaryDirectory()
         self.root = Path(self.folder.name)
         self.patches = [
             patch.object(database, "DB_PATH", self.root / "factory.db"),
-            patch.object(project_packages, "PROJECTS_DIR", self.root / "projects"),
-            patch.object(project_packages, "EXPORTS_DIR", self.root / "exports"),
-            patch.object(waveform, "PROJECTS_DIR", self.root / "projects"),
-            patch.object(maintenance, "EXPORTS_DIR", self.root / "exports"),
-            patch.object(maintenance, "LOGS_DIR", self.root / "logs"),
-            patch.object(terminology, "EXPORTS_DIR", self.root / "exports"),
         ]
         for item in self.patches: item.start()
         database.init_db()
@@ -64,69 +49,8 @@ class V1FeatureTests(unittest.TestCase):
         for item in reversed(self.patches): item.stop()
         self.folder.cleanup()
 
-    def test_untranslated_project_does_not_report_missing_translations(self):
-        db = database.get_db()
-        db.execute("UPDATE segments SET translated_text='' WHERE project_id=?", (self.project_id,))
-        db.commit(); db.close()
-        rules = {item["rule_id"] for item in scan(self.project_id)}
-        self.assertNotIn("missing_translation", rules)
 
-    def test_schema_quality_glossary_and_import_history(self):
-        db = database.get_db()
-        version = db.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0]
-        glossary_id = str(uuid.uuid4())
-        db.execute("INSERT INTO glossaries VALUES (?,?,'Project terms','en','zh','now','now')", (glossary_id, self.project_id))
-        db.execute(
-            """INSERT INTO glossary_terms VALUES (?,?, 'OpenAI','开放人工智能',0,1,0,'','now','now')""",
-            (str(uuid.uuid4()), glossary_id),
-        )
-        db.commit(); db.close()
-        self.assertEqual(version, migrations.CURRENT_SCHEMA_VERSION)
-        issues = scan(self.project_id)
-        rules = {item["rule_id"] for item in issues}
-        self.assertTrue({"number_mismatch", "glossary", "short_duration", "missing_translation"}.issubset(rules))
 
-        srt = b"1\n00:00:00,000 --> 00:00:01,000\nImported one\n\n2\n00:00:01,100 --> 00:00:02,000\nImported two\n"
-        cues = parse_subtitle(srt, "track.srt")
-        result = import_segment_snapshot(self.project_id, 0, cues)
-        self.assertEqual(result["affected_count"], 2)
-        undone = history_step(self.project_id, result["revision"], "undo")
-        self.assertEqual(undone["segments"][0]["clean_text"], "OpenAI has 2 models")
-
-    def test_waveform_cache_backup_and_project_package_roundtrip(self):
-        audio = self.root / "audio.wav"
-        with wave.open(str(audio), "wb") as output:
-            output.setnchannels(1); output.setsampwidth(2); output.setframerate(16000)
-            output.writeframes((b"\x00\x20\x00\xe0") * 8000)
-        db = database.get_db(); db.execute("UPDATE projects SET audio_path=? WHERE id=?", (str(audio), self.project_id)); db.commit(); db.close()
-        first = waveform.get_waveform(self.project_id, 1000)
-        second = waveform.get_waveform(self.project_id, 1000)
-        self.assertEqual(first["fingerprint"], second["fingerprint"])
-        self.assertEqual(len(first["peaks"]), 1000)
-
-        backup = create_backup("manual")
-        self.assertTrue(Path(backup["path"]).is_file())
-        self.assertTrue(list_backups())
-
-        db = database.get_db()
-        db.execute(
-            "INSERT INTO project_styles(project_id,settings_json,updated_at) VALUES (?,?, 'now')",
-            (self.project_id, json.dumps({"fontFamily": "PingFang SC", "fontSize": 24})),
-        )
-        db.commit(); db.close()
-
-        package = project_packages.export_project_package(self.project_id)
-        imported = project_packages.import_project_package(str(package))
-        self.assertNotEqual(imported["project_id"], self.project_id)
-        self.assertEqual(imported["media_status"], "relink_required")
-        db = database.get_db()
-        copied = db.execute("SELECT COUNT(*) FROM segments WHERE project_id=?", (imported["project_id"],)).fetchone()[0]
-        copied_style = json.loads(db.execute(
-            "SELECT settings_json FROM project_styles WHERE project_id=?", (imported["project_id"],)
-        ).fetchone()[0])
-        db.close()
-        self.assertEqual(copied, 2)
-        self.assertEqual(copied_style["fontSize"], 24)
 
     def test_backup_restore_is_verified_staged_and_applied_before_restart(self):
         backup = create_backup("manual")
@@ -200,60 +124,8 @@ class V1FeatureTests(unittest.TestCase):
             restore_backup(invalid.name)
         self.assertIsNone(pending_restore())
 
-    def test_restore_endpoint_refuses_to_stage_while_a_task_is_active(self):
-        backup = create_backup("manual")
-        db = database.get_db()
-        db.execute(
-            """INSERT INTO tasks(
-                   id,project_id,type,status,details,logs,available_actions,created_at,updated_at
-               ) VALUES ('busy-task',?,'render','running','{}','[]','[]','now','now')""",
-            (self.project_id,),
-        )
-        db.commit()
-        db.close()
-        with self.assertRaises(Exception) as caught:
-            maintenance.restore(maintenance.RestoreRequest(name=Path(backup["path"]).name, confirm=True))
-        self.assertEqual(getattr(caught.exception, "status_code", None), 409)
-        self.assertEqual(caught.exception.detail["code"], "BACKUP_RESTORE_BUSY")
-        self.assertIsNone(pending_restore())
 
-    def test_restore_endpoint_checks_live_workers_even_if_sqlite_lags(self):
-        backup = create_backup("manual")
-        live = [{"id": "memory-only", "type": "model_download", "status": "running"}]
-        with patch.object(
-            maintenance.task_manager,
-            "begin_exclusive_maintenance",
-            return_value=(False, live),
-        ):
-            with self.assertRaises(Exception) as caught:
-                maintenance.restore(maintenance.RestoreRequest(
-                    name=Path(backup["path"]).name,
-                    confirm=True,
-                ))
-        self.assertEqual(getattr(caught.exception, "status_code", None), 409)
-        self.assertEqual(
-            caught.exception.detail["details"]["active_tasks"],
-            [{"id": "memory-only", "type": "model_download", "status": "running"}],
-        )
-        self.assertIsNone(pending_restore())
 
-    def test_successful_restore_closes_mutating_gate_until_restart(self):
-        backup = create_backup("manual")
-        manager = TaskManager(max_workers=1)
-        with patch.object(maintenance, "task_manager", manager):
-            try:
-                staged = maintenance.restore(maintenance.RestoreRequest(
-                    name=Path(backup["path"]).name,
-                    confirm=True,
-                ))
-                self.assertTrue(staged["pending"])
-                self.assertFalse(manager.begin_api_mutation())
-                self.assertIsNotNone(apply_pending_restore())
-            finally:
-                manager.end_exclusive_maintenance("database_restore")
-            self.assertTrue(manager.begin_api_mutation())
-            manager.end_api_mutation()
-        manager.shutdown()
 
     def test_vtt_and_ass_parsers(self):
         vtt = b"WEBVTT\n\n00:00:00.000 --> 00:00:01.000\nHello\n"
@@ -261,30 +133,6 @@ class V1FeatureTests(unittest.TestCase):
         self.assertEqual(parse_subtitle(vtt, "a.vtt")[0]["text"], "Hello")
         self.assertEqual(parse_subtitle(ass, "a.ass")[0]["text"], "Hello\nworld")
 
-    def test_prepared_exports_stay_inside_the_managed_exports_directory(self):
-        glossary_id = str(uuid.uuid4())
-        db = database.get_db()
-        db.execute(
-            "INSERT INTO glossaries VALUES (?,?,'Native export','en','zh','now','now')",
-            (glossary_id, self.project_id),
-        )
-        db.execute(
-            """INSERT INTO glossary_terms VALUES (?,?, 'timeline','时间线',0,1,0,'','now','now')""",
-            (str(uuid.uuid4()), glossary_id),
-        )
-        db.commit()
-        db.close()
-
-        glossary = terminology.prepare_terms_export(glossary_id, "csv")
-        diagnostics = maintenance.prepare_diagnostics()
-        managed_exports = (self.root / "exports").resolve()
-        for prepared in (glossary, diagnostics):
-            path = Path(prepared["path"]).resolve()
-            self.assertTrue(path.is_relative_to(managed_exports))
-            self.assertTrue(path.is_file())
-            self.assertEqual(prepared["size"], path.stat().st_size)
-
-        self.assertTrue(Path(glossary["path"]).read_bytes().startswith(b"\xef\xbb\xbf"))
 
     def test_failed_migration_restores_pre_migration_database(self):
         def fail_after_ddl(conn):

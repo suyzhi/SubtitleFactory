@@ -26,8 +26,8 @@ GENERATED_ENTITLEMENTS="$TAURI_DIR/Entitlements.appstore.plist"
 GENERATED_HELPER_ENTITLEMENTS="$TAURI_DIR/HelperEntitlements.appstore.plist"
 EMBEDDED_PROFILE="$TAURI_DIR/embedded.provisionprofile"
 PROFILE_PLIST=""
-UI_MARKER="subtitle-factory-ui:professional-v2"
-UI_LAYOUT_MARKER="subtitle-factory-ui:library-workspace-v2"
+UI_MARKER="subtitle-factory-ui:simple-v1"
+UI_LAYOUT_MARKER="subtitle-factory-ui:single-page-v1"
 OLD_UI_MARKER="ai-settings-dialog"
 
 cleanup_generated() {
@@ -247,8 +247,7 @@ done < <(find "$RUNTIME_PATH" -type f -print0)
 for helper in \
   "$RUNTIME_PATH/subtitle-backend" \
   "$RUNTIME_PATH/bin/ffmpeg" \
-  "$RUNTIME_PATH/bin/ffprobe" \
-  "$RUNTIME_PATH/bin/vision-ocr"; do
+  "$RUNTIME_PATH/bin/ffprobe"; do
   if [ ! -x "$helper" ]; then
     echo "最终 App 缺少 helper：$(basename "$helper")" >&2
     exit 1
@@ -271,8 +270,7 @@ verify_hardened_runtime "$APP_PATH"
 for helper in \
   "$RUNTIME_PATH/subtitle-backend" \
   "$RUNTIME_PATH/bin/ffmpeg" \
-  "$RUNTIME_PATH/bin/ffprobe" \
-  "$RUNTIME_PATH/bin/vision-ocr"; do
+  "$RUNTIME_PATH/bin/ffprobe"; do
   verify_hardened_runtime "$helper"
 done
 

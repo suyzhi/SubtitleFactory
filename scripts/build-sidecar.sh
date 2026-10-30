@@ -169,8 +169,6 @@ if [ "$DISTRIBUTION_CHANNEL" != "app_store" ]; then
     cp "$DENO_ROOT/LICENSE.md" "$OUTPUT_DIR/THIRD_PARTY_LICENSES/deno/LICENSE.md"
   fi
 fi
-swiftc -target "arm64-apple-macos${MINIMUM_MACOS_VERSION}" \
-  "$ROOT/backend/runtime/vision_ocr.swift" -O -o "$OUTPUT_DIR/bin/vision-ocr"
 "$ROOT/scripts/build-parakeet-coreml.sh" "$OUTPUT_DIR/bin"
 mkdir -p "$OUTPUT_DIR/THIRD_PARTY_LICENSES/fluidaudio"
 # SwiftPM checkouts are read-only; a read-only file makes the bundler's `xattr -crs` fail.
@@ -182,18 +180,7 @@ chmod +x "$OUTPUT_DIR/bin/ffmpeg" "$OUTPUT_DIR/bin/ffprobe"
 if [ "$DISTRIBUTION_CHANNEL" != "app_store" ]; then
   chmod 755 "$OUTPUT_DIR/bin/deno"
 fi
-chmod 755 "$OUTPUT_DIR/bin/vision-ocr"
 "$ROOT/scripts/verify-release-runtime.sh" "$OUTPUT_DIR/bin"
-VISION_ARCHS="$(lipo -archs "$OUTPUT_DIR/bin/vision-ocr" 2>/dev/null || true)"
-if [ "$VISION_ARCHS" != "arm64" ]; then
-  echo "Vision OCR helper 架构错误：${VISION_ARCHS:-未知}（必须是纯 arm64）。" >&2
-  exit 1
-fi
-if ! "$OUTPUT_DIR/bin/vision-ocr" "$ROOT/frontend/src-tauri/icons/32x32.png" \
-  | "$PYTHON" -c 'import json,sys; value=json.load(sys.stdin); assert isinstance(value,list)'; then
-  echo "Vision OCR helper 无法读取测试图片并输出 JSON。" >&2
-  exit 1
-fi
 if [ "$DISTRIBUTION_CHANNEL" != "app_store" ]; then
   "$OUTPUT_DIR/bin/deno" --version
 elif [ -e "$OUTPUT_DIR/bin/deno" ]; then

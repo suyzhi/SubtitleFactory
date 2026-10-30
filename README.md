@@ -1,22 +1,18 @@
-# 字幕工厂 0.6.1
+# 字幕工厂 0.6.1 · 简洁版
 
-字幕工厂是一款面向搭载 macOS 14 Sonoma 或更高版本的 Apple Silicon Mac 的字幕工作台：导入本地视频或粘贴 YouTube 链接后，下载或导入到本地，选择模型与运行设备后准备音频并转写，再按需进行 AI 整理、翻译与导出。
+> 这是 `simple-edition` 分支：只保留**视频下载、模型转写、AI 整理、AI 翻译**四项功能，界面为单页设计。完整功能版见 `main` 分支。
 
-## v0.6.1 当前能力
+字幕工厂是一款面向搭载 macOS 14 Sonoma 或更高版本的 Apple Silicon Mac 的字幕工具：粘贴 YouTube 链接或选择本地视频，选好转写模型，一键完成转写、AI 整理与翻译，然后导出 SRT。
 
-- 个人本地工作台：`./start.sh` 启动前后端，普通开发模式无需会话令牌，保留本地来源限制及 API 密钥保护；打包模式仍使用会话令牌和媒体签名。
-- 专业编辑器：波形时间轴、时间码编辑、拆分/合并、批量替换、持久化撤销/重做与可恢复草稿。
-- 离线质检、项目/全局术语表、翻译记忆、说话人识别与 macOS Vision 硬字幕 OCR。
-- 多音轨和范围转写、SRT/VTT/ASS 导入、批量项目、监听文件夹、样式模板及 `.sfproject` 项目包。
-- 数据库顺序迁移、迁移前备份、每日/每周自动备份与脱敏诊断包。
-- 发布版内置 arm64 FFmpeg/FFprobe，YouTube 高清画面与音频合并不依赖 Homebrew。
-- YouTube 下载保留，网页播放器已移除，项目统一使用本地视频播放。
-- 模型与运行设备分别选择；不静默更换模型或从 Apple GPU 回退 CPU。CPU 保持 beam=5 与逐词时间戳，Qwen MLX 默认 20 秒切段。
-- Parakeet ONNX 与 Parakeet Core ML 都下载到 App 自己的数据目录，不写入源码或 App 包；Core ML 转写组件由 `scripts/build-parakeet-coreml.sh` 从源码构建。
-- 新增项目回收站、恢复、永久删除与运行中删除确认。
-- 新增完整设置中心、运行时诊断、可扩展语言选择器和模型路径校验。
-- 主界面重构为项目库、播放器、紧凑流程栏、工作标签页与按需检查器。
-- Web 主题通过 Tauri `setTheme()` 同步 macOS 原生标题栏，并支持减少动态效果。
+## 简洁版功能
+
+- **视频下载**：粘贴 YouTube 链接自动下载到本机；也可以选择或拖入本地视频。
+- **模型转写**：在 Whisper、Parakeet、Qwen3-ASR 等本地模型中选择，并选择 CPU / Apple GPU / Core ML 运行设备；模型未下载时会先自动下载。
+- **AI 整理**：用设置的 AI 服务修正断句和标点，合并过碎的字幕。
+- **AI 翻译**：把字幕翻译为目标语言。
+- **导出**：原文、译文或双语 SRT。
+
+已移除：项目库/分组/回收站界面、字幕编辑器、波形时间轴、样式与视频压制、质检、术语表、批量与播放列表、监听文件夹、短视频剪辑、内容包、OCR、说话人识别、项目包、备份与诊断界面。
 
 ## 直接启动
 
@@ -51,26 +47,13 @@ DMG 与校验文件位于仓库根目录：
 
 ## 使用流程
 
-1. 点击顶栏“导入”选择本地视频，或点击“链接”粘贴 YouTube URL。
-   粘贴播放列表链接时会先显示条目预览，可选择批量转写、AI 整理和 AI 翻译；创建后在首页“播放列表批量任务”中折叠归组。
-2. 在素材准备窗口选模型与 CPU / Apple GPU 等运行设备，然后选择“仅导入”或“导入并生成字幕”。
-3. 在“任务与工具”查看、暂停、继续或停止任务；AI 整理与翻译按需启用并明确授权。
-4. 在“编辑”同页播放校对，进入“样式”或“导出”完成交付。重新转写及未完成草稿可比较、采用并撤销。
-5. 项目右键菜单提供打开、重命名、移动分组和移入回收站。
+1. 在“生成字幕”页粘贴 YouTube 链接，或点击“选择本地视频…”（也可拖入视频）。
+2. 选择转写模型、运行设备和视频语言；按需打开“AI 整理”“AI 翻译”并选择目标语言。
+3. 点击“开始生成字幕”。进度会显示在项目页，字幕在转写过程中逐条出现。
+4. 完成后可在项目页再次运行“AI 整理”或换一种语言“翻译”，点击“导出 SRT”选择原文、译文或双语字幕。
+5. 左侧历史列表可重新打开或删除以前的视频。
 
-YouTube 链接中的 `t=110s`、`start`、`time_continue` 等定位参数会被移除。下载完成后在本机播放、校对和导出；下载失败不会删除项目或已有媒体。下载依赖网络及服务可用性。
-
-## 设置中心
-
-- 通用：默认流程、自动保存与启动行为。
-- 转写：默认模型、源语言、模型状态、准备/修复与本地路径。
-- AI 服务：服务商、Base URL、模型、API Key 与连接测试。
-- 翻译：默认目标语言、双语顺序和常用语言。
-- 下载与存储：新项目默认媒体模式、画质、容器、FFmpeg、yt-dlp、输出目录与磁盘空间。
-- 外观与动画：主题、界面密度与动画开关。
-- 快捷键与关于：版本、数据目录和诊断信息。
-
-API Key 在发布版中保存到 macOS Keychain；数据库只保留配置状态。密钥、完整本机路径、媒体和字幕正文不会进入脱敏诊断包。环境变量路径仅用于开发和高级排错，冻结发布版默认不继承。
+首次使用 AI 整理或翻译前，请点击左下角“AI 服务”填写服务商、API Key 与模型。API Key 在发布版中保存到 macOS Keychain。
 
 ## 转写模型
 
@@ -97,7 +80,7 @@ macOS 直装版数据目录：
 
 Mac App Store 版启用 App Sandbox，数据位于系统管理的 `~/Library/Containers/com.subtitlefactory.desktop/` 容器中。该发行版只接受用户主动选择的本地视频，不提供 YouTube、Cookie、持久监听文件夹或外部运行时路径。
 
-详细文档：[隐私说明](docs/PRIVACY.md) · [云端增强授权](docs/CLOUD_AUTHORIZATION.md) · [编辑器快捷键](docs/SHORTCUTS.md) · [备份与故障恢复](docs/RECOVERY.md) · [App Store 交接单](docs/APP_STORE_METADATA.md) · [App Store 交付基线](docs/APP_STORE_READINESS.md)
+详细文档：[隐私说明](docs/PRIVACY.md) · [云端增强授权](docs/CLOUD_AUTHORIZATION.md) · [备份与故障恢复](docs/RECOVERY.md) · [App Store 交接单](docs/APP_STORE_METADATA.md) · [App Store 交付基线](docs/APP_STORE_READINESS.md)
 
 ## 开发环境
 
@@ -181,36 +164,21 @@ npm run build
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| GET | `/api/health` | 后端、FFmpeg、yt-dlp、磁盘、输出目录和模型状态 |
-| GET | `/api/projects` | 正常项目列表 |
-| GET | `/api/projects?deleted=true` | 回收站列表 |
-| PATCH | `/api/projects/{id}/media-mode` | 准备单个 YouTube 项目的本地视频（兼容旧接口） |
-| POST | `/api/projects/{id}/prepare-audio` | 只下载并准备转写音频 |
-| POST | `/api/projects/{id}/materialize-video` | 按需下载并保留本地视频副本 |
-| POST | `/api/projects/{id}/trash` | 移入回收站；活动任务需 `terminate=true` 确认 |
-| POST | `/api/projects/{id}/restore` | 恢复项目 |
-| DELETE | `/api/projects/{id}?permanent=true` | 永久删除项目及其数据 |
-| DELETE | `/api/projects/trash?confirm=true` | 清空回收站 |
-| GET/PUT | `/api/settings/app` | 读取或部分更新 App 运行设置 |
-| POST | `/api/settings/app/validate-path` | 校验模型、CLI、FFmpeg 和目录路径 |
-| GET | `/api/transcription/models` | 模型来源、就绪与下载状态 |
-| POST | `/api/transcription/models/{id}/prepare` | 下载、校验或修复 App 管理模型 |
-| POST | `/api/batches/playlist/preview` | 只读取 YouTube 播放列表元数据和条目顺序 |
-| POST | `/api/batches/playlist` | 创建或增量同步播放列表批次并启动所选流水线 |
-| GET | `/api/batches?kind=youtube_playlist` | 获取首页播放列表批次、子项目和逐阶段状态 |
+| GET | `/api/health` | 后端、FFmpeg、yt-dlp、磁盘和模型状态 |
+| GET/POST | `/api/projects` | 历史列表 / 新建项目 |
+| DELETE | `/api/projects/{id}?permanent=true` | 删除项目及其数据 |
+| POST | `/api/projects/{id}/import-local` | 导入本地视频 |
+| POST | `/api/projects/{id}/workflow` | 下载 → 转写 → 整理 → 翻译一键流程 |
+| POST | `/api/projects/{id}/clean` | 单独运行 AI 整理 |
+| POST | `/api/projects/{id}/translate` | 单独运行 AI 翻译 |
+| GET | `/api/projects/{id}/segments` | 读取字幕 |
+| POST | `/api/projects/{id}/export` | 导出 SRT / VTT / ASS（原文、译文或双语） |
+| GET | `/api/transcription/models` | 模型就绪与下载状态 |
+| POST | `/api/transcription/models/{id}/prepare` | 下载、校验 App 管理模型 |
+| GET/PUT | `/api/settings/ai/providers…` | AI 服务商配置与测试 |
+| GET/POST | `/api/tasks/{id}` / `…/cancel` | 任务进度与停止 |
 
-现有转写、整理、翻译、字幕编辑和导出接口保持兼容，完整交互文档可在后端启动后打开 [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)。
-
-## 快捷键
-
-| 快捷键 | 操作 |
-|---|---|
-| `Space` | 播放 / 暂停 |
-| `R` | 从头重播 |
-| `,` / `.` | 前一帧 / 后一帧 |
-| `T` | 剧院模式 |
-| `Esc` | 关闭弹窗、抽屉或退出剧院模式 |
-| `Return` | 保存当前字幕编辑 |
+完整交互文档可在后端启动后打开 [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)。
 
 ## 发布说明
 

@@ -106,7 +106,6 @@ from ..services.transcriber import (
     resolve_transcription_model,
     transcribe_audio,
 )
-from ..services.video_renderer import burn_subtitles
 from ..services.video_thumbnail import generate_video_thumbnail
 from ..utils.config import (
     AUDIO_DIR,
@@ -2336,60 +2335,9 @@ def update_segment(project_id: str, segment_index: int, update: SegmentUpdate):
 # 导出
 # ============================
 
-def _do_video_export(
-    task_id: str,
-    project_id: str,
-    subtitle_path: str,
-    output_path: str,
-    fmt: str,
-    bilingual: bool,
-    style_settings: dict | None,
-):
-    row = _project_row(project_id)
-    if not row:
-        raise RuntimeError("项目不存在")
-    stages = {"download_video": "waiting", "render_video": "waiting"}
-    video_path = row["video_path"]
-    if not video_path or not os.path.isfile(video_path):
-        if row["source_type"] != "youtube" or not row["source_url"]:
-            raise RuntimeError("视频文件不存在，且项目没有可重新下载的链接")
-        stages["download_video"] = "running"
-        task_manager.update_task(
-            task_id, step="materialize_video", progress=1,
-            message="首次视频导出：正在下载并保留本地视频",
-            details={"stages": stages, "format": fmt},
-        )
-        _do_download(
-            task_id, project_id, row["source_url"],
-            preserve_metadata=True, progress_start=2, progress_end=52,
-            completed_progress=52, materialization_reason="video_export",
-        )
-        row = _project_row(project_id)
-        video_path = row["video_path"] if row else None
-    if not video_path or not os.path.isfile(video_path):
-        raise RuntimeError("本地视频准备失败，无法压制字幕")
-    stages["download_video"] = "success"
-    stages["render_video"] = "running"
-    task_manager.update_task(
-        task_id, step="rendering", progress=55,
-        message="本地视频已就绪，正在压制字幕",
-        details={"stages": stages, "format": fmt},
-    )
-    burn_subtitles(
-        task_id, video_path, subtitle_path, output_path, project_id,
-        bilingual=bilingual, style_settings=style_settings,
-    )
-    stages["render_video"] = "success"
-    task_manager.update_task(
-        task_id, step="render_done", progress=95,
-        message="视频压制完成",
-        details={"stages": stages, "format": fmt},
-    )
-
-
 @router.post("/projects/{project_id}/export")
 def export_subtitles(project_id: str, req: ExportRequest):
-    """导出字幕或压制视频"""
+    """导出字幕文件"""
     db = get_db()
     row = db.execute("SELECT * FROM projects WHERE id = ?", (project_id,)).fetchone()
     segments_rows = db.execute(
@@ -2425,44 +2373,6 @@ def export_subtitles(project_id: str, req: ExportRequest):
     elif fmt == "srt-bilingual":
         out = get_subtitle_path(project_id, "bilingual.srt")
         export_srt(segments, out, bilingual=True, primary_lang=req.primary_language)
-    elif fmt in {"mp4", "mkv"}:
-        if (
-            row["source_type"] == "youtube"
-            and (not row["video_path"] or not os.path.isfile(row["video_path"]))
-        ):
-            require_youtube_feature()
-        if _active_task_conflict(project_id):
-            raise HTTPException(
-                409,
-                detail={
-                    "code": "MEDIA_TASK_ACTIVE",
-                    "message": "项目已有任务正在运行，完成后再导出视频",
-                },
-            )
-        if (
-            (not row["video_path"] or not os.path.exists(row["video_path"]))
-            and (row["source_type"] != "youtube" or not row["source_url"])
-        ):
-            raise HTTPException(400, "视频文件不存在，且项目没有可重新下载的链接")
-
-        # 先导出 ASS 字幕
-        ass_path = get_subtitle_path(project_id, "ass")
-        export_ass(segments, ass_path, bilingual=bilingual, primary_lang=req.primary_language, settings=style_settings)
-
-        # 后台压制
-        task_id = task_manager.create_task(project_id, "render")
-        task_manager.update_task(task_id, details={
-            "format": fmt,
-            "bilingual": bilingual,
-            "style": style_settings or {},
-        })
-        from ..utils.config import EXPORTS_DIR
-        output_path = os.path.join(EXPORTS_DIR, f"{project_id}_hardsub.{fmt}")
-        task_manager.run_background(
-            task_id, _do_video_export,
-            project_id, ass_path, output_path, fmt, bilingual, style_settings,
-        )
-        return {"task_id": task_id, "message": f"{fmt.upper()} 视频导出任务已创建"}
     else:
         raise HTTPException(400, f"不支持的导出格式: {fmt}")
 
@@ -2470,14 +2380,10 @@ def export_subtitles(project_id: str, req: ExportRequest):
 
 
 @router.get("/projects/{project_id}/export/download")
-def download_export(project_id: str, fmt: str = Query("srt", pattern="^(srt|vtt|ass|srt-bilingual|mp4|mkv)$")):
+def download_export(project_id: str, fmt: str = Query("srt", pattern="^(srt|vtt|ass|srt-bilingual)$")):
     """下载已导出的字幕文件"""
-    if fmt in {"mp4", "mkv"}:
-        from ..utils.config import EXPORTS_DIR
-        filepath = os.path.join(EXPORTS_DIR, f"{project_id}_hardsub.{fmt}")
-    else:
-        ext = fmt.replace("srt-bilingual", "bilingual.srt")
-        filepath = get_subtitle_path(project_id, ext)
+    ext = fmt.replace("srt-bilingual", "bilingual.srt")
+    filepath = get_subtitle_path(project_id, ext)
     if not os.path.exists(filepath):
         raise HTTPException(404, "导出文件不存在，请先导出")
     return FileResponse(filepath, filename=os.path.basename(filepath))
