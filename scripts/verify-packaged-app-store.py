@@ -287,7 +287,6 @@ def verify_api(
             "title": "blocked-review", "source_type": "youtube",
             "source_url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
         }),
-        ("/api/watch-folders", "GET", None),
         ("/api/settings/app/validate-path", "POST", {
             "kind": "download_directory", "path": "/tmp",
         }),

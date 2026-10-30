@@ -14,8 +14,8 @@ use tauri::{Manager, RunEvent, State, WindowEvent};
 use tauri_plugin_dialog::DialogExt;
 use uuid::Uuid;
 
-const PROFESSIONAL_UI_MARKER: &str = "subtitle-factory-ui:professional-v2";
-const LIBRARY_WORKSPACE_UI_MARKER: &str = "subtitle-factory-ui:library-workspace-v2";
+const SIMPLE_UI_MARKER: &str = "subtitle-factory-ui:simple-v1";
+const SINGLE_PAGE_UI_MARKER: &str = "subtitle-factory-ui:single-page-v1";
 const DIRECT_DISTRIBUTION_CHANNEL: &str = "direct";
 const APP_STORE_DISTRIBUTION_CHANNEL: &str = "app_store";
 const BACKEND_STARTUP_ERROR_FILE: &str = "backend-startup-error.txt";
@@ -578,8 +578,8 @@ pub fn run() {
                 .build(),
         )
         .setup(|app| {
-            log::info!("release UI marker: {PROFESSIONAL_UI_MARKER}");
-            log::info!("release UI layout marker: {LIBRARY_WORKSPACE_UI_MARKER}");
+            log::info!("release UI marker: {SIMPLE_UI_MARKER}");
+            log::info!("release UI layout marker: {SINGLE_PAGE_UI_MARKER}");
             let session = create_backend_session()?;
             let app_data = app
                 .path()

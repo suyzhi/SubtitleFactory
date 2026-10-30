@@ -53,10 +53,10 @@ cargo test --manifest-path "$ROOT/frontend/src-tauri/Cargo.toml" --locked
 
 if ! rg -F "$UI_MARKER" "$ROOT/frontend/src/App.tsx" >/dev/null \
   || ! rg -F "$UI_LAYOUT_MARKER" "$ROOT/frontend/src/App.tsx" >/dev/null \
-  || ! rg -F "library-home" "$ROOT/frontend/src/App.tsx" >/dev/null \
-  || ! rg -F "workspace-active" "$ROOT/frontend/src/App.tsx" >/dev/null \
+  || ! rg -F "<NewTask" "$ROOT/frontend/src/App.tsx" >/dev/null \
+  || ! rg -F "<ProjectView" "$ROOT/frontend/src/App.tsx" >/dev/null \
   || ! rg -F "import App from './App.tsx'" "$ROOT/frontend/src/main.tsx" >/dev/null; then
-  echo "新版项目库 / 独立项目工作区源码标记或入口缺失。" >&2
+  echo "简洁版单页界面源码标记或入口缺失。" >&2
   exit 1
 fi
 if rg -n "AISettingsDialog" "$ROOT/frontend/src/main.tsx" "$ROOT/frontend/src/App.tsx" >/dev/null; then

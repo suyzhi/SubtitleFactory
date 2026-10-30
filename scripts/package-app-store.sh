@@ -154,7 +154,7 @@ npm run build
 if ! rg -F "$UI_MARKER" "$ROOT/frontend/src/App.tsx" >/dev/null \
   || ! rg -F "$UI_LAYOUT_MARKER" "$ROOT/frontend/src/App.tsx" >/dev/null \
   || ! rg -F "import App from './App.tsx'" "$ROOT/frontend/src/main.tsx" >/dev/null; then
-  echo "App Store 源码入口不是规定的新版项目库/工作区界面。" >&2
+  echo "App Store 源码入口不是规定的简洁版单页界面。" >&2
   exit 1
 fi
 if ! rg -F "$UI_MARKER" "$ROOT/frontend/dist" >/dev/null \

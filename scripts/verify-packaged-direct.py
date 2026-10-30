@@ -78,7 +78,6 @@ def verify_direct_api(
     common.require("parakeet-tdt-0.6b-v3-coreml" in ids, "直装模型目录缺少外部 Core ML 入口")
     common.require("custom" not in ids, "空白隔离数据目录不应凭空出现 custom 模型")
 
-    common.json_response(session, "/api/watch-folders", expected=200)
     common.json_response(session, "/api/transcription/models/imported", expected=200)
 
     youtube_project: str | None = None
