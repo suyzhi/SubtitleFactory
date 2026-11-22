@@ -9,6 +9,7 @@ mlx-qwen3-asr==0.3.5; platform_system == "Darwin" and platform_machine == "arm64
 sherpa-onnx==1.13.3
 srt>=3.5.3
 yt-dlp>=2025.10.14
+yt-dlp-ejs==0.8.0
 python-dotenv>=1.0.0
 aiofiles>=24.1.0
 httpx>=0.28.0
@@ -16,5 +17,4 @@ pysubs2>=1.8.0
 Pillow>=11.3.0
 python-multipart>=0.0.22
 keyring>=25.7.0
-av>=11.0.0
 numpy>=1.26.0

@@ -259,15 +259,54 @@ def resolve_yt_dlp_path(
     )
 
 
+def resolve_quickjs_path(
+    user_path: str | os.PathLike[str] | None = None,
+) -> RuntimeExecutable | None:
+    """Resolve the lightweight QuickJS-ng runtime bundled for yt-dlp challenges."""
+    resolved = _resolve_executable(
+        "qjs",
+        user_path=user_path,
+        environment_variable="SUBTITLE_FACTORY_BUNDLED_QJS",
+        version_args=("--version",),
+    )
+    if resolved is None:
+        return None
+    version = resolved.version
+    if version and version[0].isdigit():
+        return RuntimeExecutable(
+            name=resolved.name,
+            path=resolved.path,
+            source=resolved.source,
+            available=resolved.available,
+            version=f"QuickJS-ng {version}",
+            architectures=resolved.architectures,
+            error=resolved.error,
+        )
+    return resolved
+
+
 def resolve_deno_path(
     user_path: str | os.PathLike[str] | None = None,
 ) -> RuntimeExecutable | None:
-    """Resolve the JavaScript runtime used by yt-dlp's YouTube challenges."""
+    """Resolve an optional Deno runtime for yt-dlp's YouTube challenges."""
     return _resolve_executable(
         "deno", user_path=user_path,
         environment_variable="SUBTITLE_FACTORY_BUNDLED_DENO",
         version_args=("--version",),
     )
+
+
+def resolve_js_runtime(
+    user_path: str | os.PathLike[str] | None = None,
+) -> tuple[str, RuntimeExecutable] | None:
+    """Resolve the preferred JavaScript runtime for yt-dlp (QuickJS-ng → Deno)."""
+    quickjs = resolve_quickjs_path(None)
+    if quickjs is not None:
+        return "quickjs", quickjs
+    deno = resolve_deno_path(user_path)
+    if deno is not None:
+        return "deno", deno
+    return None
 
 
 def _ejs_status() -> dict:
@@ -281,10 +320,18 @@ def _ejs_status() -> dict:
             "version": "",
             "error": f"无法加载 EJS 挑战组件：{type(exc).__name__}",
         }
+    solver_version = ""
+    try:
+        ejs_pkg = import_module("yt_dlp_ejs")
+        solver_version = str(getattr(ejs_pkg, "version", "") or "")
+    except Exception:
+        solver_version = ""
+    yt_dlp_version = getattr(getattr(_yt_dlp_module(), "version", None), "__version__", "")
     return {
         "available": bool(module),
-        "source": "yt_dlp_python_package",
-        "version": getattr(getattr(_yt_dlp_module(), "version", None), "__version__", ""),
+        "source": "yt_dlp_ejs_package" if solver_version else "yt_dlp_python_package",
+        "version": solver_version or yt_dlp_version,
+        "bundled_solver": bool(solver_version),
         "error": "",
     }
 
@@ -316,7 +363,21 @@ def get_download_runtime_status(
     """Status payload shared by health checks and the settings preflight."""
     ffmpeg = resolve_ffmpeg_path(user_ffmpeg_path)
     ffprobe = resolve_ffprobe_path(None)
-    deno = resolve_deno_path(None)
+    js_runtime_pair = resolve_js_runtime(None)
+    js_runtime_dict = (
+        {**js_runtime_pair[1].to_dict(), "engine": js_runtime_pair[0]}
+        if js_runtime_pair
+        else {
+            "name": "qjs",
+            "engine": "unavailable",
+            "available": False,
+            "error": "未找到可用的 JS 运行时（QuickJS / Deno）",
+            "path": "",
+            "source": "unavailable",
+            "version": "",
+            "architectures": [],
+        }
+    )
     cli = resolve_yt_dlp_path(user_yt_dlp_path)
     ejs = _ejs_status()
     version = getattr(getattr(_yt_dlp_module(), "version", None), "__version__", "")
@@ -329,7 +390,7 @@ def get_download_runtime_status(
     output = _output_directory_status(user_download_dir)
     return {
         "ok": bool(
-            ffmpeg and ffprobe and deno and ejs["available"]
+            ffmpeg and ffprobe and js_runtime_pair and ejs["available"]
             and yt_dlp_status["available"] and output["writable"]
         ),
         "ffmpeg": ffmpeg.to_dict() if ffmpeg else {
@@ -341,10 +402,8 @@ def get_download_runtime_status(
             "path": "", "source": "unavailable", "version": "", "architectures": [],
         },
         "yt_dlp": yt_dlp_status,
-        "deno": deno.to_dict() if deno else {
-            "name": "deno", "available": False, "error": "未找到可用的 Deno",
-            "path": "", "source": "unavailable", "version": "", "architectures": [],
-        },
+        "js_runtime": js_runtime_dict,
+        "deno": js_runtime_dict,
         "ejs": ejs,
         "po_token": {
             "available": False,

@@ -267,7 +267,7 @@ def verify_api(
     require(capabilities.get("channel") == "app_store", "packaged sidecar 不是 app_store 通道")
     for key in ("youtube", "browser_cookies", "filesystem_automation", "external_runtime_paths"):
         require(capabilities.get(key) is False, f"App Store 能力 {key} 没有关闭")
-    for key in ("yt_dlp", "deno", "ejs"):
+    for key in ("yt_dlp", "js_runtime", "deno", "ejs"):
         require((runtime.get(key) or {}).get("status") == "disabled", f"{key} 没有禁用")
     require(
         runtime.get("data_directory") == f"~/Library/Application Support/{bundle_id}/data",

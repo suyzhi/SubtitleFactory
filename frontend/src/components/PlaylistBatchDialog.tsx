@@ -43,7 +43,7 @@ export default function PlaylistBatchDialog({ url, workflow, appSettings, health
     if (!health?.runtime?.ffmpeg?.ok) values.push('FFmpeg 不可用');
     if (!health?.runtime?.ffprobe?.ok) values.push('FFprobe 不可用');
     if (!health?.runtime?.yt_dlp?.ok) values.push('yt-dlp 不可用');
-    if (!health?.runtime?.deno?.ok) values.push('Deno 不可用');
+    if (!(health?.runtime?.js_runtime?.ok ?? health?.runtime?.deno?.ok)) values.push('JS 运行时不可用');
     if (!health?.runtime?.ejs?.ok) values.push('EJS 挑战组件不可用');
     if (transcribe && !workflow.runtime) values.push('尚未选择转写运行设备');
     if (clean && !aiReady.clean) values.push('AI 整理供应商尚未配置可用的 API Key');

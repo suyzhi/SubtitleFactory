@@ -63,7 +63,7 @@ def verify_direct_api(
         runtime.get("data_directory") == str(data_directory),
         "sidecar 没有使用验收器指定的隔离数据目录",
     )
-    for key in ("ffmpeg", "ffprobe", "yt_dlp", "deno", "ejs"):
+    for key in ("ffmpeg", "ffprobe", "yt_dlp", "js_runtime", "deno", "ejs"):
         item = runtime.get(key) or {}
         common.require(item.get("ok") is True, f"真实包内 {key} 不可用")
         common.require(item.get("status") == "ready", f"真实包内 {key} 状态不是 ready")
@@ -208,7 +208,7 @@ def verify_app(
             )
             print(
                 f"{label} API 通过：401 鉴权、{EXPECTED_MODEL_COUNT} 个模型、"
-                "4 项直装能力、禁用浏览器凭据、真实 Deno/FFmpeg、本地导入与精确清理"
+                "4 项直装能力、禁用浏览器凭据、真实 QuickJS/FFmpeg、本地导入与精确清理"
             )
             common.verify_lifecycle(
                 executable,

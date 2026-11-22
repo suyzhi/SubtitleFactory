@@ -364,8 +364,8 @@ async def import_local_video(
 
 @router.get("/projects/{project_id}/media-info")
 def get_media_info(project_id: str):
-    """Enumerate playable audio tracks without invoking an external process."""
-    import av
+    """Enumerate playable audio tracks via the bundled FFprobe runtime."""
+    from ...services.media_tools import parse_duration, probe_media
 
     db = get_db()
     row = db.execute(
@@ -377,24 +377,33 @@ def get_media_info(project_id: str):
         raise HTTPException(404, "项目不存在")
     if not row["video_path"] or not os.path.isfile(row["video_path"]):
         raise HTTPException(404, "视频文件不存在")
-    with av.open(row["video_path"]) as container:
-        tracks = []
-        for index, stream in enumerate(container.streams.audio):
-            metadata = dict(stream.metadata or {})
-            tracks.append(
-                {
-                    "index": index,
-                    "codec": stream.codec_context.name,
-                    "channels": stream.codec_context.channels,
-                    "sample_rate": stream.codec_context.sample_rate,
-                    "language": metadata.get("language", "und"),
-                    "title": metadata.get("title") or f"音轨 {index + 1}",
-                    "duration": float(stream.duration * stream.time_base)
-                    if stream.duration
-                    else None,
-                }
-            )
-        duration = float(container.duration / 1_000_000) if container.duration else None
+    info = probe_media(row["video_path"])
+    audio_streams = [
+        stream
+        for stream in (info.get("streams") or [])
+        if isinstance(stream, dict) and stream.get("codec_type") == "audio"
+    ]
+    tracks = []
+    for index, stream in enumerate(audio_streams):
+        tags = stream.get("tags") or {}
+        if not isinstance(tags, dict):
+            tags = {}
+        try:
+            sample_rate = int(stream["sample_rate"]) if stream.get("sample_rate") else None
+        except (TypeError, ValueError):
+            sample_rate = None
+        tracks.append(
+            {
+                "index": index,
+                "codec": stream.get("codec_name") or "",
+                "channels": stream.get("channels"),
+                "sample_rate": sample_rate,
+                "language": tags.get("language") or tags.get("LANGUAGE") or "und",
+                "title": tags.get("title") or tags.get("TITLE") or f"音轨 {index + 1}",
+                "duration": parse_duration(stream.get("duration")),
+            }
+        )
+    duration = parse_duration((info.get("format") or {}).get("duration"))
     return {
         "audio_tracks": tracks,
         "duration": duration,
@@ -447,17 +456,22 @@ def update_media_selection(project_id: str, request: MediaSelectionUpdate):
                 "affected_results": [],
             }
         if row["video_path"] and os.path.isfile(row["video_path"]):
-            import av
+            from ...services.media_tools import parse_duration, probe_media
 
-            with av.open(row["video_path"]) as container:
-                if request.audio_track_index >= len(container.streams.audio):
-                    raise HTTPException(422, "所选音轨不存在")
-                duration = float(container.duration / av.time_base) if container.duration else None
-                if duration and (
-                    float(request.range_start or 0) >= duration
-                    or (request.range_end is not None and request.range_end > duration + 0.1)
-                ):
-                    raise HTTPException(422, "截取范围超出视频时长")
+            info = probe_media(row["video_path"])
+            audio_streams = [
+                stream
+                for stream in (info.get("streams") or [])
+                if isinstance(stream, dict) and stream.get("codec_type") == "audio"
+            ]
+            if request.audio_track_index >= len(audio_streams):
+                raise HTTPException(422, "所选音轨不存在")
+            duration = parse_duration((info.get("format") or {}).get("duration"))
+            if duration and (
+                float(request.range_start or 0) >= duration
+                or (request.range_end is not None and request.range_end > duration + 0.1)
+            ):
+                raise HTTPException(422, "截取范围超出视频时长")
         db.execute(
             """UPDATE projects SET audio_track_index=?,range_start=?,range_end=?,audio_path=NULL,
                updated_at=datetime('now','localtime') WHERE id=?""",

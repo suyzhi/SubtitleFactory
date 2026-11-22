@@ -49,6 +49,7 @@ export interface RuntimeHealth {
   ffmpeg?: RuntimeCheck;
   ffprobe?: RuntimeCheck;
   yt_dlp?: RuntimeCheck;
+  js_runtime?: RuntimeCheck;
   deno?: RuntimeCheck;
   ejs?: RuntimeCheck;
   disk?: RuntimeCheck;

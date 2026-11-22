@@ -21,6 +21,8 @@ from ..runtime_diagnostics import (
     resolve_deno_path,
     resolve_ffmpeg_path,
     resolve_ffprobe_path,
+    resolve_js_runtime,
+    resolve_quickjs_path,
 )
 from .error_classifier import _classify_download_error
 from .media_probe import (
@@ -107,6 +109,17 @@ def _resolve_deno_path() -> Optional[Path]:
     resolver = _facade("resolve_deno_path", resolve_deno_path)
     runtime = resolver()
     return runtime.path if runtime else None
+
+
+def _resolve_js_runtime() -> Optional[tuple[str, Path]]:
+    quickjs_resolver = _facade("resolve_quickjs_path", resolve_quickjs_path)
+    quickjs = quickjs_resolver()
+    if quickjs is not None:
+        return "quickjs", quickjs.path
+    deno = _facade("_resolve_deno_path", _resolve_deno_path)()
+    if deno is not None:
+        return "deno", deno
+    return None
 
 
 def _with_player_client(options: dict, client: str) -> dict:
@@ -304,18 +317,19 @@ def _download_options(
         }
     if ffmpeg_location:
         options["ffmpeg_location"] = ffmpeg_location
-    deno = _facade("_resolve_deno_path", _resolve_deno_path)()
-    if not deno:
+    js_runtime = _facade("_resolve_js_runtime", _resolve_js_runtime)()
+    if not js_runtime:
         raise DownloadServiceError(
-            "下载运行环境缺少 YouTube 挑战所需的 Deno",
+            "下载运行环境缺少 YouTube 挑战所需的 JS 运行时（QuickJS / Deno）",
             "DOWNLOAD_RUNTIME_MISSING",
             actions=["open_settings"],
-            suggestion="请重新安装包含 Deno 与 EJS 挑战组件的完整 App",
+            suggestion="请重新安装包含 QuickJS 与 EJS 挑战组件的完整 App",
             details={
                 "failure_stage": "runtime_preflight",
-                "runtime_component": "deno",
+                "runtime_component": "js_runtime",
             },
         )
+    js_engine, js_path = js_runtime
     try:
         import_module("yt" + "_dlp.extractor.youtube.jsc")
     except Exception as exc:
@@ -329,7 +343,7 @@ def _download_options(
                 "runtime_component": "ejs",
             },
         ) from exc
-    options["js_runtimes"] = {"deno": {"path": str(deno)}}
+    options["js_runtimes"] = {js_engine: {"path": str(js_path)}}
     return options
 
 
@@ -347,7 +361,7 @@ def download_video(
     tm = _facade("task_manager", task_manager)
     ffmpeg_resolver = _facade("resolve_ffmpeg_path", resolve_ffmpeg_path)
     ffprobe_resolver = _facade("resolve_ffprobe_path", resolve_ffprobe_path)
-    deno_resolver = _facade("resolve_deno_path", resolve_deno_path)
+    js_runtime_resolver = _facade("resolve_js_runtime", resolve_js_runtime)
     probe_fn = _facade("_probe_media", _probe_media)
     default_downloads_dir = _facade("DOWNLOADS_DIR", DOWNLOADS_DIR)
 
@@ -440,14 +454,16 @@ def download_video(
             ("http://", "https://")
         ):
             thumbnail_url = None
-        deno_info = deno_resolver()
+        js_runtime_info = js_runtime_resolver()
         download_details = {
             **attempt_details,
             "format_id": _selected_format_id(info),
             **validation,
             "ffmpeg_source": ffmpeg.source,
             "ffprobe_source": ffprobe.source,
-            "deno_source": deno_info.source if deno_info else "unavailable",
+            "js_runtime_engine": js_runtime_info[0] if js_runtime_info else "unavailable",
+            "js_runtime_source": js_runtime_info[1].source if js_runtime_info else "unavailable",
+            "deno_source": js_runtime_info[1].source if js_runtime_info else "unavailable",
         }
         tm.update_task(
             task_id,
@@ -493,7 +509,7 @@ def download_audio_source(
 ) -> str:
     """Download only the best available audio stream into task-local staging."""
     tm = _facade("task_manager", task_manager)
-    deno_resolver = _facade("resolve_deno_path", resolve_deno_path)
+    js_runtime_resolver = _facade("resolve_js_runtime", resolve_js_runtime)
     default_downloads_dir = _facade("DOWNLOADS_DIR", DOWNLOADS_DIR)
 
     tm.update_task(
@@ -546,7 +562,7 @@ def download_audio_source(
             ("http://", "https://")
         ):
             thumbnail_url = None
-        deno_info = deno_resolver()
+        js_runtime_info = js_runtime_resolver()
         tm.update_task(
             task_id,
             step="audio_downloaded",
@@ -564,7 +580,9 @@ def download_audio_source(
                     "format_id": _selected_format_id(info),
                     "container": Path(audio_source_path).suffix.lower().lstrip("."),
                     "file_size": Path(audio_source_path).stat().st_size,
-                    "deno_source": deno_info.source if deno_info else "unavailable",
+                    "js_runtime_engine": js_runtime_info[0] if js_runtime_info else "unavailable",
+                    "js_runtime_source": js_runtime_info[1].source if js_runtime_info else "unavailable",
+                    "deno_source": js_runtime_info[1].source if js_runtime_info else "unavailable",
                 },
             },
         )

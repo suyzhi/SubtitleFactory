@@ -480,13 +480,20 @@ def get_runtime_health() -> dict[str, Any]:
         download_runtime.get("ffprobe") if isinstance(download_runtime, dict) else None,
         "ffprobe",
     )
-    deno = (
+    js_runtime = (
         _normalize_runtime_tool(
-            download_runtime.get("deno") if isinstance(download_runtime, dict) else None,
-            "deno",
-        ) if capabilities.youtube else _runtime_item(
-            ok=False, status="disabled", path=None, source="distribution_policy",
-            message="Mac App Store 版本未包含 Deno",
+            (download_runtime.get("js_runtime") or download_runtime.get("deno"))
+            if isinstance(download_runtime, dict)
+            else None,
+            "JS 运行时",
+        )
+        if capabilities.youtube
+        else _runtime_item(
+            ok=False,
+            status="disabled",
+            path=None,
+            source="distribution_policy",
+            message="Mac App Store 版本未包含 YouTube JS 运行时",
         )
     )
     ejs = (
@@ -503,7 +510,8 @@ def get_runtime_health() -> dict[str, Any]:
         "ffmpeg": ffmpeg,
         "ffprobe": ffprobe,
         "yt_dlp": yt_dlp_status,
-        "deno": deno,
+        "js_runtime": js_runtime,
+        "deno": js_runtime,
         "ejs": ejs,
         "output_directory": _runtime_item(
             ok=output_validation["ok"], status=output_validation["status"],

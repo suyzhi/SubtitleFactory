@@ -387,6 +387,7 @@ export default function SettingsCenter(props: Props) {
 
   const copyDiagnostics = async () => {
     const runtime = health?.runtime;
+    const jsRuntime = runtime?.js_runtime ?? runtime?.deno;
     const safeDiagnostics = {
       version: health?.version,
       status: health?.status,
@@ -394,7 +395,7 @@ export default function SettingsCenter(props: Props) {
         ffmpeg: runtime?.ffmpeg && { ok: runtime.ffmpeg.ok, status: runtime.ffmpeg.status, source: runtime.ffmpeg.source, version: runtime.ffmpeg.version },
         ffprobe: runtime?.ffprobe && { ok: runtime.ffprobe.ok, status: runtime.ffprobe.status, source: runtime.ffprobe.source, version: runtime.ffprobe.version },
         yt_dlp: runtime?.yt_dlp && { ok: runtime.yt_dlp.ok, status: runtime.yt_dlp.status, source: runtime.yt_dlp.source, version: runtime.yt_dlp.version },
-        deno: runtime?.deno && { ok: runtime.deno.ok, status: runtime.deno.status, source: runtime.deno.source, version: runtime.deno.version },
+        js_runtime: jsRuntime && { ok: jsRuntime.ok, status: jsRuntime.status, source: jsRuntime.source, version: jsRuntime.version },
         ejs: runtime?.ejs && { ok: runtime.ejs.ok, status: runtime.ejs.status, source: runtime.ejs.source, version: runtime.ejs.version },
         disk: runtime?.disk && { ok: runtime.disk.ok, status: runtime.disk.status, free_bytes: runtime.disk.free_bytes },
         models: modelStatus?.models.map(model => ({ id: model.id, ready: model.ready, source: model.source, status: model.status })),
@@ -637,7 +638,7 @@ export default function SettingsCenter(props: Props) {
                 <RuntimeRow label="FFmpeg" value={runtimeCopy(runtime?.ffmpeg as any)}/>
                 <RuntimeRow label="FFprobe" value={runtimeCopy(runtime?.ffprobe as any)}/>
                 {youtubeEnabled && <RuntimeRow label="yt-dlp" value={runtimeCopy(runtime?.yt_dlp as any)}/>}
-                {youtubeEnabled && <RuntimeRow label="Deno" value={runtimeCopy(runtime?.deno as any)}/>}
+                {youtubeEnabled && <RuntimeRow label="JS 运行时" value={runtimeCopy((runtime?.js_runtime ?? runtime?.deno) as any)}/>}
                 {youtubeEnabled && <RuntimeRow label="EJS 挑战组件" value={runtimeCopy(runtime?.ejs as any)}/>}
                 <RuntimeRow label="输出目录" value={runtimeCopy(runtime?.output_directory as any)}/>
                 <RuntimeRow label="磁盘空间" value={{ ...runtimeCopy(runtime?.disk as any), detail: runtime?.disk?.free_bytes ? `${bytes(runtime.disk.free_bytes)} 可用` : runtimeCopy(runtime?.disk as any).detail }}/>

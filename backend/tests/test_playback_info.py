@@ -1,33 +1,39 @@
+import subprocess
 import sys
 import tempfile
 import unittest
-from fractions import Fraction
 from pathlib import Path
-from types import SimpleNamespace
 from unittest.mock import patch
-
-import av
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BACKEND_DIR))
 
+from app.services import playback_info
+from app.services.media_tools import require_ffmpeg
 from app.services.playback_info import get_playback_info
 
 
 def make_video(path: Path, fps: int) -> None:
-    with av.open(str(path), "w") as output:
-        stream = output.add_stream("mpeg4", rate=fps)
-        stream.width = 64
-        stream.height = 48
-        stream.pix_fmt = "yuv420p"
-        for index in range(fps):
-            frame = av.VideoFrame(64, 48, "yuv420p")
-            frame.pts = index
-            frame.time_base = Fraction(1, fps)
-            for packet in stream.encode(frame):
-                output.mux(packet)
-        for packet in stream.encode():
-            output.mux(packet)
+    ffmpeg = require_ffmpeg()
+    subprocess.run(
+        [
+            str(ffmpeg),
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            f"color=c=black:s=64x48:d=1:r={fps}",
+            "-c:v",
+            "mpeg4",
+            "-pix_fmt",
+            "yuv420p",
+            str(path),
+        ],
+        check=True,
+    )
 
 
 class PlaybackInfoTests(unittest.TestCase):
@@ -35,11 +41,11 @@ class PlaybackInfoTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / "media.mp4"
             make_video(path, 24)
-            with patch("app.services.playback_info.av.open", wraps=av.open) as opened:
+            with patch.object(playback_info, "probe_media", wraps=playback_info.probe_media) as probed:
                 first = get_playback_info(path)
                 first["frame_rate"] = 999
                 self.assertEqual(get_playback_info(path)["frame_rate"], 24)
-                self.assertEqual(opened.call_count, 1)
+                self.assertEqual(probed.call_count, 1)
             replacement = Path(folder) / "replacement.mp4"
             make_video(replacement, 60)
             replacement.replace(path)
@@ -58,25 +64,18 @@ class PlaybackInfoTests(unittest.TestCase):
 
     def test_missing_rate_falls_back_to_30_without_writing(self):
         path = Path(__file__)
-        stream = SimpleNamespace(
-            average_rate=None,
-            guessed_rate=None,
-            base_rate=None,
-            duration=120,
-            time_base=Fraction(1, 60),
-        )
-        class Container:
-            streams = SimpleNamespace(video=[stream])
-            duration = None
-
-            def __enter__(self):
-                return self
-
-            def __exit__(self, *_args):
-                return None
-
-        container = Container()
-        with patch("app.services.playback_info.av.open", return_value=container):
+        fake_probe = {
+            "streams": [
+                {
+                    "codec_type": "video",
+                    "avg_frame_rate": "0/0",
+                    "duration": "2.0",
+                }
+            ],
+            "format": {"duration": "2.0"},
+        }
+        playback_info._cached_playback_info.cache_clear()
+        with patch.object(playback_info, "probe_media", return_value=fake_probe):
             info = get_playback_info(path)
         self.assertEqual(info["frame_rate"], 30)
         self.assertEqual(info["frame_rate_source"], "fallback_30fps")

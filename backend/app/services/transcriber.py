@@ -268,6 +268,9 @@ def _transcribe_audio(task_id, audio_path, project_id, language, model_size, run
     elif runtime == "mlx" or (imported and imported["format"] == "mlx"):
         from types import SimpleNamespace
 
+        from .mlx_timing_shim import install_mlx_timing_shim
+
+        install_mlx_timing_shim()
         import mlx_whisper
         if imported:
             model_path=imported["path"]
@@ -301,6 +304,9 @@ def _transcribe_audio(task_id, audio_path, project_id, language, model_size, run
         runtime_model_name = f"MLX Whisper {model_id}"
         progress_start = 5.0
     else:
+        from .faster_whisper_shim import install_faster_whisper_shim
+
+        install_faster_whisper_shim()
         from faster_whisper import WhisperModel
 
         device, compute_type = "cpu", "int8"

@@ -25,6 +25,9 @@ class DownloadQualityTests(unittest.TestCase):
         # These are download-behaviour unit tests, so their runtime inputs must
         # not depend on Deno/FFprobe already being installed on the host. The
         # packaged-app acceptance tests exercise the real bundled executables.
+        qjs_patch = patch.object(
+            downloader, "resolve_quickjs_path", return_value=None,
+        )
         deno_patch = patch.object(
             downloader, "_resolve_deno_path", return_value=Path("/app/bin/deno"),
         )
@@ -35,8 +38,10 @@ class DownloadQualityTests(unittest.TestCase):
                 path=Path("/app/bin/ffprobe"), source="bundled",
             ),
         )
+        qjs_patch.start()
         deno_patch.start()
         ffprobe_patch.start()
+        self.addCleanup(qjs_patch.stop)
         self.addCleanup(deno_patch.stop)
         self.addCleanup(ffprobe_patch.stop)
 

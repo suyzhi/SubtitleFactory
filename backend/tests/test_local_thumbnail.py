@@ -1,5 +1,6 @@
 import asyncio
 import os
+import subprocess
 import sys
 import tempfile
 import time
@@ -7,8 +8,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-import av
-import numpy as np
+from PIL import Image
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(BACKEND_DIR))
@@ -19,6 +19,7 @@ if "SUBTITLE_FACTORY_DATA_DIR" not in os.environ:
 
 from app.api import projects
 from app.models import database
+from app.services.media_tools import require_ffmpeg
 from app.services.video_thumbnail import generate_video_thumbnail
 
 
@@ -33,26 +34,30 @@ class FakeUpload:
 
 
 def create_test_video(path: Path, width: int = 640, height: int = 360):
-    with av.open(str(path), mode="w") as output:
-        stream = output.add_stream("mpeg4", rate=10)
-        stream.width = width
-        stream.height = height
-        stream.pix_fmt = "yuv420p"
-        for index in range(12):
-            pixels = np.zeros((height, width, 3), dtype=np.uint8)
-            pixels[:, :, 0] = 30 + index * 10
-            pixels[:, :, 1] = 100
-            pixels[:, :, 2] = 180
-            frame = av.VideoFrame.from_ndarray(pixels, format="rgb24")
-            frame.pts = index
-            for packet in stream.encode(frame):
-                output.mux(packet)
-        for packet in stream.encode():
-            output.mux(packet)
+    ffmpeg = require_ffmpeg()
+    subprocess.run(
+        [
+            str(ffmpeg),
+            "-hide_banner",
+            "-loglevel",
+            "error",
+            "-y",
+            "-f",
+            "lavfi",
+            "-i",
+            f"testsrc=duration=1.2:size={width}x{height}:rate=10",
+            "-c:v",
+            "mpeg4",
+            "-pix_fmt",
+            "yuv420p",
+            str(path),
+        ],
+        check=True,
+    )
 
 
-class PyAVThumbnailTests(unittest.TestCase):
-    def test_generates_small_jpeg_without_external_image_libraries(self):
+class FFmpegThumbnailTests(unittest.TestCase):
+    def test_generates_small_jpeg_with_bundled_ffmpeg(self):
         with tempfile.TemporaryDirectory() as folder:
             folder_path = Path(folder)
             video_path = folder_path / "input.mp4"
@@ -65,11 +70,11 @@ class PyAVThumbnailTests(unittest.TestCase):
             thumbnail_path = Path(result)
             self.assertEqual(thumbnail_path.name, "thumbnail.jpg")
             self.assertEqual(thumbnail_path.read_bytes()[:3], b"\xff\xd8\xff")
-            with av.open(str(thumbnail_path)) as image:
-                frame = next(image.decode(video=0))
-            self.assertLessEqual(frame.width, 480)
-            self.assertLessEqual(frame.height, 270)
-            self.assertEqual((frame.width, frame.height), (480, 270))
+            with Image.open(thumbnail_path) as image:
+                width, height = image.size
+            self.assertLessEqual(width, 480)
+            self.assertLessEqual(height, 270)
+            self.assertEqual((width, height), (480, 270))
 
 
 class LocalImportThumbnailTests(unittest.TestCase):

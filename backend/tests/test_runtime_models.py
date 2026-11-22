@@ -48,17 +48,21 @@ class DownloadRuntimeTests(unittest.TestCase):
 
     def test_download_runtime_health_reports_deno_ejs_and_po_token_capability(self):
         status = runtime.get_download_runtime_status()
+        self.assertIn("js_runtime", status)
         self.assertIn("deno", status)
         self.assertIn("ejs", status)
         self.assertIn("po_token", status)
         self.assertFalse(status["po_token"]["bundled_provider"])
 
-    def test_missing_deno_blocks_youtube_before_network(self):
-        with patch.object(downloader, "resolve_deno_path", return_value=None):
+    def test_missing_js_runtime_blocks_youtube_before_network(self):
+        with (
+            patch.object(downloader, "resolve_quickjs_path", return_value=None),
+            patch.object(downloader, "resolve_deno_path", return_value=None),
+        ):
             with self.assertRaises(downloader.DownloadServiceError) as raised:
                 downloader._download_options("task", "/tmp/%(title)s.%(ext)s")
         self.assertEqual(raised.exception.error_code, "DOWNLOAD_RUNTIME_MISSING")
-        self.assertEqual(raised.exception.details["runtime_component"], "deno")
+        self.assertEqual(raised.exception.details["runtime_component"], "js_runtime")
 
     def test_ffmpeg_resolution_prefers_bundled_then_user_then_environment_then_path(self):
         with tempfile.TemporaryDirectory() as folder:

@@ -166,8 +166,8 @@ if rg -F "$OLD_UI_MARKER" "$ROOT/frontend/dist" >/dev/null; then
   echo "App Store Vite 产物包含旧 UI 标记：$OLD_UI_MARKER" >&2
   exit 1
 fi
-if [ -e "$TAURI_DIR/backend-runtime/bin/deno" ]; then
-  echo "App Store sidecar 错误地包含 Deno。" >&2
+if [ -e "$TAURI_DIR/backend-runtime/bin/deno" ] || [ -e "$TAURI_DIR/backend-runtime/bin/qjs" ]; then
+  echo "App Store sidecar 错误地包含 Deno 或 QuickJS。" >&2
   exit 1
 fi
 if find "$TAURI_DIR/backend-runtime" -iname '*yt_dlp*' -print -quit | grep -q .; then
@@ -200,8 +200,9 @@ if [ "$(/usr/libexec/PlistBuddy -c 'Print :LSApplicationCategoryType' "$APP_PATH
   exit 1
 fi
 if [ -e "$RUNTIME_PATH/bin/deno" ] \
+  || [ -e "$RUNTIME_PATH/bin/qjs" ] \
   || find "$RUNTIME_PATH" -iname '*yt_dlp*' -print -quit | grep -q .; then
-  echo "最终 App Store App 错误地包含 Deno 或 yt-dlp。" >&2
+  echo "最终 App Store App 错误地包含 Deno、QuickJS 或 yt-dlp。" >&2
   exit 1
 fi
 "$ROOT/scripts/restore-packaged-runtime-symlinks.sh" \

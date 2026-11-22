@@ -17,6 +17,8 @@ from ..runtime_diagnostics import (
     resolve_deno_path,
     resolve_ffmpeg_path,
     resolve_ffprobe_path,
+    resolve_js_runtime,
+    resolve_quickjs_path,
 )
 from .error_classifier import (
     _AUTH_CHALLENGE_MARKERS,
@@ -47,6 +49,7 @@ from .ytdlp_runner import (
     _execute_youtube_operation,
     _LazyYtDlp,
     _resolve_deno_path,
+    _resolve_js_runtime,
     _update_download_details,
     _with_player_client,
     download_audio_source,
@@ -82,6 +85,7 @@ __all__ = [
     "_probe_media",
     "_promote_candidate",
     "_resolve_deno_path",
+    "_resolve_js_runtime",
     "_safe_error_text",
     "_selected_format_id",
     "_update_download_details",
@@ -96,6 +100,8 @@ __all__ = [
     "resolve_deno_path",
     "resolve_ffmpeg_path",
     "resolve_ffprobe_path",
+    "resolve_js_runtime",
+    "resolve_quickjs_path",
     "task_manager",
     "time",
     "yt_dlp",

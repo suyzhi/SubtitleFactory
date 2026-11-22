@@ -68,6 +68,7 @@ class DistributionPolicyTests(unittest.TestCase):
         self.assertFalse(capabilities["filesystem_automation"])
         runtime = response.json()["runtime"]
         self.assertEqual(runtime["yt_dlp"]["status"], "disabled")
+        self.assertEqual(runtime["js_runtime"]["status"], "disabled")
         self.assertEqual(runtime["deno"]["status"], "disabled")
         self.assertEqual(runtime["ejs"]["status"], "disabled")
 

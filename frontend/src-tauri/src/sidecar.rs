@@ -173,10 +173,12 @@ pub fn start_backend(
     if let Some(runtime_dir) = packaged_runtime.as_ref() {
         let ffmpeg = runtime_dir.join("bin/ffmpeg");
         let ffprobe = runtime_dir.join("bin/ffprobe");
+        let qjs = runtime_dir.join("bin/qjs");
         let deno = runtime_dir.join("bin/deno");
-        if !ffmpeg.is_file() || !ffprobe.is_file() || (session.youtube_enabled && !deno.is_file()) {
+        let has_js_runtime = qjs.is_file() || deno.is_file();
+        if !ffmpeg.is_file() || !ffprobe.is_file() || (session.youtube_enabled && !has_js_runtime) {
             return Err(if session.youtube_enabled {
-                "App 内置 FFmpeg/FFprobe/Deno 缺失，发布包不完整".into()
+                "App 内置 FFmpeg/FFprobe/JS 运行时缺失，发布包不完整".into()
             } else {
                 "App 内置 FFmpeg/FFprobe 缺失，发布包不完整".into()
             });
@@ -186,7 +188,12 @@ pub fn start_backend(
             .env("SUBTITLE_FACTORY_BUNDLED_FFPROBE", &ffprobe)
             .env("SUBTITLE_FACTORY_RESOURCE_DIR", runtime_dir);
         if session.youtube_enabled {
-            command.env("SUBTITLE_FACTORY_BUNDLED_DENO", &deno);
+            if qjs.is_file() {
+                command.env("SUBTITLE_FACTORY_BUNDLED_QJS", &qjs);
+            }
+            if deno.is_file() {
+                command.env("SUBTITLE_FACTORY_BUNDLED_DENO", &deno);
+            }
         }
     }
 

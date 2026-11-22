@@ -30,10 +30,15 @@ backend/dist/
 backend/test_*.py
 frontend/src-tauri/binaries/
 backend/runtime/bin/
+backend/runtime/lib/
+backend/runtime/assets/
 backend/runtime/parakeet-coreml/.build/
 vendor/ffmpeg/darwin-arm64/
 vendor/ffmpeg/build/
 vendor/ffmpeg/source/
+vendor/quickjs/darwin-arm64/
+vendor/quickjs/source/
+vendor/silero-vad/
 *.app/
 *.dmg
 *.pkg

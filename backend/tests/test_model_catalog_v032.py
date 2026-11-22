@@ -139,7 +139,7 @@ class CatalogContractTests(unittest.TestCase):
     def test_parakeet_release_hashes_are_real_sha256_values(self):
         self.assertEqual(
             PARAKEET_ARCHIVE_SHA256,
-            "5793d0fd397c5778d2cf2126994d58e9d56b1be7c04d13c7a15bb1b4eafb16bf",
+            "1495e91b59d7fc53ddca91f3431758ec99f8fa253fdb0e1e851be0f72b14b0f9",
         )
         self.assertEqual(
             SILERO_VAD_SHA256,

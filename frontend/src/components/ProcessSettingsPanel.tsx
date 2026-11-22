@@ -162,8 +162,8 @@ export default function ProcessSettingsPanel({
               </span>
             )}
             {activeProjectIsYoutube && (
-              <span className={health?.runtime?.deno?.ok && health?.runtime?.ejs?.ok ? 'ok' : 'error'}>
-                YouTube 挑战组件 {health?.runtime?.deno?.ok && health?.runtime?.ejs?.ok ? '可用' : '需检查'}
+              <span className={(health?.runtime?.js_runtime?.ok ?? health?.runtime?.deno?.ok) && health?.runtime?.ejs?.ok ? 'ok' : 'error'}>
+                YouTube 挑战组件 {(health?.runtime?.js_runtime?.ok ?? health?.runtime?.deno?.ok) && health?.runtime?.ejs?.ok ? '可用' : '需检查'}
               </span>
             )}
           </div>

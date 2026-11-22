@@ -122,9 +122,9 @@ def _runtime_available(runtime_id: str, model_id: str = "") -> tuple[bool, str]:
         return ok, f"{label} 已随 App 提供" if ok else f"当前运行包缺少 {label}"
     if runtime_id == "coreml":
         try:
-            import onnxruntime
+            from ...services.faster_whisper_shim import sherpa_coreml_available
 
-            ok = "CoreMLExecutionProvider" in onnxruntime.get_available_providers()
+            ok = sherpa_coreml_available()
         except Exception:
             ok = False
         return ok, "Core ML Execution Provider 可用" if ok else "当前 ONNX Runtime 不支持 Core ML"

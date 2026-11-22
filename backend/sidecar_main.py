@@ -6,12 +6,32 @@ import os
 import signal
 import sys
 import threading
+from pathlib import Path
 from typing import BinaryIO, Callable
 
 import uvicorn
 
 PARENT_WATCHDOG_ENV = "SUBTITLE_FACTORY_PARENT_WATCHDOG"
 RUNTIME_VERIFY_ARGUMENT = "--verify-runtime"
+
+
+def _prepend_bundled_bin_to_path() -> None:
+    """Ensure bundled helpers (ffmpeg/ffprobe/qjs) are discoverable on PATH."""
+    candidates: list[Path] = []
+    resource_dir = os.getenv("SUBTITLE_FACTORY_RESOURCE_DIR", "").strip()
+    if resource_dir:
+        candidates.append(Path(resource_dir) / "bin")
+    if getattr(sys, "frozen", False):
+        candidates.append(Path(sys.executable).resolve().parent / "bin")
+    existing = os.environ.get("PATH", "")
+    parts = [p for p in existing.split(os.pathsep) if p]
+    for directory in reversed(candidates):
+        if directory.is_dir():
+            text = str(directory)
+            if text not in parts:
+                parts.insert(0, text)
+    if parts:
+        os.environ["PATH"] = os.pathsep.join(parts)
 
 
 def _verify_runtime_dependencies() -> None:
@@ -22,16 +42,31 @@ def _verify_runtime_dependencies() -> None:
     PyInstaller has rewritten ``@rpath`` entries.  Keep this check model-free so
     release builds can run it deterministically without downloads.
     """
-    import av
+    _prepend_bundled_bin_to_path()
+
+    from app.services.faster_whisper_shim import (
+        install_faster_whisper_shim,
+        resolve_silero_vad_path,
+        sherpa_coreml_available,
+        sherpa_get_speech_timestamps,
+    )
+    from app.services.mlx_timing_shim import (
+        dtw_cpu,
+        has_native_mlx_timing,
+        install_mlx_timing_shim,
+        median_filter,
+    )
+
+    install_mlx_timing_shim()
+    install_faster_whisper_shim()
+
     import ctranslate2
     import faster_whisper
     import mlx.core as mx
     import mlx_qwen3_asr
     import mlx_whisper
     import numpy as np
-    import onnxruntime
     import pysubs2
-    import scipy.signal
     import sherpa_onnx
     import tiktoken
     from PIL import Image
@@ -48,15 +83,22 @@ def _verify_runtime_dependencies() -> None:
     finally:
         mx.set_default_device(previous_device)
 
+    if not has_native_mlx_timing():
+        raise RuntimeError("Native libmlx_timing.dylib failed to load")
+    sample_matrix = np.array([[0.1, 0.5, 0.9], [0.4, 0.1, 0.2]], dtype=np.float32)
+    text_idx, time_idx = dtw_cpu(sample_matrix)
+    if text_idx.size == 0 or text_idx.shape != time_idx.shape:
+        raise RuntimeError("Native MLX DTW returned an unexpected result")
+    filtered = median_filter(np.array([1.0, 9.0, 2.0, 8.0, 3.0], dtype=np.float32), 3)
+    if filtered.shape != (5,):
+        raise RuntimeError("Native MLX median filter returned an unexpected result")
+
     image = Image.new("RGB", (2, 2), color="black")
     image_buffer = io.BytesIO()
     image.save(image_buffer, format="PNG")
     if not image_buffer.getvalue().startswith(b"\x89PNG"):
         raise RuntimeError("Pillow runtime failed to encode PNG")
 
-    resampled = scipy.signal.resample(np.array([0.0, 1.0]), 4)
-    if np.asarray(resampled).shape != (4,):
-        raise RuntimeError("SciPy runtime returned an unexpected result")
     encoding = tiktoken.Encoding(
         name="runtime-smoke",
         pat_str=r"(?s).+",
@@ -67,15 +109,19 @@ def _verify_runtime_dependencies() -> None:
         raise RuntimeError("tiktoken runtime failed to encode text")
     if not isinstance(pysubs2.SSAFile(), pysubs2.SSAFile):
         raise RuntimeError("pysubs2 runtime failed to create a subtitle file")
-    if "CoreMLExecutionProvider" not in onnxruntime.get_available_providers():
-        raise RuntimeError("ONNX Runtime does not expose Core ML")
+    if not sherpa_coreml_available():
+        raise RuntimeError("sherpa-onnx bundled ONNX Runtime does not expose Core ML")
+    if resolve_silero_vad_path() is None:
+        raise RuntimeError("Bundled silero_vad.onnx asset is missing")
+    vad_result = sherpa_get_speech_timestamps(np.zeros(16000, dtype=np.float32))
+    if not isinstance(vad_result, list):
+        raise RuntimeError("sherpa-onnx Silero VAD smoke test returned unexpected output")
     if ctranslate2.get_cuda_device_count() != 0:
         raise RuntimeError("macOS release unexpectedly reported a CUDA device")
 
     # Keep explicit references so static analyzers and PyInstaller cannot treat
     # an otherwise import-only dependency as unused.
     versions = {
-        "av": av.__version__,
         "faster_whisper": faster_whisper.__version__,
         "mlx_qwen3_asr": mlx_qwen3_asr.__version__,
         "mlx_whisper": mlx_whisper.__version__,
@@ -130,6 +176,7 @@ def _start_parent_watchdog() -> threading.Thread | None:
 
 def main() -> None:
     multiprocessing.freeze_support()
+    _prepend_bundled_bin_to_path()
     if sys.argv[1:] == [RUNTIME_VERIFY_ARGUMENT]:
         _verify_runtime_dependencies()
         return
