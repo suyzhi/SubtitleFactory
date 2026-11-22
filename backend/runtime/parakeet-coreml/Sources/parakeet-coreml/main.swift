@@ -11,7 +11,11 @@
 // FluidAudio deletes its model folder and re-downloads it. We give it a private
 // folder of symlinks and an unreachable registry, so a bad load can only remove
 // those links and can never touch the user's files or reach the network.
+// The symlink folder uses a deterministic cache path per canonical source model
+// and is retained across runs so Core ML / ANE reuses its compiled model cache
+// instead of recompiling from scratch on every invocation.
 
+import CryptoKit
 import FluidAudio
 import Foundation
 
@@ -63,7 +67,53 @@ func parseArguments(_ arguments: [String]) throws -> [String: String] {
     return values
 }
 
-/// Builds `<temp>/parakeet-tdt-0.6b-v3-coreml/` containing symlinks to the real model entries.
+func deterministicStageRoot(for source: URL) -> URL {
+    let digest = SHA256.hash(data: Data(source.path.utf8))
+    let hash = digest.prefix(16).map { String(format: "%02x", $0) }.joined()
+    let files = FileManager.default
+    if let caches = files.urls(for: .cachesDirectory, in: .userDomainMask).first {
+        let candidate = caches
+            .appendingPathComponent("com.subtitlefactory.parakeet-coreml-stage", isDirectory: true)
+            .appendingPathComponent(hash, isDirectory: true)
+        if (try? files.createDirectory(at: candidate, withIntermediateDirectories: true)) != nil {
+            return candidate
+        }
+    }
+    return files.temporaryDirectory
+        .appendingPathComponent("subtitle-factory-parakeet-coreml-stage", isDirectory: true)
+        .appendingPathComponent(hash, isDirectory: true)
+}
+
+func ensureSymbolicLink(at link: URL, to destination: URL) throws {
+    let files = FileManager.default
+    let targetPath = destination.standardizedFileURL.path
+    if let existing = try? files.destinationOfSymbolicLink(atPath: link.path),
+        URL(fileURLWithPath: existing, relativeTo: link.deletingLastPathComponent()).standardizedFileURL.path
+            == targetPath
+    {
+        return
+    }
+    if (try? files.attributesOfItem(atPath: link.path)) != nil {
+        try? files.removeItem(at: link)
+    }
+    do {
+        try files.createSymbolicLink(at: link, withDestinationURL: destination)
+    } catch let error as NSError
+        where error.domain == NSCocoaErrorDomain && error.code == NSFileWriteFileExistsError
+    {
+        if let existing = try? files.destinationOfSymbolicLink(atPath: link.path),
+            URL(fileURLWithPath: existing, relativeTo: link.deletingLastPathComponent()).standardizedFileURL.path
+                == targetPath
+        {
+            return
+        }
+        throw error
+    }
+}
+
+/// Builds a deterministic private `<cache>/<hash>/parakeet-tdt-0.6b-v3-coreml/`
+/// folder containing symlinks to the real model entries so Core ML keeps its
+/// compiled ANE cache warm across runs while isolating the source directory.
 func stageModel(from source: URL) throws -> (root: URL, repo: URL) {
     let files = FileManager.default
     var isDirectory: ObjCBool = false
@@ -76,15 +126,15 @@ func stageModel(from source: URL) throws -> (root: URL, repo: URL) {
         .first(where: { files.fileExists(atPath: $0.path) })
     else { throw Failure(message: "Model vocabulary missing: parakeet_vocab.json") }
 
-    let root = files.temporaryDirectory.appendingPathComponent("parakeet-coreml-\(UUID().uuidString)")
-    let repo = root.appendingPathComponent(modelFolderName)
+    let root = deterministicStageRoot(for: source)
+    let repo = root.appendingPathComponent(modelFolderName, isDirectory: true)
     try files.createDirectory(at: repo, withIntermediateDirectories: true)
     for entry in modelEntries {
-        try files.createSymbolicLink(
-            at: repo.appendingPathComponent(entry), withDestinationURL: source.appendingPathComponent(entry))
+        try ensureSymbolicLink(
+            at: repo.appendingPathComponent(entry), to: source.appendingPathComponent(entry))
     }
     for name in vocabularyNames {
-        try files.createSymbolicLink(at: repo.appendingPathComponent(name), withDestinationURL: vocabulary)
+        try ensureSymbolicLink(at: repo.appendingPathComponent(name), to: vocabulary)
     }
     return (root, repo)
 }
@@ -114,7 +164,6 @@ func run() async throws {
     // Never let FluidAudio's self-healing download reach the network.
     ModelRegistry.baseURL = "http://127.0.0.1:9"
     let staged = try stageModel(from: URL(fileURLWithPath: modelPath).resolvingSymlinksInPath())
-    defer { try? FileManager.default.removeItem(at: staged.root) }
 
     emit(["status": "progress", "progress": 0, "message": "loading model"])
     let models = try await AsrModels.load(from: staged.repo, version: .v3)

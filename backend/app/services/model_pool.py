@@ -1,12 +1,34 @@
-"""One leased CPU model, reused between jobs and released after idle time."""
+"""Leased local inference models, reused between jobs and released after idle time."""
+import os
 import re
 import subprocess
 import sys
 import time
 from contextlib import contextmanager
+from functools import lru_cache
 from pathlib import Path
 from threading import RLock, Timer
-from typing import Callable
+from typing import Any, Callable, Iterable
+
+
+@lru_cache(maxsize=1)
+def optimal_cpu_threads() -> int:
+    """Return the performance-core count on Apple Silicon, avoiding slower E-cores."""
+    if sys.platform == "darwin":
+        try:
+            result = subprocess.run(
+                ["/usr/sbin/sysctl", "-n", "hw.perflevel0.physicalcpu"],
+                capture_output=True,
+                text=True,
+                timeout=2,
+                check=False,
+            )
+            value = int((result.stdout or "").strip())
+            if value > 0:
+                return max(1, min(8, value))
+        except (OSError, ValueError, subprocess.SubprocessError):
+            pass
+    return max(1, min(4, os.cpu_count() or 2))
 
 
 def memory_is_tight() -> bool:
@@ -22,17 +44,26 @@ def memory_is_tight() -> bool:
         return False
 
 
-def model_identity(target: str, device: str, compute_type: str) -> tuple:
+def model_identity(
+    target: str,
+    device: str,
+    compute_type: str,
+    files: Iterable[str | Path] | None = None,
+) -> tuple:
     path = Path(target).expanduser()
-    if not path.exists():
+    if files is not None:
+        tracked = [Path(item).expanduser() for item in files]
+    elif not path.exists():
         return (target, device, compute_type)
-    files = [path] if path.is_file() else [path / name for name in ('model.bin', 'config.json', 'tokenizer.json')]
+    else:
+        tracked = [path] if path.is_file() else [path / name for name in ("model.bin", "config.json", "tokenizer.json")]
     stamps = []
-    for file in files:
+    for file in tracked:
         if file.exists():
             stat = file.stat()
             stamps.append((str(file.resolve()), stat.st_ino, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns))
-    return (str(path.resolve()), device, compute_type, tuple(stamps))
+    resolved = str(path.resolve()) if path.exists() else target
+    return (resolved, device, compute_type, tuple(stamps))
 
 
 class ModelPool:
@@ -41,8 +72,8 @@ class ModelPool:
         self.pressure_check = pressure_check
         self._released_at = 0.0
         self._lock = RLock()
-        self._key = None
-        self._model = None
+        self._key: tuple | None = None
+        self._model: Any = None
         self._timer: Timer | None = None
         self._generation = 0
 
@@ -94,3 +125,4 @@ class ModelPool:
 
 
 cpu_model_pool = ModelPool()
+sherpa_model_pool = ModelPool()

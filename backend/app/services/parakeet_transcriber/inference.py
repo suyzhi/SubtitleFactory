@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import os
+import time as time_module
 import wave
+from contextlib import ExitStack
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Iterator
 
 from ...utils.config import environment_path_overrides_enabled
 from ...utils.task_manager import TaskCancelled, task_manager
+from ..model_pool import model_identity, optimal_cpu_threads, sherpa_model_pool
 from .assets import ensure_parakeet_assets, ensure_parakeet_coreml_model
 from .constants import (
     _PUNCTUATION_ONLY,
@@ -65,9 +68,12 @@ def _iter_vad_segments(
     vad_path: Path,
     sherpa_onnx: Any,
     audio_duration: float,
+    lease_stack: ExitStack | None = None,
 ) -> Iterator[ParakeetSegment]:
     """Follow sherpa-onnx's official VAD subtitle flow, yielding incrementally."""
     import numpy as np
+
+    from ..managed_sherpa import prefetch_vad_segments
 
     tm = facade_attr("task_manager", task_manager)
     config = sherpa_onnx.VadModelConfig()
@@ -80,47 +86,60 @@ def _iter_vad_segments(
     window_size = int(config.silero_vad.window_size)
     vad = sherpa_onnx.VoiceActivityDetector(config, buffer_size_in_seconds=100)
 
-    pending = np.empty(0, dtype=np.float32)
-    with wave.open(audio_path, "rb") as audio:
-        frames_per_read = 16000 * 2
-        while True:
+    def _vad_spans() -> Iterator[tuple[float, float, Any]]:
+        pending = np.empty(0, dtype=np.float32)
+        with wave.open(audio_path, "rb") as audio:
+            frames_per_read = 16000 * 10
+            while True:
+                tm.checkpoint(task_id)
+                raw = audio.readframes(frames_per_read)
+                is_eof = not raw
+                if raw:
+                    samples = np.frombuffer(raw, dtype="<i2").astype(np.float32) / 32768.0
+                    pending = np.concatenate((pending, samples)) if pending.size else samples
+                    offset = 0
+                    limit = pending.size - window_size
+                    while offset <= limit:
+                        vad.accept_waveform(pending[offset : offset + window_size])
+                        offset += window_size
+                    pending = pending[offset:] if offset else pending
+                else:
+                    if pending.size:
+                        padded = np.zeros(window_size, dtype=np.float32)
+                        padded[: pending.size] = pending
+                        vad.accept_waveform(padded)
+                        pending = np.empty(0, dtype=np.float32)
+                    vad.flush()
+
+                while not vad.empty():
+                    tm.checkpoint(task_id)
+                    speech = vad.front
+                    start = float(speech.start) / 16000.0
+                    speech_samples = np.asarray(speech.samples, dtype=np.float32).copy()
+                    vad.pop()
+                    end = min(audio_duration, start + speech_samples.size / 16000.0)
+                    if end > start:
+                        yield start, end, speech_samples
+
+                if is_eof:
+                    break
+
+    try:
+        for start, end, speech_samples in prefetch_vad_segments(
+            _vad_spans(), thread_name="parakeet-vad-prefetch"
+        ):
             tm.checkpoint(task_id)
-            raw = audio.readframes(frames_per_read)
-            is_eof = not raw
-            if raw:
-                samples = np.frombuffer(raw, dtype="<i2").astype(np.float32) / 32768.0
-                pending = np.concatenate((pending, samples))
-                while pending.size >= window_size:
-                    vad.accept_waveform(pending[:window_size])
-                    pending = pending[window_size:]
-            else:
-                if pending.size:
-                    padded = np.zeros(window_size, dtype=np.float32)
-                    padded[: pending.size] = pending
-                    vad.accept_waveform(padded)
-                    pending = np.empty(0, dtype=np.float32)
-                vad.flush()
-
-            while not vad.empty():
-                tm.checkpoint(task_id)
-                speech = vad.front
-                start = float(speech.start) / 16000.0
-                speech_samples = np.asarray(speech.samples, dtype=np.float32).copy()
-                vad.pop()
-
-                stream = recognizer.create_stream()
-                stream.accept_waveform(16000, speech_samples)
-                recognizer.decode_stream(stream)
-                tm.checkpoint(task_id)
-                text = str(stream.result.text or "").strip()
-                if not text or _PUNCTUATION_ONLY.fullmatch(text):
-                    continue
-                end = min(audio_duration, start + speech_samples.size / 16000.0)
-                if end > start:
-                    yield ParakeetSegment(start=start, end=end, text=text)
-
-            if is_eof:
-                break
+            stream = recognizer.create_stream()
+            stream.accept_waveform(16000, speech_samples)
+            recognizer.decode_stream(stream)
+            tm.checkpoint(task_id)
+            text = str(stream.result.text or "").strip()
+            if not text or _PUNCTUATION_ONLY.fullmatch(text):
+                continue
+            yield ParakeetSegment(start=start, end=end, text=text)
+    finally:
+        if lease_stack is not None:
+            lease_stack.close()
 
 
 def _create_onnx_session(
@@ -129,6 +148,7 @@ def _create_onnx_session(
     normalized_language: str,
     provider: str = "cpu",
     model_dir: str | Path | None = None,
+    resources: ExitStack | None = None,
 ) -> ParakeetSession:
     tm = facade_attr("task_manager", task_manager)
     ensure_assets_fn = facade_attr("ensure_parakeet_assets", ensure_parakeet_assets)
@@ -158,27 +178,59 @@ def _create_onnx_session(
         progress=24,
         message="正在加载 Parakeet int8 ONNX 模型...",
     )
+    owned_stack = ExitStack() if resources is None else None
+    lease_target = resources if resources is not None else owned_stack
+    assert lease_target is not None
     try:
         sherpa_onnx = import_sherpa_fn()
-        thread_default = max(1, min(4, os.cpu_count() or 2))
+        thread_default = optimal_cpu_threads()
         num_threads = max(1, int(os.getenv("PARAKEET_NUM_THREADS", str(thread_default))))
-        recognizer = sherpa_onnx.OfflineRecognizer.from_transducer(
-            encoder=str(assets.encoder),
-            decoder=str(assets.decoder),
-            joiner=str(assets.joiner),
-            tokens=str(assets.tokens),
-            model_type="nemo_transducer",
-            num_threads=num_threads,
-            provider=provider,
-            decoding_method="greedy_search",
-            sample_rate=16000,
-            feature_dim=80,
-            debug=False,
+        pool_key = (
+            "parakeet_onnx",
+            provider,
+            num_threads,
+            id(sherpa_onnx.OfflineRecognizer),
+            model_identity(
+                str(assets.encoder.parent),
+                provider,
+                "parakeet-onnx",
+                files=(assets.encoder, assets.decoder, assets.joiner, assets.tokens),
+            ),
+        )
+        load_started = time_module.perf_counter()
+        recognizer, reused = lease_target.enter_context(
+            sherpa_model_pool.lease(
+                pool_key,
+                lambda: sherpa_onnx.OfflineRecognizer.from_transducer(
+                    encoder=str(assets.encoder),
+                    decoder=str(assets.decoder),
+                    joiner=str(assets.joiner),
+                    tokens=str(assets.tokens),
+                    model_type="nemo_transducer",
+                    num_threads=num_threads,
+                    provider=provider,
+                    decoding_method="greedy_search",
+                    sample_rate=16000,
+                    feature_dim=80,
+                    debug=False,
+                ),
+            )
+        )
+        tm.update_task(
+            task_id,
+            details={
+                "model_cache_hit": reused,
+                "model_load_seconds": round(time_module.perf_counter() - load_started, 3),
+            },
         )
         audio_duration, _, _ = _wave_info(audio_path)
     except TaskCancelled:
+        if owned_stack is not None:
+            owned_stack.close()
         raise
     except Exception as exc:
+        if owned_stack is not None:
+            owned_stack.close()
         tm.update_task(
             task_id,
             step="model_error",
@@ -201,6 +253,7 @@ def _create_onnx_session(
         assets.vad,
         sherpa_onnx,
         audio_duration,
+        lease_stack=owned_stack.pop_all() if owned_stack is not None else None,
     )
     detected_language = normalized_language if normalized_language != "auto" else "auto"
     return ParakeetSession(
@@ -301,6 +354,7 @@ def create_parakeet_session(
     coreml_cli_path: str | Path | None = None,
     runtime: str | None = None,
     onnx_model_dir: str | Path | None = None,
+    resources: ExitStack | None = None,
 ) -> ParakeetSession:
     discover_fn = facade_attr("discover_coreml_runtime", discover_coreml_runtime)
     bundled_cli_fn = facade_attr("bundled_coreml_cli", bundled_coreml_cli)
@@ -342,6 +396,15 @@ def create_parakeet_session(
             )
             raise error
         return create_coreml_fn(task_id, audio_path, normalized_language, coreml_runtime)
+    if resources is not None and create_onnx_fn is _create_onnx_session:
+        return create_onnx_fn(
+            task_id,
+            audio_path,
+            normalized_language,
+            "coreml" if runtime == "coreml" else "cpu",
+            onnx_model_dir,
+            resources=resources,
+        )
     return create_onnx_fn(
         task_id,
         audio_path,

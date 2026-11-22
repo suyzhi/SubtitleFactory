@@ -14,10 +14,14 @@ import json
 import logging
 import time as time_module
 import uuid
+import wave
 from contextlib import ExitStack
+from pathlib import Path
+from types import SimpleNamespace
+from typing import Any, Iterator
 
 from ..models.database import get_db
-from ..utils.config import MAX_DURATION, MIN_DURATION, WHISPER_MODEL
+from ..utils.config import MAX_DURATION, MIN_DURATION, MODELS_DIR, WHISPER_MODEL
 from ..utils.task_manager import task_manager
 from .cloud_asr import (
     FUN_ASR_MODEL_ID,
@@ -118,6 +122,162 @@ class TranscriptionError(RuntimeError):
         self.suggestion = suggestion
 
 
+def _load_pcm16_wav_float32(audio_path: str) -> tuple[Any, float] | None:
+    """Fast-path read for prepared 16 kHz mono 16-bit PCM WAV without spawning FFmpeg/PyAV."""
+    try:
+        import numpy as np
+
+        with wave.open(audio_path, "rb") as audio:
+            if (
+                audio.getnchannels() != 1
+                or audio.getsampwidth() != 2
+                or audio.getframerate() != 16_000
+                or audio.getcomptype() != "NONE"
+            ):
+                return None
+            frames = audio.getnframes()
+            raw = audio.readframes(frames)
+        samples = np.frombuffer(raw, dtype="<i2").astype(np.float32) / 32768.0
+        return samples, frames / 16_000.0
+    except Exception:
+        return None
+
+
+def _clear_mlx_metal_cache() -> None:
+    try:
+        import mlx.core as mx
+    except Exception:
+        return
+    clear_cache = getattr(mx, "clear_cache", None)
+    if callable(clear_cache):
+        clear_cache()
+        return
+    metal = getattr(mx, "metal", None)
+    metal_clear_cache = getattr(metal, "clear_cache", None)
+    if callable(metal_clear_cache):
+        metal_clear_cache()
+
+
+def _vad_speech_windows(
+    task_id: str,
+    audio_path: str,
+    audio_duration: float,
+    *,
+    max_window_seconds: float = 28.0,
+    max_gap_seconds: float = 1.5,
+) -> list[tuple[float, float]] | None:
+    """Compute coalesced speech windows (~<=28s) using local Silero VAD if available."""
+    candidate = Path(MODELS_DIR) / "silero_vad.onnx"
+    vad_path: Path | None = candidate if candidate.is_file() else None
+    if vad_path is None:
+        try:
+            from .managed_sherpa import _ensure_vad
+
+            vad_path = _ensure_vad(task_id)
+        except Exception:
+            return None
+    try:
+        from .managed_sherpa import iter_vad_audio_segments
+
+        windows: list[tuple[float, float]] = []
+        win_start: float | None = None
+        win_end: float = 0.0
+        for start, end, _samples in iter_vad_audio_segments(
+            task_id, audio_path, vad_path, audio_duration, max_speech_seconds=max_window_seconds
+        ):
+            if win_start is None:
+                win_start, win_end = start, end
+            elif (
+                end - win_start <= max_window_seconds
+                and start - win_end <= max_gap_seconds
+            ):
+                win_end = max(win_end, end)
+            else:
+                windows.append((win_start, win_end))
+                win_start, win_end = start, end
+        if win_start is not None:
+            windows.append((win_start, win_end))
+        return windows
+    except Exception:
+        logger.debug("Silero VAD unavailable for MLX Whisper; falling back to full audio", exc_info=True)
+        return None
+
+
+def _shift_mlx_segments(items: list[dict], offset: float) -> list[SimpleNamespace]:
+    shifted: list[SimpleNamespace] = []
+    for item in items:
+        words = []
+        for word in item.get("words") or []:
+            if isinstance(word, dict):
+                shifted_word = dict(word)
+                if "start" in shifted_word:
+                    shifted_word["start"] = float(shifted_word["start"]) + offset
+                if "end" in shifted_word:
+                    shifted_word["end"] = float(shifted_word["end"]) + offset
+                words.append(shifted_word)
+            else:
+                words.append(word)
+        shifted.append(
+            SimpleNamespace(
+                start=float(item["start"]) + offset,
+                end=float(item["end"]) + offset,
+                text=str(item["text"]),
+                words=words,
+            )
+        )
+    return shifted
+
+
+def _iter_mlx_whisper_segments(
+    task_id: str,
+    mlx_whisper_mod: Any,
+    model_path: str,
+    audio_path: str,
+    lang: str | None,
+    loaded_wav: tuple[Any, float] | None,
+    windows: list[tuple[float, float]] | None,
+    detected_lang_box: list[str],
+) -> Iterator[SimpleNamespace]:
+    try:
+        if loaded_wav is not None and windows is not None:
+            samples, _duration = loaded_wav
+            active_lang = lang
+            for win_start, win_end in windows:
+                task_manager.checkpoint(task_id)
+                start_idx = max(0, int(round(win_start * 16_000)))
+                end_idx = min(len(samples), int(round(win_end * 16_000)))
+                if end_idx <= start_idx:
+                    continue
+                result = mlx_whisper_mod.transcribe(
+                    samples[start_idx:end_idx],
+                    path_or_hf_repo=model_path,
+                    language=active_lang,
+                    word_timestamps=True,
+                    condition_on_previous_text=False,
+                )
+                if not active_lang and result.get("language"):
+                    active_lang = str(result["language"])
+                    detected_lang_box[0] = active_lang
+                for seg in _shift_mlx_segments(result.get("segments", []), win_start):
+                    yield seg
+            return
+
+        audio_input = loaded_wav[0] if loaded_wav is not None else audio_path
+        result = mlx_whisper_mod.transcribe(
+            audio_input,
+            path_or_hf_repo=model_path,
+            language=lang,
+            word_timestamps=True,
+            condition_on_previous_text=False,
+        )
+        if result.get("language"):
+            detected_lang_box[0] = str(result["language"])
+        for seg in _shift_mlx_segments(result.get("segments", []), 0.0):
+            yield seg
+    finally:
+        _clear_mlx_metal_cache()
+
+
 def transcribe_audio(task_id: str, audio_path: str, project_id: str, language: str = "auto", model_size: str | None = None, runtime: str | None = None):
     # Workflow preparation does not occupy the inference slot. Standalone
     # transcription already holds it; resource_slot is reentrant in that case.
@@ -203,6 +363,7 @@ def _transcribe_audio(task_id, audio_path, project_id, language, model_size, run
         if not imported["ready"]:
             raise TranscriptionError("导入模型路径失效，需要重新定位", "MODEL_NEEDS_RELINK")
 
+    detected_lang_box: list[str] | None = None
     if model_id == FUN_ASR_MODEL_ID:
         session = create_fun_asr_session(task_id, audio_path, language)
         segments_gen = session.segments
@@ -230,6 +391,7 @@ def _transcribe_audio(task_id, audio_path, project_id, language, model_size, run
             language,
             model_id,
             runtime or "cpu",
+            resources=resources,
         )
         segments_gen = session.segments
         detected_lang = session.detected_language
@@ -245,7 +407,7 @@ def _transcribe_audio(task_id, audio_path, project_id, language, model_size, run
         device=session.device; compute_type=session.compute_type; runtime_model_name=imported["display_name"]; progress_start=session.progress_start
     elif imported and imported["format"] == "sherpa-onnx":
         session = create_parakeet_session(task_id,audio_path,language,PARAKEET_ONNX_MODEL_ID,
-            runtime=runtime,onnx_model_dir=imported["path"])
+            runtime=runtime,onnx_model_dir=imported["path"],resources=resources)
         segments_gen=session.segments; detected_lang=session.detected_language; audio_duration=session.audio_duration
         device=session.device; compute_type=session.compute_type; runtime_model_name=imported["display_name"]; progress_start=session.progress_start
     elif model_id in PARAKEET_MODEL_IDS:
@@ -257,6 +419,7 @@ def _transcribe_audio(task_id, audio_path, project_id, language, model_size, run
             coreml_model_dir=app_settings.get("coreml_model_path"),
             coreml_cli_path=app_settings.get("coreml_cli_path"),
             runtime=runtime,
+            resources=resources,
         )
         segments_gen = session.segments
         detected_lang = session.detected_language
@@ -266,11 +429,9 @@ def _transcribe_audio(task_id, audio_path, project_id, language, model_size, run
         runtime_model_name = session.model_label
         progress_start = session.progress_start
     elif runtime == "mlx" or (imported and imported["format"] == "mlx"):
-        from types import SimpleNamespace
-
         import mlx_whisper
         if imported:
-            model_path=imported["path"]
+            model_path = imported["path"]
         else:
             model_path = resolve_local_model(model_id, "mlx")
             if model_path is None:
@@ -283,27 +444,35 @@ def _transcribe_audio(task_id, audio_path, project_id, language, model_size, run
                     suggestion="请在模型中心修复此模型的 Apple GPU 格式",
                 )
         lang = None if language in ("auto", "") else language
-        result = mlx_whisper.transcribe(
-            audio_path, path_or_hf_repo=model_path,
-            language=lang, word_timestamps=True,
+        loaded_wav = _load_pcm16_wav_float32(audio_path)
+        audio_duration = loaded_wav[1] if loaded_wav is not None else 0.0
+        windows = (
+            _vad_speech_windows(task_id, audio_path, audio_duration)
+            if loaded_wav is not None and audio_duration > 30.0
+            else None
         )
-        mlx_segments = [
-            SimpleNamespace(
-                start=float(item["start"]), end=float(item["end"]), text=str(item["text"]),
-                words=item.get("words") or [],
-            )
-            for item in result.get("segments", [])
-        ]
-        segments_gen = iter(mlx_segments)
-        detected_lang = result.get("language") or lang or "auto"
-        audio_duration = max((item.end for item in mlx_segments), default=0.0)
+        detected_lang_box = [lang or "auto"]
+        segments_gen = _iter_mlx_whisper_segments(
+            task_id,
+            mlx_whisper,
+            str(model_path),
+            audio_path,
+            lang,
+            loaded_wav,
+            windows,
+            detected_lang_box,
+        )
+        detected_lang = detected_lang_box[0]
         device, compute_type = "mlx", "MLX"
         runtime_model_name = f"MLX Whisper {model_id}"
         progress_start = 5.0
     else:
         from faster_whisper import WhisperModel
 
+        from .model_pool import cpu_model_pool, model_identity, optimal_cpu_threads
+
         device, compute_type = "cpu", "int8"
+        cpu_threads = optimal_cpu_threads()
         load_target = resolution.load_target
         if model_id in WHISPER_MODEL_IDS and resolution.source != "built_in":
             local_model = resolve_local_model(model_id, "cpu")
@@ -317,11 +486,15 @@ def _transcribe_audio(task_id, audio_path, project_id, language, model_size, run
                     suggestion="请在模型中心修复此模型的 CPU 格式",
                 )
             load_target = str(local_model)
-        from .model_pool import cpu_model_pool, model_identity
         load_started = time_module.perf_counter()
         model, reused = resources.enter_context(cpu_model_pool.lease(
-            model_identity(str(load_target), device, compute_type),
-            lambda: WhisperModel(load_target, device=device, compute_type=compute_type),
+            (model_identity(str(load_target), device, compute_type), cpu_threads),
+            lambda: WhisperModel(
+                load_target,
+                device=device,
+                compute_type=compute_type,
+                cpu_threads=cpu_threads,
+            ),
         ))
         task_manager.update_task(task_id, details={
             "model_cache_hit": reused,
@@ -330,10 +503,14 @@ def _transcribe_audio(task_id, audio_path, project_id, language, model_size, run
         task_manager.checkpoint(task_id)
 
         lang = None if language in ("auto", "") else language
+        loaded_wav = _load_pcm16_wav_float32(audio_path)
+        audio_input = loaded_wav[0] if loaded_wav is not None else audio_path
         segments_gen, info = model.transcribe(
-            audio_path,
+            audio_input,
             language=lang,
             beam_size=5,
+            best_of=2,
+            condition_on_previous_text=False,
             vad_filter=True,
             vad_parameters=dict(min_silence_duration_ms=500),
             word_timestamps=True,
@@ -443,6 +620,8 @@ def _transcribe_audio(task_id, audio_path, project_id, language, model_size, run
                 task_manager.add_log(task_id, "info", "语音转写", log_msg)
 
     task_manager.checkpoint(task_id)
+    if detected_lang_box is not None and detected_lang_box[0]:
+        detected_lang = detected_lang_box[0]
     if generated_count == 0:
         db_empty = get_db()
         db_empty.execute(

@@ -5,14 +5,17 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import queue
 import re
 import shutil
 import tarfile
 import threading
+import time as time_module
 import urllib.error
 import urllib.request
 import uuid
 import wave
+from contextlib import ExitStack
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Iterator
@@ -20,6 +23,7 @@ from typing import Any, Callable, Iterator
 from ..utils.config import MODELS_DIR
 from ..utils.task_manager import TaskCancelled, task_manager
 from ..version import product_user_agent
+from .model_pool import model_identity, optimal_cpu_threads, sherpa_model_pool
 from .parakeet_transcriber import (
     SILERO_VAD_BYTES,
     SILERO_VAD_SHA256,
@@ -657,7 +661,7 @@ def _create_recognizer(
 
     paths = _paths(definition)
     common = {
-        "num_threads": max(1, min(4, os.cpu_count() or 2)),
+        "num_threads": optimal_cpu_threads(),
         "provider": provider,
         "debug": False,
     }
@@ -807,22 +811,27 @@ def iter_vad_audio_segments(
     window_size = int(config.silero_vad.window_size)
     vad = sherpa_onnx.VoiceActivityDetector(config, buffer_size_in_seconds=120)
     pending = np.empty(0, dtype=np.float32)
+    frames_per_read = 16000 * 10
     with wave.open(audio_path, "rb") as audio:
         while True:
             task_manager.checkpoint(task_id)
-            raw = audio.readframes(16000 * 2)
+            raw = audio.readframes(frames_per_read)
             eof = not raw
             if raw:
                 samples = np.frombuffer(raw, dtype="<i2").astype(np.float32) / 32768.0
-                pending = np.concatenate((pending, samples))
-                while pending.size >= window_size:
-                    vad.accept_waveform(pending[:window_size])
-                    pending = pending[window_size:]
+                pending = np.concatenate((pending, samples)) if pending.size else samples
+                offset = 0
+                limit = pending.size - window_size
+                while offset <= limit:
+                    vad.accept_waveform(pending[offset : offset + window_size])
+                    offset += window_size
+                pending = pending[offset:] if offset else pending
             else:
                 if pending.size:
                     padded = np.zeros(window_size, dtype=np.float32)
                     padded[:pending.size] = pending
                     vad.accept_waveform(padded)
+                    pending = np.empty(0, dtype=np.float32)
                 vad.flush()
             while not vad.empty():
                 task_manager.checkpoint(task_id)
@@ -837,6 +846,68 @@ def iter_vad_audio_segments(
                 break
 
 
+def prefetch_vad_segments(
+    source: Iterator[tuple[float, float, Any]],
+    *,
+    maxsize: int = 16,
+    thread_name: str = "vad-prefetch",
+) -> Iterator[tuple[float, float, Any]]:
+    """Run Silero VAD ahead of ASR decoding on a bounded background thread."""
+    sentinel = object()
+    buffer: queue.Queue[Any] = queue.Queue(maxsize=maxsize)
+    stop_event = threading.Event()
+    error_holder: list[BaseException] = []
+
+    def _put(item: Any) -> bool:
+        while not stop_event.is_set():
+            try:
+                buffer.put(item, timeout=0.1)
+                return True
+            except queue.Full:
+                continue
+        return False
+
+    def _producer() -> None:
+        try:
+            for item in source:
+                if stop_event.is_set():
+                    break
+                if not _put(item):
+                    break
+        except BaseException as exc:
+            error_holder.append(exc)
+        finally:
+            while True:
+                try:
+                    buffer.put(sentinel, timeout=0.1)
+                    break
+                except queue.Full:
+                    if stop_event.is_set():
+                        try:
+                            buffer.get_nowait()
+                        except queue.Empty:
+                            pass
+
+    worker = threading.Thread(target=_producer, daemon=True, name=thread_name)
+    worker.start()
+    try:
+        while True:
+            item = buffer.get()
+            if item is sentinel:
+                if error_holder:
+                    raise error_holder[0]
+                break
+            yield item
+    finally:
+        stop_event.set()
+        while True:
+            try:
+                buffer.get_nowait()
+            except queue.Empty:
+                break
+        worker.join(timeout=2.0)
+
+
 def _iter_vad_segments(
     task_id: str,
     audio_path: str,
@@ -845,25 +916,34 @@ def _iter_vad_segments(
     audio_duration: float,
     max_speech_seconds: float,
     timestamp_mode: str,
+    lease_stack: ExitStack | None = None,
 ) -> Iterator[ManagedSegment]:
-    for start, end, speech_samples in iter_vad_audio_segments(
+    vad_iter = iter_vad_audio_segments(
         task_id, audio_path, vad_path, audio_duration, max_speech_seconds,
-    ):
-        stream = recognizer.create_stream()
-        stream.accept_waveform(16000, speech_samples)
-        recognizer.decode_stream(stream)
-        result = stream.result
-        text = re.sub(
-            r"\s+", " ", str(result.text or "").replace("▁", " ")
-        ).strip()
-        if not text or _PUNCTUATION_ONLY.fullmatch(text):
-            continue
-        yield ManagedSegment(
-            start=start,
-            end=end,
-            text=text,
-            timings=_timings_from_result(result, start, end, timestamp_mode),
-        )
+    )
+    try:
+        for start, end, speech_samples in prefetch_vad_segments(
+            vad_iter, thread_name="sherpa-vad-prefetch"
+        ):
+            task_manager.checkpoint(task_id)
+            stream = recognizer.create_stream()
+            stream.accept_waveform(16000, speech_samples)
+            recognizer.decode_stream(stream)
+            result = stream.result
+            text = re.sub(
+                r"\s+", " ", str(result.text or "").replace("▁", " ")
+            ).strip()
+            if not text or _PUNCTUATION_ONLY.fullmatch(text):
+                continue
+            yield ManagedSegment(
+                start=start,
+                end=end,
+                text=text,
+                timings=_timings_from_result(result, start, end, timestamp_mode),
+            )
+    finally:
+        if lease_stack is not None:
+            lease_stack.close()
 
 
 def create_managed_session(
@@ -872,6 +952,7 @@ def create_managed_session(
     language: str,
     model_id: str,
     runtime: str,
+    resources: ExitStack | None = None,
 ) -> ManagedSession:
     definition = MANAGED_SHERPA_BY_ID.get(model_id)
     if not definition:
@@ -910,8 +991,41 @@ def create_managed_session(
         message=f"正在加载 {definition.name}...",
     )
     provider = "coreml" if runtime == "coreml" else "cpu"
+    owned_stack = ExitStack() if resources is None else None
+    lease_target = resources if resources is not None else owned_stack
+    assert lease_target is not None
     try:
-        recognizer = _create_recognizer(definition, provider, normalized)
+        import sherpa_onnx
+
+        lang_key = normalized if definition.adapter == "sense_voice" else ""
+        pool_key = (
+            "managed_sherpa",
+            definition.id,
+            definition.adapter,
+            lang_key,
+            optimal_cpu_threads(),
+            id(sherpa_onnx.OfflineRecognizer),
+            model_identity(
+                str(managed_model_dir(definition.id)),
+                provider,
+                "sherpa-onnx",
+                files=_paths(definition).values(),
+            ),
+        )
+        load_started = time_module.perf_counter()
+        recognizer, reused = lease_target.enter_context(
+            sherpa_model_pool.lease(
+                pool_key,
+                lambda: _create_recognizer(definition, provider, normalized),
+            )
+        )
+        task_manager.update_task(
+            task_id,
+            details={
+                "model_cache_hit": reused,
+                "model_load_seconds": round(time_module.perf_counter() - load_started, 3),
+            },
+        )
         duration, sample_rate = _wave_info(audio_path)
         if sample_rate != 16000:
             raise ManagedModelError(
@@ -920,8 +1034,12 @@ def create_managed_session(
                 "请重新提取音频",
             )
     except ManagedModelError:
+        if owned_stack is not None:
+            owned_stack.close()
         raise
     except Exception as exc:
+        if owned_stack is not None:
+            owned_stack.close()
         raise ManagedModelError(
             f"{definition.name} 推理引擎加载失败：{exc}",
             "MODEL_RUNTIME_MISSING",
@@ -936,6 +1054,7 @@ def create_managed_session(
             duration,
             definition.vad_max_speech_seconds,
             definition.timestamp_mode,
+            lease_stack=owned_stack.pop_all() if owned_stack is not None else None,
         ),
         audio_duration=duration,
         detected_language=normalized or "auto",

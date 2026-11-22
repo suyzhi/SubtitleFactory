@@ -11,6 +11,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 from pathlib import Path
 from typing import Any, Callable
 
@@ -53,15 +54,36 @@ def _valid_coreml_model_dir(path: Path) -> bool:
     return True
 
 
+_VALID_CLI_CACHE: dict[tuple[str, int, int, int], bool] = {}
+_VALID_CLI_CACHE_LOCK = threading.Lock()
+
+
 def _valid_coreml_cli(path: Path) -> bool:
     if not path.is_file() or not os.access(path, os.X_OK):
         return False
-    return validate_runtime_executable(
+    try:
+        resolved = path.resolve()
+        stat = resolved.stat()
+        cache_key = (str(resolved), stat.st_ino, stat.st_size, stat.st_mtime_ns)
+    except OSError:
+        cache_key = None
+    if cache_key is not None:
+        with _VALID_CLI_CACHE_LOCK:
+            cached = _VALID_CLI_CACHE.get(cache_key)
+        if cached is not None:
+            return cached
+    ok = validate_runtime_executable(
         path,
         name="parakeet",
         source="external_detected",
         version_args=("--help",),
     ).available
+    if cache_key is not None:
+        with _VALID_CLI_CACHE_LOCK:
+            if len(_VALID_CLI_CACHE) >= 32:
+                _VALID_CLI_CACHE.clear()
+            _VALID_CLI_CACHE[cache_key] = ok
+    return ok
 
 
 def discover_coreml_runtime(
@@ -360,6 +382,8 @@ def _run_coreml_cli(
         reader = threading.Thread(target=read_output, daemon=True)
         reader.start()
         reader_done = False
+        last_progress_update = 0.0
+        last_reported_progress = -1
         try:
             while True:
                 tm.checkpoint(task_id)
@@ -377,19 +401,29 @@ def _run_coreml_cli(
                     event = _parse_coreml_status_line(item)
                     if event and event.get("status") == "progress":
                         progress = max(0, min(100, int(_float_time(event.get("progress"), 0))))
-                        tm.update_task(
-                            task_id,
-                            step="transcribing",
-                            progress=5 + progress * 0.75,
-                            message=f"Parakeet Core ML 正在转写：{progress}%",
-                            details={
-                                "coreml": {
-                                    "status": "running",
-                                    "progress": progress,
-                                    "source": runtime.source,
-                                }
-                            },
-                        )
+                        now = time.monotonic()
+                        if (
+                            progress != last_reported_progress
+                            and (
+                                progress in (0, 100)
+                                or now - last_progress_update >= 0.25
+                            )
+                        ):
+                            last_progress_update = now
+                            last_reported_progress = progress
+                            tm.update_task(
+                                task_id,
+                                step="transcribing",
+                                progress=5 + progress * 0.75,
+                                message=f"Parakeet Core ML 正在转写：{progress}%",
+                                details={
+                                    "coreml": {
+                                        "status": "running",
+                                        "progress": progress,
+                                        "source": runtime.source,
+                                    }
+                                },
+                            )
                     elif event and event.get("status") == "success" and event.get("result"):
                         reported_output = Path(str(event["result"])).expanduser().resolve()
                 if reader_done and process.poll() is not None:

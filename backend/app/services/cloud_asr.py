@@ -6,6 +6,8 @@ import base64
 import io
 import json
 import wave
+from collections import deque
+from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Iterator
 from urllib.parse import urlparse, urlunparse
@@ -19,6 +21,7 @@ from .ai_providers import get_provider
 FUN_ASR_MODEL_ID = "fun-asr-realtime"
 FUN_ASR_RUNTIME = "dashscope_cloud"
 _MAX_CHUNK_FRAMES = 150 * 16_000
+_MAX_CONCURRENT_CHUNKS = 3
 
 
 class CloudAsrError(RuntimeError):
@@ -318,10 +321,47 @@ def create_fun_asr_session(
     def generate() -> Iterator[CloudAsrSegment]:
         timeout = httpx.Timeout(connect=20.0, read=240.0, write=60.0, pool=20.0)
         with httpx.Client(timeout=timeout) as client:
-            for offset, wav_bytes in chunks:
-                yield from _request_chunk(
-                    task_id, client, endpoint, api_key, offset, wav_bytes,
+            if audio_duration <= _MAX_CHUNK_FRAMES / 16_000.0:
+                for offset, wav_bytes in chunks:
+                    yield from _request_chunk(
+                        task_id, client, endpoint, api_key, offset, wav_bytes,
+                    )
+                return
+
+            in_flight: deque[Future[list[CloudAsrSegment]]] = deque()
+            chunk_iter = iter(chunks)
+            exhausted = False
+
+            def _fetch_chunk(chunk_offset: float, chunk_wav: bytes) -> list[CloudAsrSegment]:
+                return list(
+                    _request_chunk(
+                        task_id, client, endpoint, api_key, chunk_offset, chunk_wav,
+                    )
                 )
+
+            with ThreadPoolExecutor(
+                max_workers=_MAX_CONCURRENT_CHUNKS,
+                thread_name_prefix="cloud-asr",
+            ) as executor:
+                try:
+                    while True:
+                        while not exhausted and len(in_flight) < _MAX_CONCURRENT_CHUNKS:
+                            task_manager.checkpoint(task_id)
+                            try:
+                                offset, wav_bytes = next(chunk_iter)
+                            except StopIteration:
+                                exhausted = True
+                                break
+                            in_flight.append(executor.submit(_fetch_chunk, offset, wav_bytes))
+                        if not in_flight:
+                            break
+                        next_future = in_flight.popleft()
+                        for segment in next_future.result():
+                            task_manager.checkpoint(task_id)
+                            yield segment
+                finally:
+                    for pending in in_flight:
+                        pending.cancel()
 
     normalized = (language or "auto").lower()
     return CloudAsrSession(
