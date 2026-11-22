@@ -7649,6 +7649,32 @@
     },
     {
       "type": "library",
+      "name": "@tanstack/query-core",
+      "version": "5.101.4",
+      "purl": "pkg:npm/@tanstack/query-core@5.101.4",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "name": "@tanstack/react-query",
+      "version": "5.101.4",
+      "purl": "pkg:npm/@tanstack/react-query@5.101.4",
+      "licenses": [
+        {
+          "license": {
+            "id": "MIT"
+          }
+        }
+      ]
+    },
+    {
+      "type": "library",
       "name": "@tauri-apps/api",
       "version": "2.11.1",
       "purl": "pkg:npm/@tauri-apps/api@2.11.1",
@@ -9365,6 +9391,12 @@
     },
     {
       "type": "library",
+      "name": "aiofiles",
+      "version": "25.1.0",
+      "purl": "pkg:pypi/aiofiles@25.1.0"
+    },
+    {
+      "type": "library",
       "name": "altgraph",
       "version": "0.17.5",
       "purl": "pkg:pypi/altgraph@0.17.5"
@@ -9392,6 +9424,12 @@
       "name": "av",
       "version": "18.0.0",
       "purl": "pkg:pypi/av@18.0.0"
+    },
+    {
+      "type": "library",
+      "name": "backports-tarfile",
+      "version": "1.2.0",
+      "purl": "pkg:pypi/backports-tarfile@1.2.0"
     },
     {
       "type": "library",
@@ -9485,9 +9523,39 @@
     },
     {
       "type": "library",
+      "name": "importlib-metadata",
+      "version": "9.0.0",
+      "purl": "pkg:pypi/importlib-metadata@9.0.0"
+    },
+    {
+      "type": "library",
+      "name": "jaraco-classes",
+      "version": "3.4.0",
+      "purl": "pkg:pypi/jaraco-classes@3.4.0"
+    },
+    {
+      "type": "library",
+      "name": "jaraco-context",
+      "version": "6.1.2",
+      "purl": "pkg:pypi/jaraco-context@6.1.2"
+    },
+    {
+      "type": "library",
+      "name": "jaraco-functools",
+      "version": "4.6.0",
+      "purl": "pkg:pypi/jaraco-functools@4.6.0"
+    },
+    {
+      "type": "library",
       "name": "jinja2",
       "version": "3.1.6",
       "purl": "pkg:pypi/jinja2@3.1.6"
+    },
+    {
+      "type": "library",
+      "name": "keyring",
+      "version": "25.7.0",
+      "purl": "pkg:pypi/keyring@25.7.0"
     },
     {
       "type": "library",
@@ -9575,6 +9643,12 @@
     },
     {
       "type": "library",
+      "name": "pillow",
+      "version": "12.3.0",
+      "purl": "pkg:pypi/pillow@12.3.0"
+    },
+    {
+      "type": "library",
       "name": "protobuf",
       "version": "7.35.1",
       "purl": "pkg:pypi/protobuf@7.35.1"
@@ -9584,6 +9658,12 @@
       "name": "pydantic-core",
       "version": "2.46.4",
       "purl": "pkg:pypi/pydantic-core@2.46.4"
+    },
+    {
+      "type": "library",
+      "name": "pydantic-settings",
+      "version": "2.14.2",
+      "purl": "pkg:pypi/pydantic-settings@2.14.2"
     },
     {
       "type": "library",
@@ -9602,6 +9682,12 @@
       "name": "pyinstaller",
       "version": "6.21.0",
       "purl": "pkg:pypi/pyinstaller@6.21.0"
+    },
+    {
+      "type": "library",
+      "name": "pysubs2",
+      "version": "1.8.1",
+      "purl": "pkg:pypi/pysubs2@1.8.1"
     },
     {
       "type": "library",
@@ -9656,6 +9742,12 @@
       "name": "sherpa-onnx",
       "version": "1.13.3",
       "purl": "pkg:pypi/sherpa-onnx@1.13.3"
+    },
+    {
+      "type": "library",
+      "name": "srt",
+      "version": "3.5.3",
+      "purl": "pkg:pypi/srt@3.5.3"
     },
     {
       "type": "library",
@@ -9722,6 +9814,12 @@
       "name": "yt-dlp",
       "version": "2026.7.4",
       "purl": "pkg:pypi/yt-dlp@2026.7.4"
+    },
+    {
+      "type": "library",
+      "name": "zipp",
+      "version": "4.1.0",
+      "purl": "pkg:pypi/zipp@4.1.0"
     }
   ]
 }

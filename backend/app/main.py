@@ -1,10 +1,11 @@
 """
-字幕工厂（简洁版）- FastAPI 应用主入口
+字幕工厂 - FastAPI 应用主入口
 """
 
 import logging
 import os
 import sys
+import threading
 from contextlib import asynccontextmanager
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
@@ -18,7 +19,17 @@ from fastapi.responses import JSONResponse
 # 将项目根加入 sys.path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from .api import projects, settings, tasks
+from .api import (
+    batches,
+    editor,
+    media,
+    projects,
+    search,
+    settings,
+    tasks,
+    templates,
+    watch_folders,
+)
 from .models.database import init_db, mark_interrupted_tasks
 from .security import ALLOWED_ORIGINS, require_local_origin
 from .services.distribution import (
@@ -26,7 +37,8 @@ from .services.distribution import (
     distribution_capabilities,
     require_project_distribution,
 )
-from .services.workflow_recovery import resume_interrupted_workflows
+from .services.playlist_batches import recover_playlist_batches
+from .services.watch_runtime import resume_interrupted_workflows, watch_loop
 from .utils.config import DATA_DIR, LOGS_DIR, is_frozen_app
 from .version import VERSION
 
@@ -37,10 +49,7 @@ logging.basicConfig(
     format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
     handlers=[
         RotatingFileHandler(
-            LOGS_DIR / "app.log",
-            maxBytes=5 * 1024 * 1024,
-            backupCount=5,
-            encoding="utf-8",
+            LOGS_DIR / "app.log", maxBytes=5 * 1024 * 1024, backupCount=5, encoding="utf-8",
         ),
         logging.StreamHandler(),
     ],
@@ -54,18 +63,40 @@ DOCS_ENABLED = not is_frozen_app()
 init_db()
 interrupted_tasks = mark_interrupted_tasks()
 
-
+# ── 运行期服务 ──
 @asynccontextmanager
 async def lifespan(application: FastAPI):
-    del application
     resume_interrupted_workflows(interrupted_tasks)
-    yield
+    capabilities = distribution_capabilities()
+    # This is local database reconciliation, not a YouTube network action.
+    # Run it in every distribution so legacy rows cannot remain falsely live
+    # after a direct-build database is opened by the App Store build.
+    recover_playlist_batches(interrupted_tasks)
+    stop_event = None
+    worker = None
+    if capabilities.filesystem_automation:
+        stop_event = threading.Event()
+        worker = threading.Thread(
+            target=watch_loop,
+            args=(stop_event,),
+            name="watch-folders",
+            daemon=True,
+        )
+        worker.start()
+        application.state.watch_stop_event = stop_event
+        application.state.watch_worker = worker
+    try:
+        yield
+    finally:
+        if stop_event is not None and worker is not None:
+            stop_event.set()
+            worker.join(timeout=2)
 
 
 # ── 创建 FastAPI 应用 ──
 app = FastAPI(
-    title="字幕工厂 API（简洁版）",
-    description="视频下载、本地模型转写、AI 整理与翻译的本地 API 服务",
+    title="字幕工厂 API",
+    description="YouTube 视频转写字幕桌面软件的 API 服务",
     version=VERSION,
     lifespan=lifespan,
     docs_url="/docs" if DOCS_ENABLED else None,
@@ -80,6 +111,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
 
 # Reject requests originating from unrelated websites.
 app.middleware("http")(require_local_origin)
@@ -119,75 +151,60 @@ async def structured_http_error(request: Request, exc: HTTPException):
 
 @app.exception_handler(RequestValidationError)
 async def structured_validation_error(request: Request, exc: RequestValidationError):
-    del request
-    return JSONResponse(
-        status_code=422,
-        content={
-            "error": {
-                "code": "REQUEST_VALIDATION_FAILED",
-                "message": "请求参数无效",
-                "suggestion": "请检查输入内容后重试",
-                "details": {"errors": exc.errors()},
-                "recoverable": True,
-            }
-        },
-    )
+    return JSONResponse(status_code=422, content={"error": {
+        "code": "REQUEST_VALIDATION_FAILED", "message": "请求参数无效",
+        "suggestion": "请检查输入内容后重试", "details": {"errors": exc.errors()},
+        "recoverable": True,
+    }})
 
 
 @app.exception_handler(DistributionPolicyError)
-async def distribution_policy_error(request: Request, exc: DistributionPolicyError):
-    del request
-    return JSONResponse(
-        status_code=403,
-        content={
-            "error": {
-                "code": exc.error_code,
-                "message": str(exc),
-                "suggestion": exc.suggestion,
-                "details": {"feature": exc.feature},
-                "recoverable": exc.recoverable,
-                "available_actions": exc.available_actions,
-            }
-        },
-    )
+async def distribution_policy_error(
+    request: Request, exc: DistributionPolicyError,
+):
+    return JSONResponse(status_code=403, content={"error": {
+        "code": exc.error_code,
+        "message": str(exc),
+        "suggestion": exc.suggestion,
+        "details": {"feature": exc.feature},
+        "recoverable": exc.recoverable,
+        "available_actions": exc.available_actions,
+    }})
 
 
 @app.exception_handler(Exception)
 async def structured_unexpected_error(request: Request, exc: Exception):
     logger.exception("未处理的 API 错误: %s", request.url.path, exc_info=exc)
     if request.url.path.startswith("/api"):
-        return JSONResponse(
-            status_code=500,
-            content={
-                "error": {
-                    "code": "INTERNAL_ERROR",
-                    "message": "本地引擎处理失败",
-                    "suggestion": "请重试；若问题持续，请重启 App",
-                    "details": {},
-                    "recoverable": True,
-                }
-            },
-        )
+        return JSONResponse(status_code=500, content={"error": {
+            "code": "INTERNAL_ERROR", "message": "本地引擎处理失败",
+            "suggestion": "请重试；若问题持续，请重启 App", "details": {},
+            "recoverable": True,
+        }})
     raise exc
-
 
 # ── 注册路由 ──
 project_distribution_dependency = [Depends(require_project_distribution)]
 app.include_router(projects.router, dependencies=project_distribution_dependency)
 app.include_router(tasks.router, dependencies=project_distribution_dependency)
 app.include_router(settings.router)
+app.include_router(editor.router, dependencies=project_distribution_dependency)
+app.include_router(media.router, dependencies=project_distribution_dependency)
+app.include_router(templates.router, dependencies=project_distribution_dependency)
+app.include_router(watch_folders.router)
+app.include_router(batches.router)
+app.include_router(search.router, dependencies=project_distribution_dependency)
 
 
 # ── 根路径 / 健康检查 ──
 @app.get("/")
 def root():
     return {
-        "name": "字幕工厂 API（简洁版）",
+        "name": "字幕工厂 API",
         "version": VERSION,
         "docs": "/docs",
         "distribution": distribution_capabilities().as_dict(),
     }
-
 
 @app.get("/api/health")
 def health_check():
@@ -201,8 +218,9 @@ def health_check():
     }
 
 
+# ── 启动提醒 ──
 logger.info("=" * 50)
-logger.info("字幕工厂 API（简洁版）启动")
+logger.info("字幕工厂 API 启动")
 logger.info(f"数据目录: {DATA_DIR}")
 if DOCS_ENABLED:
     logger.info("文档地址: http://127.0.0.1:%s/docs", os.getenv("SUBTITLE_FACTORY_PORT", "8000"))

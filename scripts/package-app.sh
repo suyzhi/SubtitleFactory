@@ -3,8 +3,8 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 VERSION="0.6.1"
-UI_MARKER="subtitle-factory-ui:simple-v1"
-UI_LAYOUT_MARKER="subtitle-factory-ui:single-page-v1"
+UI_MARKER="subtitle-factory-ui:simple-v2"
+UI_LAYOUT_MARKER="subtitle-factory-ui:library-workspace-simple-v2"
 OLD_UI_MARKER="ai-settings-dialog"
 
 # A direct release must not inherit an App Store channel from the caller's
@@ -53,10 +53,10 @@ cargo test --manifest-path "$ROOT/frontend/src-tauri/Cargo.toml" --locked
 
 if ! rg -F "$UI_MARKER" "$ROOT/frontend/src/App.tsx" >/dev/null \
   || ! rg -F "$UI_LAYOUT_MARKER" "$ROOT/frontend/src/App.tsx" >/dev/null \
-  || ! rg -F "<NewTask" "$ROOT/frontend/src/App.tsx" >/dev/null \
-  || ! rg -F "<ProjectView" "$ROOT/frontend/src/App.tsx" >/dev/null \
+  || ! rg -F "library-home" "$ROOT/frontend/src/App.tsx" >/dev/null \
+  || ! rg -F "workspace-active" "$ROOT/frontend/src/App.tsx" >/dev/null \
   || ! rg -F "import App from './App.tsx'" "$ROOT/frontend/src/main.tsx" >/dev/null; then
-  echo "简洁版单页界面源码标记或入口缺失。" >&2
+  echo "新版项目库 / 独立项目工作区源码标记或入口缺失。" >&2
   exit 1
 fi
 if rg -n "AISettingsDialog" "$ROOT/frontend/src/main.tsx" "$ROOT/frontend/src/App.tsx" >/dev/null; then
@@ -66,11 +66,11 @@ fi
 
 npm run build
 if ! rg -F "$UI_MARKER" "$ROOT/frontend/dist" >/dev/null; then
-  echo "Vite 产物缺少 simple-v1 标记。" >&2
+  echo "Vite 产物缺少 simple-v2 标记。" >&2
   exit 1
 fi
 if ! rg -F "$UI_LAYOUT_MARKER" "$ROOT/frontend/dist" >/dev/null; then
-  echo "Vite 产物缺少 single-page-v1 标记。" >&2
+  echo "Vite 产物缺少 library-workspace-simple-v2 标记。" >&2
   exit 1
 fi
 if rg -F "$OLD_UI_MARKER" "$ROOT/frontend/dist" >/dev/null; then
@@ -120,11 +120,11 @@ if ! file "$APP_EXECUTABLE" | rg -F "arm64" >/dev/null; then
   exit 1
 fi
 if ! strings "$APP_EXECUTABLE" | rg -F "$UI_MARKER" >/dev/null; then
-  echo "最终 App 可执行文件缺少 simple-v1 标记。" >&2
+  echo "最终 App 可执行文件缺少 simple-v2 标记。" >&2
   exit 1
 fi
 if ! strings "$APP_EXECUTABLE" | rg -F "$UI_LAYOUT_MARKER" >/dev/null; then
-  echo "最终 App 可执行文件缺少 single-page-v1 标记。" >&2
+  echo "最终 App 可执行文件缺少 library-workspace-simple-v2 标记。" >&2
   exit 1
 fi
 if strings "$APP_EXECUTABLE" | rg -F "$OLD_UI_MARKER" >/dev/null; then
@@ -164,11 +164,11 @@ codesign --verify --deep --strict "$FINAL_APP"
 "$ROOT/scripts/verify-macos-deployment-target.sh" \
   "$FINAL_APP" "$MINIMUM_MACOS_VERSION"
 if ! strings "$FINAL_APP/Contents/MacOS/app" | rg -F "$UI_MARKER" >/dev/null; then
-  echo "根目录最终 App 缺少 simple-v1 标记。" >&2
+  echo "根目录最终 App 缺少 simple-v2 标记。" >&2
   exit 1
 fi
 if ! strings "$FINAL_APP/Contents/MacOS/app" | rg -F "$UI_LAYOUT_MARKER" >/dev/null; then
-  echo "根目录最终 App 缺少 single-page-v1 标记。" >&2
+  echo "根目录最终 App 缺少 library-workspace-simple-v2 标记。" >&2
   exit 1
 fi
 "$ROOT/backend/.venv/bin/python" "$ROOT/scripts/verify-dmg-app.py" \

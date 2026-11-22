@@ -50,19 +50,14 @@ class DownloadRuntimeTests(unittest.TestCase):
             user = _executable(root, "user-ffmpeg", "user")
             environment = _executable(root, "environment-ffmpeg", "environment")
             system = _executable(root, "system-ffmpeg", "system")
-            with (
-                patch.object(
-                    runtime, "_bundled_candidates", return_value=[(bundled, "bundled")]
-                ),
-                patch.object(
-                    runtime, "environment_path_overrides_enabled", return_value=True
-                ),
-                patch.dict(os.environ, {"FFMPEG_PATH": str(environment)}),
-                patch.object(
-                    runtime.shutil,
-                    "which",
-                    side_effect=lambda name: str(system) if name == "ffmpeg" else None,
-                ),
+            with patch.object(
+                runtime, "_bundled_candidates", return_value=[(bundled, "bundled")]
+            ), patch.object(
+                runtime, "environment_path_overrides_enabled", return_value=True
+            ), patch.dict(
+                os.environ, {"FFMPEG_PATH": str(environment)}
+            ), patch.object(
+                runtime.shutil, "which", side_effect=lambda name: str(system) if name == "ffmpeg" else None
             ):
                 selected = runtime.resolve_ffmpeg_path(user)
             self.assertIsNotNone(selected)
@@ -75,12 +70,9 @@ class DownloadRuntimeTests(unittest.TestCase):
             invalid = root / "not-executable"
             invalid.write_text("invalid", encoding="utf-8")
             user = _executable(root, "user-ffmpeg", "user")
-            with (
-                patch.object(
-                    runtime, "_bundled_candidates", return_value=[(invalid, "bundled")]
-                ),
-                patch.object(runtime.shutil, "which", return_value=None),
-            ):
+            with patch.object(
+                runtime, "_bundled_candidates", return_value=[(invalid, "bundled")]
+            ), patch.object(runtime.shutil, "which", return_value=None):
                 selected = runtime.resolve_ffmpeg_path(user)
             self.assertEqual(selected.path, user.resolve())
             self.assertEqual(selected.source, "user")
@@ -88,24 +80,18 @@ class DownloadRuntimeTests(unittest.TestCase):
     def test_normal_release_does_not_inherit_advanced_environment_path(self):
         with tempfile.TemporaryDirectory() as folder:
             environment = _executable(Path(folder), "environment-ffmpeg")
-            with (
-                patch.object(runtime, "_bundled_candidates", return_value=[]),
-                patch.object(
-                    runtime, "environment_path_overrides_enabled", return_value=False
-                ),
-                patch.dict(os.environ, {"FFMPEG_PATH": str(environment)}),
-                patch.object(runtime.shutil, "which", return_value=None),
+            with patch.object(runtime, "_bundled_candidates", return_value=[]), patch.object(
+                runtime, "environment_path_overrides_enabled", return_value=False
+            ), patch.dict(os.environ, {"FFMPEG_PATH": str(environment)}), patch.object(
+                runtime.shutil, "which", return_value=None
             ):
                 self.assertIsNone(runtime.resolve_ffmpeg_path())
 
     def test_architecture_mismatch_is_rejected(self):
         with tempfile.TemporaryDirectory() as folder:
             executable = _executable(Path(folder), "ffmpeg")
-            with (
-                patch.object(
-                    runtime, "_detect_architectures", return_value=("x86_64",)
-                ),
-                patch.object(runtime.platform, "machine", return_value="arm64"),
+            with patch.object(runtime, "_detect_architectures", return_value=("x86_64",)), patch.object(
+                runtime.platform, "machine", return_value="arm64"
             ):
                 result = runtime.validate_runtime_executable(
                     executable, name="ffmpeg", source="bundled"
@@ -130,27 +116,17 @@ class DownloadRuntimeTests(unittest.TestCase):
         )
 
     def test_download_fails_with_stable_code_before_network_when_ffmpeg_missing(self):
-        with (
-            patch.object(downloader, "resolve_ffmpeg_path", return_value=None),
-            patch.object(
-                downloader.yt_dlp,
-                "YoutubeDL",
-                side_effect=AssertionError("network must not start without merge runtime"),
-            ),
+        with patch.object(downloader, "resolve_ffmpeg_path", return_value=None), patch.object(
+            downloader.yt_dlp, "YoutubeDL",
+            side_effect=AssertionError("network must not start without merge runtime"),
         ):
             with self.assertRaises(downloader.DownloadServiceError) as raised:
-                downloader.download_video(
-                    "task", "https://youtu.be/purSYm87Cas", "project"
-                )
+                downloader.download_video("task", "https://youtu.be/purSYm87Cas", "project")
         self.assertEqual(raised.exception.error_code, "DOWNLOAD_RUNTIME_MISSING")
 
     def test_download_error_classification_is_stable(self):
-        unavailable = downloader._classify_download_error(
-            Exception("ERROR: Video unavailable")
-        )
-        merged = downloader._classify_download_error(
-            Exception("ffmpeg merger exited with code 1")
-        )
+        unavailable = downloader._classify_download_error(Exception("ERROR: Video unavailable"))
+        merged = downloader._classify_download_error(Exception("ffmpeg merger exited with code 1"))
         self.assertEqual(unavailable.error_code, "DOWNLOAD_FAILED")
         self.assertEqual(merged.error_code, "MERGE_FAILED")
 
@@ -174,12 +150,20 @@ class ModelIndependenceTests(unittest.TestCase):
             ["mlx"],
         )
         self.assertEqual(
-            [
-                item["id"]
-                for item in _runtime_options("dolphin-base-ctc-multi-lang-int8-2025-04-02")
-            ],
+            [item["id"] for item in _runtime_options("dolphin-base-ctc-multi-lang-int8-2025-04-02")],
             ["cpu", "coreml"],
         )
+
+    def test_fun_asr_cloud_runtime_is_never_available_without_explicit_status(self):
+        unavailable = {
+            "ready": False, "reason": "需要单独授权", "state": "authorization_required",
+        }
+        with patch("app.api.projects.fun_asr_status", return_value=unavailable):
+            option = _runtime_options("fun-asr-realtime")[0]
+        self.assertEqual(option["id"], "dashscope_cloud")
+        self.assertFalse(option["available"])
+        self.assertFalse(option["download_required"])
+        self.assertIn("授权", option["reason"])
 
     def test_runtime_must_be_explicit_or_remembered(self):
         with self.assertRaises(HTTPException) as raised:
@@ -187,22 +171,41 @@ class ModelIndependenceTests(unittest.TestCase):
         self.assertEqual(raised.exception.status_code, 409)
         self.assertEqual(raised.exception.detail["code"], "RUNTIME_SELECTION_REQUIRED")
         self.assertEqual(
-            _select_runtime(
-                "small", None, {"transcription_runtime_by_model": {"small": "cpu"}}
-            ),
+            _select_runtime("small", None, {"transcription_runtime_by_model": {"small": "cpu"}}),
             "cpu",
         )
 
     def test_auto_is_safe_whisper_small_without_memo(self):
         with patch.object(
-            parakeet,
-            "discover_coreml_runtime",
+            parakeet, "discover_coreml_runtime",
             side_effect=AssertionError("auto must not depend on Memo"),
         ):
             resolution = resolve_transcription_model("auto", default_model="small")
         self.assertEqual(resolution.model_id, "small")
         self.assertEqual(resolution.load_target, "small")
         self.assertFalse(resolution.fell_back)
+
+    def test_invalid_custom_model_falls_back_without_persisting_path(self):
+        secret_path = "/Users/example/private/missing-model"
+        resolution = resolve_transcription_model(
+            "custom", custom_model_path=secret_path
+        )
+        self.assertEqual(resolution.model_id, "small")
+        self.assertTrue(resolution.fell_back)
+        self.assertNotIn(secret_path, str(resolution.to_details()))
+
+    def test_valid_custom_model_is_selected_but_details_are_redacted(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            for name in ("model.bin", "config.json", "tokenizer.json"):
+                (root / name).write_bytes(b"model")
+            resolution = resolve_transcription_model(
+                "custom", custom_model_path=root
+            )
+            self.assertEqual(resolution.model_id, "custom")
+            self.assertEqual(resolution.source, "custom_path")
+            self.assertEqual(resolution.load_target, str(root.resolve()))
+            self.assertNotIn(str(root), str(resolution.to_details()))
 
     def test_unavailable_coreml_and_unsupported_parakeet_language_fall_back(self):
         with patch(
@@ -217,9 +220,8 @@ class ModelIndependenceTests(unittest.TestCase):
 
     def test_prepare_model_forwards_repair_to_atomic_asset_manager(self):
         expected = {"model_id": parakeet.PARAKEET_ONNX_MODEL_ID, "ready": True}
-        with (
-            patch.object(parakeet, "ensure_parakeet_assets") as ensure,
-            patch.object(parakeet, "get_parakeet_model_status", return_value=expected),
+        with patch.object(parakeet, "ensure_parakeet_assets") as ensure, patch.object(
+            parakeet, "get_parakeet_model_status", return_value=expected
         ):
             result = parakeet.prepare_parakeet_model(
                 "repair-task", parakeet.PARAKEET_ONNX_MODEL_ID, repair=True

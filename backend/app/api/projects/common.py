@@ -1,5 +1,5 @@
 """
-字幕工厂（简洁版）- 项目路由共享工具与依赖访问层
+字幕工厂 - 项目路由共享工具与依赖访问层
 """
 
 import logging
@@ -17,6 +17,7 @@ from ...models.database import get_db as _default_get_db
 from ...services.app_settings import (
     get_effective_app_settings as _default_get_app_settings,
 )
+from ...services.cloud_asr import fun_asr_status as _default_fun_asr_status
 from ...services.distribution import require_youtube_feature
 from ...services.transcriber import (
     get_transcription_model_status as _default_get_transcription_model_status,
@@ -45,6 +46,7 @@ from ...utils.task_manager import task_manager as _default_task_manager
 logger = logging.getLogger("app.api.projects")
 
 VIDEO_EXTENSIONS = {".mp4", ".mkv", ".mov", ".webm", ".avi"}
+IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
 
 
 def facade_attr(name: str, default: Any) -> Any:
@@ -69,10 +71,12 @@ def get_logger() -> logging.Logger:
     return facade_attr("logger", logger)
 
 
+def get_fun_asr_status() -> dict:
+    return facade_attr("fun_asr_status", _default_fun_asr_status)()
+
+
 def get_model_status(*args, **kwargs) -> dict:
-    fn = facade_attr(
-        "get_transcription_model_status", _default_get_transcription_model_status
-    )
+    fn = facade_attr("get_transcription_model_status", _default_get_transcription_model_status)
     return fn(*args, **kwargs)
 
 
@@ -110,8 +114,16 @@ def _download_service():
     return import_module("...services." + "downloader", __package__)
 
 
+def download_audio_source(*args, **kwargs):
+    return _download_service().download_audio_source(*args, **kwargs)
+
+
 def download_video(*args, **kwargs):
     return _download_service().download_video(*args, **kwargs)
+
+
+def get_video_info(*args, **kwargs):
+    return _download_service().get_video_info(*args, **kwargs)
 
 
 def normalize_youtube_url(*args, **kwargs):
@@ -125,9 +137,7 @@ def remove_managed_download_file(*args, **kwargs):
 def _project_row(project_id: str):
     db = get_db()
     try:
-        return db.execute(
-            "SELECT * FROM projects WHERE id=?", (project_id,)
-        ).fetchone()
+        return db.execute("SELECT * FROM projects WHERE id=?", (project_id,)).fetchone()
     finally:
         db.close()
 
@@ -141,14 +151,14 @@ def _raise_active_task_conflict(task_ids: list[str]) -> None:
         status_code=409,
         detail={
             "code": "ACTIVE_TASKS",
-            "message": "项目正在处理；请先取消或等待任务完成后再删除项目",
+            "message": "项目正在处理；确认终止任务后再移入回收站",
             "task_ids": task_ids,
         },
     )
 
 
 def _path_is_managed(path: Path) -> bool:
-    """Only remove files below App-owned storage roots."""
+    """Only remove files below App-owned or user-selected storage roots."""
     roots = {
         data_dir(),
         projects_dir(),
@@ -157,6 +167,12 @@ def _path_is_managed(path: Path) -> bool:
         subtitles_dir(),
         exports_dir(),
     }
+    try:
+        custom_download_root = get_app_settings().get("download_directory")
+    except Exception:
+        custom_download_root = None
+    if custom_download_root:
+        roots.add(Path(custom_download_root))
     resolved = path.resolve(strict=False)
     resolved_roots = {root.expanduser().resolve(strict=False) for root in roots}
     # A storage root itself is never deletable, even when it also lies below
@@ -176,7 +192,7 @@ def _remove_managed_path(path: Path) -> None:
 
 
 def _purge_project_files(row) -> None:
-    """Delete only App-managed media, subtitles, and exports."""
+    """Delete only App-managed media, subtitles, thumbnails, and exports."""
     project_id = row["id"]
     candidates = {
         projects_dir() / project_id,
@@ -185,14 +201,21 @@ def _purge_project_files(row) -> None:
         subtitles_dir() / project_id,
         exports_dir() / project_id,
     }
-    for column in ("video_path", "audio_path"):
+    try:
+        custom_download_root = get_app_settings().get("download_directory")
+    except Exception:
+        custom_download_root = None
+    if custom_download_root:
+        candidates.add(Path(custom_download_root).expanduser() / project_id)
+    for column in ("video_path", "audio_path", "thumbnail_path"):
         value = row[column] if column in row.keys() else None
         if value:
             candidates.add(Path(value))
     for root in (subtitles_dir(), exports_dir()):
         if root.is_dir():
             candidates.update(
-                item for item in root.iterdir() if item.name.startswith(f"{project_id}_")
+                item for item in root.iterdir()
+                if item.name.startswith(f"{project_id}_")
             )
     for path in sorted(candidates, key=lambda item: len(item.parts), reverse=True):
         _remove_managed_path(path)
@@ -201,12 +224,15 @@ def _purge_project_files(row) -> None:
 def _purge_project_record(project_id: str) -> None:
     db = get_db()
     try:
+        # Explicit task deletion is required because the legacy tasks table has
+        # no foreign key. Other rows are listed for old databases whose foreign
+        # key definitions may predate the current schema.
         db.execute(
             "DELETE FROM transcription_segments WHERE project_id=?", (project_id,)
         )
         db.execute("DELETE FROM transcription_runs WHERE project_id=?", (project_id,))
+        db.execute("DELETE FROM segment_revisions WHERE project_id=?", (project_id,))
         db.execute("DELETE FROM segments WHERE project_id=?", (project_id,))
-        db.execute("DELETE FROM ai_batch_results WHERE project_id=?", (project_id,))
         db.execute("DELETE FROM tasks WHERE project_id=?", (project_id,))
         db.execute("DELETE FROM projects WHERE id=?", (project_id,))
         db.commit()
@@ -224,10 +250,8 @@ def _audio_preflight(audio_path: str | None) -> dict:
         with wave.open(audio_path, "rb") as source:
             duration = source.getnframes() / max(source.getframerate(), 1)
             valid_format = (
-                source.getnchannels() == 1
-                and source.getsampwidth() == 2
-                and source.getframerate() == 16000
-                and source.getcomptype() == "NONE"
+                source.getnchannels() == 1 and source.getsampwidth() == 2
+                and source.getframerate() == 16000 and source.getcomptype() == "NONE"
             )
     except (OSError, EOFError, wave.Error) as exc:
         return {"ok": False, "error_code": "AUDIO_INVALID", "message": str(exc)}
@@ -241,9 +265,5 @@ def _audio_preflight(audio_path: str | None) -> dict:
         }
     free_bytes = shutil.disk_usage(Path(audio_path).parent).free
     if free_bytes < 512 * 1024 * 1024:
-        return {
-            "ok": False,
-            "error_code": "DISK_FULL",
-            "message": "可用磁盘空间不足 512 MiB",
-        }
+        return {"ok": False, "error_code": "DISK_FULL", "message": "可用磁盘空间不足 512 MiB"}
     return {"ok": True, "duration": round(duration, 2), "free_bytes": free_bytes}

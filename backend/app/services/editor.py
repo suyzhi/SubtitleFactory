@@ -1,0 +1,649 @@
+"""Transactional subtitle editing, drafts, and persistent history."""
+
+from __future__ import annotations
+
+import json
+import re
+import time
+import uuid
+from dataclasses import dataclass
+from datetime import datetime
+from typing import Iterable
+
+from pydantic import ValidationError
+
+from ..models.database import get_db, segment_to_dict
+from ..models.schemas import SegmentOperationItem, SegmentOperationRequest
+
+SEGMENT_COLUMNS = (
+    "id", "project_id", "idx", "start", "end", "raw_text", "clean_text",
+    "translated_text", "speaker", "speaker_id", "locked", "is_draft",
+    "source_stage", "transcription_run_id",
+)
+
+
+@dataclass
+class EditorServiceError(Exception):
+    status_code: int
+    code: str
+    message: str
+    suggestion: str = ""
+    details: dict | None = None
+
+    def as_detail(self) -> dict:
+        return {
+            "code": self.code,
+            "message": self.message,
+            "suggestion": self.suggestion,
+            "details": self.details or {},
+            "recoverable": self.status_code < 500,
+        }
+
+
+def _now() -> str:
+    return time.strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _now_milliseconds() -> str:
+    return datetime.now().isoformat(sep=" ", timespec="milliseconds")
+
+
+def _project_revision(conn, project_id: str) -> int:
+    row = conn.execute(
+        "SELECT edit_revision FROM projects WHERE id=? AND deleted_at IS NULL",
+        (project_id,),
+    ).fetchone()
+    if not row:
+        raise EditorServiceError(404, "PROJECT_NOT_FOUND", "项目不存在")
+    return int(row["edit_revision"] or 0)
+
+
+def _rows(conn, project_id: str):
+    return conn.execute(
+        "SELECT * FROM segments WHERE project_id=? ORDER BY idx", (project_id,)
+    ).fetchall()
+
+
+def _snapshot(rows: Iterable) -> list[dict]:
+    result = []
+    for row in rows:
+        keys = set(row.keys())
+        result.append({name: row[name] if name in keys else None for name in SEGMENT_COLUMNS})
+    return result
+
+
+def _restore_snapshot(conn, project_id: str, snapshot: list[dict]) -> None:
+    conn.execute("DELETE FROM segments WHERE project_id=?", (project_id,))
+    placeholders = ",".join("?" for _ in SEGMENT_COLUMNS)
+    columns = ",".join(SEGMENT_COLUMNS)
+    rows = []
+    for item in snapshot:
+        values = [item.get(name) for name in SEGMENT_COLUMNS]
+        values[1] = project_id
+        rows.append(values)
+    if rows:
+        conn.executemany(
+            f"INSERT INTO segments ({columns}) VALUES ({placeholders})", rows
+        )
+
+
+def _renumber(conn, project_id: str) -> None:
+    # Single window-function statement instead of one UPDATE per row.
+    conn.execute(
+        """WITH ranked AS (
+               SELECT id, ROW_NUMBER() OVER (ORDER BY idx, start, id) AS rn
+                 FROM segments WHERE project_id=?
+           )
+           UPDATE segments
+              SET idx = (SELECT rn FROM ranked WHERE ranked.id = segments.id)
+            WHERE project_id=?""",
+        (project_id, project_id),
+    )
+
+
+def _validate_timeline(conn, project_id: str) -> None:
+    previous = None
+    for row in _rows(conn, project_id):
+        start, end = float(row["start"]), float(row["end"])
+        if start < 0 or end <= start:
+            raise EditorServiceError(
+                422, "INVALID_TIME_RANGE", f"第 {row['idx']} 条字幕时间范围无效",
+                "请确保开始时间非负且结束时间晚于开始时间",
+            )
+        if previous is not None and float(previous["end"]) > start + 1e-6:
+            raise EditorServiceError(
+                422, "SEGMENT_OVERLAP", f"第 {previous['idx']} 与 {row['idx']} 条字幕发生重叠",
+                "请先调整相邻字幕边界",
+            )
+        previous = row
+
+
+def _language_join(values: Iterable[str]) -> str:
+    output = ""
+    for raw in values:
+        value = (raw or "").strip()
+        if not value:
+            continue
+        if not output:
+            output = value
+        elif re.search(r"[\u3400-\u9fff]$", output) or re.match(r"^[\u3400-\u9fff，。！？；：、]", value):
+            output += value
+        else:
+            output += " " + value
+    return output
+
+
+def _split_offset(text: str, ratio: float, preferred: int | None = None) -> int:
+    if not text:
+        return 0
+    if preferred is not None:
+        return max(0, min(len(text), preferred))
+    target = max(1, min(len(text) - 1, round(len(text) * ratio)))
+    if re.search(r"\s", text):
+        candidates = [match.start() for match in re.finditer(r"\s+", text)]
+        if candidates:
+            return min(candidates, key=lambda value: abs(value - target))
+    return target
+
+
+def _split_text(text: str, ratio: float, preferred: int | None = None) -> tuple[str, str]:
+    offset = _split_offset(text or "", ratio, preferred)
+    return (text[:offset].rstrip(), text[offset:].lstrip())
+
+
+def _apply_update_many(conn, project_id: str, request: SegmentOperationRequest) -> tuple[int, bool]:
+    affected = 0
+    time_changed = False
+    for item in request.items:
+        row = conn.execute(
+            "SELECT * FROM segments WHERE project_id=? AND idx=?",
+            (project_id, item.index),
+        ).fetchone()
+        if not row:
+            raise EditorServiceError(404, "SEGMENT_NOT_FOUND", f"第 {item.index} 条字幕不存在")
+        values = item.model_dump(exclude={"index"}, exclude_unset=True)
+        if row["locked"] and not request.include_locked and set(values) != {"locked"}:
+            continue
+        if not values:
+            continue
+        time_changed = time_changed or "start" in values or "end" in values
+        assignments = ",".join(f"{key}=?" for key in values)
+        conn.execute(
+            f"UPDATE segments SET {assignments} WHERE id=?",
+            [*values.values(), row["id"]],
+        )
+        affected += 1
+    return affected, time_changed
+
+
+def _apply_replace(conn, project_id: str, request: SegmentOperationRequest) -> tuple[int, bool]:
+    if not request.search:
+        raise EditorServiceError(422, "EMPTY_SEARCH", "查找内容不能为空")
+    affected = 0
+    pattern = re.compile(re.escape(request.search), 0 if request.match_case else re.IGNORECASE)
+    # Search is literal, so the replacement is too: a function result is
+    # inserted verbatim, keeping text such as "\N" or "C:\temp" intact.
+    replacement = request.replacement
+    for row in _rows(conn, project_id):
+        if row["locked"] and not request.include_locked:
+            continue
+        updates = {}
+        for field in request.fields:
+            value = row[field] or ""
+            replaced = pattern.sub(lambda _match: replacement, value)
+            if replaced != value:
+                updates[field] = replaced
+        if updates:
+            assignments = ",".join(f"{key}=?" for key in updates)
+            conn.execute(
+                f"UPDATE segments SET {assignments} WHERE id=?",
+                [*updates.values(), row["id"]],
+            )
+            affected += 1
+    return affected, False
+
+
+def _apply_shift(conn, project_id: str, request: SegmentOperationRequest) -> tuple[int, bool]:
+    selected = set(request.indices)
+    clauses = ["project_id=?"]
+    values: list = [request.delta, request.delta, project_id]
+    if selected:
+        placeholders = ",".join("?" for _ in selected)
+        clauses.append(f"idx IN ({placeholders})")
+        values.extend(sorted(selected))
+    if not request.include_locked:
+        clauses.append("COALESCE(locked,0)=0")
+    cursor = conn.execute(
+        f"UPDATE segments SET start=start+?,end=end+? WHERE {' AND '.join(clauses)}",
+        values,
+    )
+    return cursor.rowcount, True
+
+
+def _apply_split(conn, project_id: str, request: SegmentOperationRequest) -> tuple[int, bool]:
+    if request.split_index is None or request.split_at is None:
+        raise EditorServiceError(422, "SPLIT_ARGUMENTS_REQUIRED", "拆分需要字幕序号和拆分时间")
+    row = conn.execute(
+        "SELECT * FROM segments WHERE project_id=? AND idx=?",
+        (project_id, request.split_index),
+    ).fetchone()
+    if not row:
+        raise EditorServiceError(404, "SEGMENT_NOT_FOUND", "要拆分的字幕不存在")
+    if row["locked"] and not request.include_locked:
+        raise EditorServiceError(409, "SEGMENT_LOCKED", "锁定字幕不能拆分")
+    start, end = float(row["start"]), float(row["end"])
+    if not start < request.split_at < end:
+        raise EditorServiceError(422, "INVALID_SPLIT_POINT", "拆分点必须位于字幕时间范围内部")
+    ratio = (request.split_at - start) / (end - start)
+    raw_left, raw_right = _split_text(row["raw_text"] or "", ratio)
+    clean_left, clean_right = _split_text(
+        row["clean_text"] or "", ratio, request.text_offset
+    )
+    translated_left, translated_right = _split_text(row["translated_text"] or "", ratio)
+    conn.execute("UPDATE segments SET idx=idx+1 WHERE project_id=? AND idx>?", (project_id, row["idx"]))
+    conn.execute(
+        "UPDATE segments SET end=?,raw_text=?,clean_text=?,translated_text=? WHERE id=?",
+        (request.split_at, raw_left, clean_left, translated_left, row["id"]),
+    )
+    values = dict(row)
+    values.update({
+        "id": str(uuid.uuid4()), "idx": row["idx"] + 1, "start": request.split_at,
+        "raw_text": raw_right, "clean_text": clean_right,
+        "translated_text": translated_right,
+    })
+    placeholders = ",".join("?" for _ in SEGMENT_COLUMNS)
+    conn.execute(
+        f"INSERT INTO segments ({','.join(SEGMENT_COLUMNS)}) VALUES ({placeholders})",
+        [values.get(name) for name in SEGMENT_COLUMNS],
+    )
+    return 2, True
+
+
+def _apply_merge(conn, project_id: str, request: SegmentOperationRequest) -> tuple[int, bool]:
+    indices = sorted(set(request.indices))
+    if len(indices) < 2 or indices != list(range(indices[0], indices[-1] + 1)):
+        raise EditorServiceError(422, "NON_ADJACENT_MERGE", "只能合并两个或更多相邻字幕")
+    placeholders = ",".join("?" for _ in indices)
+    rows = conn.execute(
+        f"SELECT * FROM segments WHERE project_id=? AND idx IN ({placeholders}) ORDER BY idx",
+        [project_id, *indices],
+    ).fetchall()
+    if len(rows) != len(indices):
+        raise EditorServiceError(404, "SEGMENT_NOT_FOUND", "部分待合并字幕不存在")
+    if any(row["locked"] for row in rows) and not request.include_locked:
+        raise EditorServiceError(409, "SEGMENT_LOCKED", "锁定字幕不能合并")
+    speaker_ids = {row["speaker_id"] for row in rows}
+    speakers = {row["speaker"] for row in rows}
+    first = rows[0]
+    merged_speaker_id = next(iter(speaker_ids)) if len(speaker_ids) == 1 else None
+    merged_speaker = next(iter(speakers)) if len(speakers) == 1 else ""
+    conn.execute(
+        """UPDATE segments SET end=?,raw_text=?,clean_text=?,translated_text=?,
+                  speaker_id=?,speaker=?,locked=? WHERE id=?""",
+        (
+            rows[-1]["end"], _language_join(row["raw_text"] for row in rows),
+            _language_join(row["clean_text"] for row in rows),
+            _language_join(row["translated_text"] for row in rows),
+            merged_speaker_id, merged_speaker, int(all(row["locked"] for row in rows)), first["id"],
+        ),
+    )
+    conn.execute(
+        f"DELETE FROM segments WHERE project_id=? AND idx IN ({placeholders}) AND id<>?",
+        [project_id, *indices, first["id"]],
+    )
+    _renumber(conn, project_id)
+    return len(rows), True
+
+
+def _apply_delete(conn, project_id: str, request: SegmentOperationRequest) -> tuple[int, bool]:
+    indices = sorted(set(request.indices))
+    if not indices:
+        raise EditorServiceError(422, "SEGMENTS_REQUIRED", "请选择要删除的字幕")
+    placeholders = ",".join("?" for _ in indices)
+    rows = conn.execute(
+        f"SELECT * FROM segments WHERE project_id=? AND idx IN ({placeholders}) ORDER BY idx",
+        [project_id, *indices],
+    ).fetchall()
+    if len(rows) != len(indices):
+        raise EditorServiceError(404, "SEGMENT_NOT_FOUND", "部分待删除字幕不存在")
+    if any(row["locked"] for row in rows) and not request.include_locked:
+        raise EditorServiceError(409, "SEGMENT_LOCKED", "锁定字幕不能删除")
+    conn.execute(
+        f"DELETE FROM segments WHERE project_id=? AND idx IN ({placeholders})",
+        [project_id, *indices],
+    )
+    _renumber(conn, project_id)
+    # Removing cues cannot create an overlap, so the remaining timeline is not
+    # revalidated (an imported track with old overlaps stays deletable).
+    return len(rows), False
+
+
+APPLIERS = {
+    "update_many": _apply_update_many,
+    "replace": _apply_replace,
+    "shift": _apply_shift,
+    "split": _apply_split,
+    "merge": _apply_merge,
+    "delete": _apply_delete,
+}
+
+
+def execute_operation(
+    project_id: str,
+    request: SegmentOperationRequest | None,
+    *,
+    commit_saved_draft: bool = False,
+    rebase_draft: bool = False,
+) -> dict:
+    conn = get_db()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        revision = _project_revision(conn, project_id)
+        if commit_saved_draft:
+            draft = conn.execute(
+                "SELECT base_revision,draft_json FROM segment_drafts WHERE project_id=?",
+                (project_id,),
+            ).fetchone()
+            if not draft:
+                raise EditorServiceError(
+                    409, "DRAFT_EMPTY", "没有待保存的字幕草稿"
+                )
+            try:
+                items = json.loads(draft["draft_json"] or "[]")
+                request = SegmentOperationRequest(
+                    expected_revision=(revision if rebase_draft else int(draft["base_revision"])),
+                    operation="update_many",
+                    items=items,
+                )
+                if not request.items or any(
+                    not (item.model_fields_set - {"index"})
+                    for item in request.items
+                ):
+                    raise ValueError("draft must contain at least one change")
+            except (TypeError, ValueError, ValidationError) as error:
+                raise EditorServiceError(
+                    422, "DRAFT_INVALID", "字幕草稿已损坏",
+                    "请放弃该草稿并重新编辑",
+                ) from error
+        if request is None:
+            raise EditorServiceError(422, "EDITOR_OPERATION_REQUIRED", "缺少字幕编辑操作")
+        if revision != request.expected_revision:
+            raise EditorServiceError(
+                409, "EDIT_REVISION_CONFLICT", "字幕已在其他操作中发生变化",
+                "请刷新字幕后重试", {"expected": request.expected_revision, "actual": revision},
+            )
+        before = _snapshot(_rows(conn, project_id))
+        if commit_saved_draft:
+            content_indices = {
+                item.index
+                for item in request.items
+                if item.model_fields_set - {"index", "locked"}
+            }
+            explicit_unlock_indices = {
+                item.index
+                for item in request.items
+                if "locked" in item.model_fields_set and item.locked is False
+            }
+            locked_indices = {
+                int(row["idx"]) for row in before
+                if row["locked"] and row["idx"] in content_indices
+            }
+            locked_conflicts = sorted(locked_indices - explicit_unlock_indices)
+            if locked_conflicts:
+                raise EditorServiceError(
+                    409,
+                    "DRAFT_LOCKED_CONFLICT",
+                    "草稿包含当前已锁定的字幕，未应用任何更改",
+                    "请在草稿中明确解锁这些字幕，或放弃草稿",
+                    {"indices": locked_conflicts},
+                )
+            # The normal editor only overrides a lock when the caller opts in.
+            # A saved draft may do so atomically only for rows that explicitly
+            # carry locked=false; the conflict check above protects every
+            # other locked content row in the same batch.
+            if locked_indices:
+                request.include_locked = True
+        affected, time_changed = APPLIERS[request.operation](conn, project_id, request)
+        if time_changed:
+            _validate_timeline(conn, project_id)
+        after_rows = _rows(conn, project_id)
+        after = _snapshot(after_rows)
+        operation_id = str(uuid.uuid4())
+        next_revision = revision + 1
+        conn.execute("DELETE FROM edit_operations WHERE project_id=? AND undone=1", (project_id,))
+        conn.execute(
+            """INSERT INTO edit_operations
+               (id,project_id,operation,before_json,after_json,base_revision,result_revision,undone,created_at)
+               VALUES (?,?,?,?,?,?,?,?,?)""",
+            (
+                operation_id, project_id, request.operation,
+                json.dumps(before, ensure_ascii=False, separators=(",", ":")),
+                json.dumps(after, ensure_ascii=False, separators=(",", ":")),
+                revision, next_revision, 0, _now(),
+            ),
+        )
+        conn.execute(
+            "UPDATE projects SET edit_revision=?,updated_at=? WHERE id=?",
+            (next_revision, _now(), project_id),
+        )
+        conn.execute(
+            """DELETE FROM edit_operations WHERE id IN (
+                   SELECT id FROM edit_operations WHERE project_id=? AND undone=0
+                   ORDER BY result_revision DESC LIMIT -1 OFFSET 500
+               )""",
+            (project_id,),
+        )
+        if commit_saved_draft:
+            # Committing the official edit and removing its staging draft must
+            # be one transaction. A crash can no longer leave an already-
+            # applied draft behind to be offered a second time after restart.
+            conn.execute("DELETE FROM segment_drafts WHERE project_id=?", (project_id,))
+        conn.commit()
+        return {
+            "revision": next_revision,
+            "operation_id": operation_id,
+            "operation": request.operation,
+            "affected_count": affected,
+            "segments": [segment_to_dict(row) for row in after_rows],
+        }
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def import_segment_snapshot(project_id: str, expected_revision: int, cues: list[dict], *, candidate_run_id: str | None = None) -> dict:
+    """Replace the current track with imported cues as one persistent operation."""
+    from .transcription_results import candidate_result
+    partial_candidate = False
+    conn = get_db()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        revision = _project_revision(conn, project_id)
+        if revision != expected_revision:
+            raise EditorServiceError(
+                409, "EDIT_REVISION_CONFLICT", "字幕已发生变化", "请刷新后重新导入",
+                {"expected": expected_revision, "actual": revision},
+            )
+        if candidate_run_id:
+            active = conn.execute("SELECT type,details FROM tasks WHERE project_id=? AND status IN ('pending','running','paused') AND type IN ('clean','translate','workflow')", (project_id,)).fetchall()
+            for task in active:
+                stages = json.loads(task['details'] or '{}').get('stages') or {}
+                if task['type'] != 'workflow' or any(stages.get(step) == 'running' for step in ('clean','translate')):
+                    raise EditorServiceError(409, "SUBTITLE_TASK_ACTIVE", "字幕正在被其他任务处理，请完成或取消后再采用候选结果")
+            draft = conn.execute("SELECT 1 FROM segment_drafts WHERE project_id=?", (project_id,)).fetchone()
+            if draft:
+                raise EditorServiceError(409, "DRAFT_PENDING", "请先保存或放弃字幕草稿，再替换候选结果")
+            candidate = candidate_result(conn, project_id, candidate_run_id)
+            if candidate is None:
+                raise EditorServiceError(409, "CANDIDATE_UNAVAILABLE", "候选结果已变化，请刷新")
+            cues, partial_candidate = candidate
+            if not cues:
+                raise EditorServiceError(409, "CANDIDATE_EMPTY", "候选结果为空")
+        before = _snapshot(_rows(conn, project_id))
+        conn.execute("DELETE FROM segments WHERE project_id=?", (project_id,))
+        for index, cue in enumerate(cues, 1):
+            identifier = str(uuid.uuid4())
+            text = cue.get("text", "")
+            conn.execute(
+                """INSERT INTO segments
+                   (id,project_id,idx,start,end,raw_text,clean_text,translated_text,speaker,speaker_id,locked,is_draft,source_stage)
+                   VALUES (?,?,?,?,?,?,?,'','',NULL,0,0,'imported')""",
+                (identifier, project_id, index, cue["start"], cue["end"], text, text),
+            )
+        _validate_timeline(conn, project_id)
+        if candidate_run_id:
+            conn.execute("UPDATE transcription_runs SET status='accepted' WHERE id=?", (candidate_run_id,))
+            conn.execute("UPDATE segments SET transcription_run_id=?,source_stage=? WHERE project_id=?", (candidate_run_id, 'recovered_partial' if partial_candidate else 'postprocessed', project_id))
+        after_rows = _rows(conn, project_id)
+        after = _snapshot(after_rows)
+        operation_id = str(uuid.uuid4())
+        next_revision = revision + 1
+        conn.execute("DELETE FROM edit_operations WHERE project_id=? AND undone=1", (project_id,))
+        conn.execute(
+            """INSERT INTO edit_operations
+               (id,project_id,operation,before_json,after_json,base_revision,result_revision,undone,created_at)
+               VALUES (?,?,?,?,?,?,?,0,?)""",
+            (operation_id, project_id, "import_subtitles", json.dumps(before, ensure_ascii=False),
+             json.dumps(after, ensure_ascii=False), revision, next_revision, _now()),
+        )
+        conn.execute(
+            "UPDATE projects SET edit_revision=?,updated_at=? WHERE id=?",
+            (next_revision, _now(), project_id),
+        )
+        conn.commit()
+        return {
+            "revision": next_revision, "operation_id": operation_id,
+            "operation": "import_subtitles", "affected_count": len(cues),
+            "segments": [segment_to_dict(row) for row in after_rows],
+        }
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def history_step(project_id: str, expected_revision: int, direction: str) -> dict:
+    conn = get_db()
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        revision = _project_revision(conn, project_id)
+        if revision != expected_revision:
+            raise EditorServiceError(
+                409, "EDIT_REVISION_CONFLICT", "字幕版本已变化", "请刷新字幕后重试",
+                {"expected": expected_revision, "actual": revision},
+            )
+        if direction == "undo":
+            row = conn.execute(
+                """SELECT * FROM edit_operations WHERE project_id=? AND undone=0
+                   ORDER BY result_revision DESC LIMIT 1""",
+                (project_id,),
+            ).fetchone()
+            snapshot_field, undone = "before_json", 1
+        else:
+            row = conn.execute(
+                """SELECT * FROM edit_operations WHERE project_id=? AND undone=1
+                   ORDER BY result_revision ASC LIMIT 1""",
+                (project_id,),
+            ).fetchone()
+            snapshot_field, undone = "after_json", 0
+        if not row:
+            raise EditorServiceError(409, "HISTORY_EMPTY", "没有可撤销的操作" if direction == "undo" else "没有可重做的操作")
+        _restore_snapshot(conn, project_id, json.loads(row[snapshot_field]))
+        next_revision = revision + 1
+        conn.execute("UPDATE edit_operations SET undone=? WHERE id=?", (undone, row["id"]))
+        conn.execute(
+            "UPDATE projects SET edit_revision=?,updated_at=? WHERE id=?",
+            (next_revision, _now(), project_id),
+        )
+        rows = _rows(conn, project_id)
+        conn.commit()
+        return {
+            "revision": next_revision,
+            "operation_id": row["id"],
+            "operation": direction,
+            "affected_count": len(rows),
+            "segments": [segment_to_dict(item) for item in rows],
+        }
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
+
+
+def save_draft(project_id: str, base_revision: int, items: list[dict]) -> dict:
+    if not items or any(not (set(item) - {"index"}) for item in items):
+        raise EditorServiceError(
+            422, "DRAFT_INVALID", "字幕草稿没有可保存的更改"
+        )
+    conn = get_db()
+    try:
+        # A draft is a recovery artifact, not an official edit. Preserve it
+        # even if the official revision advanced; commit still enforces the
+        # original base revision and rebase still requires explicit consent.
+        _project_revision(conn, project_id)
+        conn.execute(
+            """INSERT INTO segment_drafts(project_id,base_revision,draft_json,updated_at)
+               VALUES (?,?,?,?) ON CONFLICT(project_id) DO UPDATE SET
+               base_revision=excluded.base_revision,draft_json=excluded.draft_json,updated_at=excluded.updated_at""",
+            (
+                project_id,
+                base_revision,
+                json.dumps(items, ensure_ascii=False),
+                _now_milliseconds(),
+            ),
+        )
+        conn.commit()
+        return {"project_id": project_id, "base_revision": base_revision, "items": items}
+    finally:
+        conn.close()
+
+
+def get_draft(project_id: str) -> dict | None:
+    conn = get_db()
+    try:
+        row = conn.execute("SELECT * FROM segment_drafts WHERE project_id=?", (project_id,)).fetchone()
+        if not row:
+            return None
+        invalid = False
+        try:
+            raw_items = json.loads(row["draft_json"] or "[]")
+            if not isinstance(raw_items, list):
+                raise ValueError("draft items must be a list")
+            items = [
+                SegmentOperationItem.model_validate(item).model_dump(exclude_unset=True)
+                for item in raw_items
+            ]
+        except (TypeError, ValueError, ValidationError):
+            items = []
+            invalid = True
+        return {
+            "project_id": project_id,
+            "base_revision": row["base_revision"],
+            "items": items,
+            "updated_at": row["updated_at"],
+            "invalid": invalid,
+        }
+    finally:
+        conn.close()
+
+
+def commit_draft(project_id: str, *, rebase: bool = False) -> dict:
+    return execute_operation(
+        project_id,
+        None,
+        commit_saved_draft=True,
+        rebase_draft=rebase,
+    )
+
+
+def discard_draft(project_id: str) -> None:
+    conn = get_db()
+    try:
+        conn.execute("DELETE FROM segment_drafts WHERE project_id=?", (project_id,))
+        conn.commit()
+    finally:
+        conn.close()

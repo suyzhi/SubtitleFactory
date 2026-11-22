@@ -8,7 +8,7 @@ use std::fs;
 use tauri::{Manager, RunEvent, WindowEvent};
 
 use crate::{
-    commands::{backend_session, save_managed_file},
+    commands::{backend_session, reveal_path, save_managed_file, save_text_file},
     fs_ops::ManagedFiles,
     session::{backend_data_dir, create_backend_session},
     sidecar::{
@@ -17,15 +17,17 @@ use crate::{
     },
 };
 
-const SIMPLE_UI_MARKER: &str = "subtitle-factory-ui:simple-v1";
-const SINGLE_PAGE_UI_MARKER: &str = "subtitle-factory-ui:single-page-v1";
+const SIMPLE_UI_MARKER: &str = "subtitle-factory-ui:simple-v2";
+const SIMPLE_LAYOUT_UI_MARKER: &str = "subtitle-factory-ui:library-workspace-simple-v2";
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let app = tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
             backend_session,
+            reveal_path,
             save_managed_file,
+            save_text_file,
         ])
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
@@ -36,7 +38,7 @@ pub fn run() {
         )
         .setup(|app| {
             log::info!("release UI marker: {SIMPLE_UI_MARKER}");
-            log::info!("release UI layout marker: {SINGLE_PAGE_UI_MARKER}");
+            log::info!("release UI layout marker: {SIMPLE_LAYOUT_UI_MARKER}");
             let session = create_backend_session()?;
             let app_data = app
                 .path()

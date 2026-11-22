@@ -1,0 +1,78 @@
+/* 设计变量：颜色、阴影、圆角、字体。所有颜色只在这里定义。 */
+
+:root {
+  --bg: #f5f4ed;
+  --surface: #fffdf8;
+  --surface-2: #f7f4ec;
+  --surface-3: #efe9dd;
+  --border: #e0dacb;
+  --border-soft: #eae4d6;
+  --text: #2d2822;
+  --text-2: #6b635a;
+  --text-3: #8a8175;
+  --accent: #c96442;
+  --accent-2: #d97b56;
+  --accent-soft: rgba(201, 100, 66, .13);
+  --blue: #5b7a9e;
+  --green: #5b7a6e;
+  --yellow: #b98a2f;
+  --red: #c0452e;
+  --focus-ring: color-mix(in srgb, var(--accent) 38%, transparent);
+  --shadow-soft: 0 8px 24px rgba(80, 60, 40, .1);
+  --shadow-card: 0 2px 10px rgba(80, 60, 40, .08);
+  --font: Inter, "SF Pro Text", "PingFang SC", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --mono: "SF Mono", "JetBrains Mono", Consolas, monospace;
+}
+
+.pro-app {
+  --border-color: var(--border);
+  --panel-bg: var(--surface);
+  --input-bg: var(--surface-2);
+  --accent-color: var(--accent);
+  --text-primary: var(--text);
+  --text-secondary: var(--text-2);
+  --space-1: 6px;
+  --space-2: 10px;
+  --space-3: 14px;
+  --space-4: 20px;
+  --space-5: 28px;
+}
+
+.pro-app.theme-dark, .settings-backdrop.theme-dark {
+  --accent-grad: linear-gradient(180deg, color-mix(in srgb, var(--accent) 94%, white), color-mix(in srgb, var(--accent) 84%, black));
+}
+
+.pro-app.theme-light, .settings-backdrop.theme-light {
+  --accent: #c96442;
+  --accent-2: #d97b56;
+  --accent-soft: rgba(201, 100, 66, .12);
+  --green: #5b7a6e;
+  --yellow: #b98a2f;
+  --red: #c0452e;
+  --purple: #8a6a94;
+  --focus-ring: rgba(201, 100, 66, .22);
+  --sidebar-bg: rgba(250, 248, 241, .96);
+  --window-bg: #f6f4ee;
+  --canvas: #efece4;
+  --surface: #fffefb;
+  --surface-2: #f6f3ec;
+  --surface-3: #ede8de;
+  --elevated: #ffffff;
+  --border: rgba(70, 55, 35, .15);
+  --border-soft: rgba(70, 55, 35, .085);
+  --text: rgba(38, 33, 27, .94);
+  --text-2: rgba(62, 54, 44, .72);
+  --text-3: rgba(84, 74, 60, .52);
+  --shadow-xs: 0 1px 2px rgba(70, 50, 25, .06);
+  --shadow-card: 0 1px 2px rgba(70, 50, 25, .05), 0 6px 18px -8px rgba(70, 50, 25, .14);
+  --shadow-raised: 0 2px 6px rgba(70, 50, 25, .06), 0 24px 48px -16px rgba(70, 50, 25, .26);
+  --shadow-menu: 0 24px 64px -12px rgba(60, 42, 22, .26), 0 2px 10px rgba(60, 42, 22, .08);
+  --inset-sunken: inset 0 1px 2px rgba(70, 50, 25, .07);
+}
+
+.settings-backdrop .settings-navigation nav {
+  --indicator-radius: 10px;
+  --indicator-bg: color-mix(in srgb, var(--accent) 13%, var(--surface));
+  --indicator-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+.settings-backdrop .segmented-control { --indicator-radius: 8px; --indicator-bg: var(--elevated); }

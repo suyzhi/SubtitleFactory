@@ -474,16 +474,62 @@ class ProjectThumbnailPersistenceTests(unittest.TestCase):
         conn.commit()
         conn.close()
 
-    def test_database_commit_failure_keeps_old_media_and_removes_new_candidates(self):
+    def test_init_db_migrates_legacy_projects_with_thumbnail_columns(self):
         with tempfile.TemporaryDirectory() as folder:
-            root = Path(folder)
-            db_path = root / "projects.db"
-            project_dir = root / "downloads" / "project-id"
-            project_dir.mkdir(parents=True)
-            old_video = project_dir / "old.mp4"
-            new_video = project_dir / "video-new.mp4"
-            old_video.write_bytes(b"old-video")
-            new_video.write_bytes(b"new-video")
+            db_path = Path(folder) / "legacy.db"
+            self._create_legacy_projects_table(db_path)
+
+            with patch.object(database, "DB_PATH", db_path):
+                database.init_db()
+                conn = database.get_db()
+                columns = {
+                    row["name"] for row in conn.execute("PRAGMA table_info(projects)")
+                }
+                conn.close()
+
+            self.assertIn("thumbnail_url", columns)
+            self.assertIn("thumbnail_path", columns)
+
+    def test_legacy_youtube_urls_get_a_thumbnail_fallback(self):
+        video_id = "dQw4w9WgXcQ"
+        expected = f"https://i.ytimg.com/vi/{video_id}/hqdefault.jpg"
+        for source_url in (
+            f"https://www.youtube.com/watch?v={video_id}&feature=shared",
+            f"https://youtu.be/{video_id}?si=share-token",
+            f"https://www.youtube.com/shorts/{video_id}",
+            f"https://www.youtube.com/embed/{video_id}",
+        ):
+            with self.subTest(source_url=source_url):
+                self.assertEqual(database._youtube_thumbnail_url(source_url), expected)
+
+        self.assertIsNone(
+            database._youtube_thumbnail_url(
+                f"https://youtube.com.evil.test/watch?v={video_id}"
+            )
+        )
+
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            """SELECT 'legacy-id' AS id, 'Legacy video' AS title,
+                      'youtube' AS source_type, ? AS source_url,
+                      NULL AS video_path, NULL AS audio_path,
+                      NULL AS thumbnail_url, NULL AS thumbnail_path,
+                      'auto' AS language, 'zh' AS target_language,
+                      'now' AS created_at, 'now' AS updated_at""",
+            (f"https://www.youtube.com/watch?v={video_id}",),
+        ).fetchone()
+        conn.close()
+        self.assertEqual(database.project_to_dict(row)["thumbnail_url"], expected)
+
+    def test_download_persists_cover_and_project_list_exposes_local_url(self):
+        with tempfile.TemporaryDirectory() as folder:
+            folder_path = Path(folder)
+            db_path = folder_path / "projects.db"
+            video_path = folder_path / "video.mp4"
+            thumbnail_path = folder_path / "thumbnail.jpg"
+            video_path.write_bytes(b"video")
+            thumbnail_path.write_bytes(b"image")
             now = time.strftime("%Y-%m-%d %H:%M:%S")
 
             with patch.object(database, "DB_PATH", db_path):
@@ -491,12 +537,92 @@ class ProjectThumbnailPersistenceTests(unittest.TestCase):
                 conn = database.get_db()
                 conn.execute(
                     """INSERT INTO projects
-                       (id,title,source_type,source_url,video_path,
+                       (id, title, source_type, source_url, language, target_language,
+                        created_at, updated_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        "project-id", "Old title", "youtube", "https://old.example.test",
+                        "auto", "zh", now, now,
+                    ),
+                )
+                conn.commit()
+                conn.close()
+
+                task = {
+                    "details": {
+                        "title": "Downloaded title",
+                        "thumbnail_url": "https://cdn.example.test/cover.jpg",
+                        "thumbnail_path": str(thumbnail_path),
+                    }
+                }
+                with (
+                    patch.object(projects, "download_video", return_value=str(video_path)),
+                    patch.object(projects.task_manager, "get_task", return_value=task),
+                    patch.object(projects.task_manager, "update_task"),
+                ):
+                    projects._do_download(
+                        "task-id", "project-id", "https://example.test/watch"
+                    )
+
+                listing = projects.list_projects()["projects"]
+                detail = projects.get_project("project-id")
+                conn = database.get_db()
+                persisted = conn.execute(
+                    "SELECT thumbnail_url, thumbnail_path FROM projects WHERE id = ?",
+                    ("project-id",),
+                ).fetchone()
+                conn.close()
+
+                self.assertEqual(
+                    persisted["thumbnail_url"], "https://cdn.example.test/cover.jpg"
+                )
+                self.assertEqual(persisted["thumbnail_path"], str(thumbnail_path))
+                self.assertEqual(
+                    listing[0]["thumbnail_url"],
+                    "/api/projects/project-id/thumbnail",
+                )
+                self.assertEqual(
+                    detail["thumbnail_url"],
+                    "/api/projects/project-id/thumbnail",
+                )
+
+                thumbnail_path.unlink()
+                fallback = projects.get_project("project-id")
+                self.assertEqual(
+                    fallback["thumbnail_url"],
+                    "https://cdn.example.test/cover.jpg",
+                )
+
+    def test_database_commit_failure_keeps_old_media_and_removes_new_candidates(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            db_path = root / "projects.db"
+            project_dir = root / "downloads" / "project-id"
+            project_dir.mkdir(parents=True)
+            old_video = project_dir / "old.mp4"
+            old_thumbnail = project_dir / "old.webp"
+            new_video = project_dir / "video-new.mp4"
+            new_thumbnail = project_dir / "thumbnail-new.webp"
+            for path, content in (
+                (old_video, b"old-video"),
+                (old_thumbnail, b"old-cover"),
+                (new_video, b"new-video"),
+                (new_thumbnail, b"new-cover"),
+            ):
+                path.write_bytes(content)
+            now = time.strftime("%Y-%m-%d %H:%M:%S")
+
+            with patch.object(database, "DB_PATH", db_path):
+                database.init_db()
+                conn = database.get_db()
+                conn.execute(
+                    """INSERT INTO projects
+                       (id,title,source_type,source_url,video_path,thumbnail_path,
                         language,target_language,created_at,updated_at)
-                       VALUES (?,?,?,?,?,?,?,?,?)""",
+                       VALUES (?,?,?,?,?,?,?,?,?,?)""",
                     (
                         "project-id", "Old", "youtube", "https://youtube.test/watch",
-                        str(old_video), "auto", "zh", now, now,
+                        str(old_video), str(old_thumbnail), "auto", "zh", now, now,
                     ),
                 )
                 conn.commit()
@@ -511,10 +637,18 @@ class ProjectThumbnailPersistenceTests(unittest.TestCase):
                     def commit(self):
                         raise sqlite3.OperationalError("simulated commit failure")
 
-                task = {"details": {"title": "New"}}
+                task = {
+                    "details": {
+                        "title": "New",
+                        "thumbnail_path": str(new_thumbnail),
+                        "thumbnail_url": "https://cdn.example.test/new.webp",
+                    },
+                }
                 with (
-                    patch.object(downloader, "DOWNLOADS_DIR", root / "downloads"),
                     patch.object(projects, "download_video", return_value=str(new_video)),
+                    patch.object(projects, "get_app_settings", return_value={
+                        "download_directory": str(root / "downloads"),
+                    }),
                     patch.object(projects, "get_db", return_value=CommitFailingConnection()),
                     patch.object(projects.task_manager, "get_task", return_value=task),
                     patch.object(projects.task_manager, "checkpoint"),
@@ -525,13 +659,16 @@ class ProjectThumbnailPersistenceTests(unittest.TestCase):
                         )
 
                 self.assertTrue(old_video.is_file())
+                self.assertTrue(old_thumbnail.is_file())
                 self.assertFalse(new_video.exists())
+                self.assertFalse(new_thumbnail.exists())
                 conn = database.get_db()
                 row = conn.execute(
-                    "SELECT video_path FROM projects WHERE id='project-id'"
+                    "SELECT video_path,thumbnail_path FROM projects WHERE id='project-id'"
                 ).fetchone()
                 conn.close()
                 self.assertEqual(row["video_path"], str(old_video))
+                self.assertEqual(row["thumbnail_path"], str(old_thumbnail))
 
 
 if __name__ == "__main__":

@@ -588,6 +588,8 @@
 - `pkg:npm/@rolldown/binding-win32-x64-msvc@1.1.4` — MIT
 - `pkg:npm/@rolldown/pluginutils@1.0.1` — MIT
 - `pkg:npm/@standard-schema/spec@1.1.0` — MIT
+- `pkg:npm/@tanstack/query-core@5.101.4` — MIT
+- `pkg:npm/@tanstack/react-query@5.101.4` — MIT
 - `pkg:npm/@tauri-apps/api@2.11.1` — Apache-2.0 OR MIT
 - `pkg:npm/@tauri-apps/cli-darwin-arm64@2.11.4` — Apache-2.0 OR MIT
 - `pkg:npm/@tauri-apps/cli-darwin-x64@2.11.4` — Apache-2.0 OR MIT
@@ -720,11 +722,13 @@
 - `pkg:npm/ws@8.21.1` — MIT
 - `pkg:npm/xml-name-validator@5.0.0` — Apache-2.0
 - `pkg:npm/xmlchars@2.2.0` — MIT
+- `pkg:pypi/aiofiles@25.1.0` — See upstream package metadata
 - `pkg:pypi/altgraph@0.17.5` — See upstream package metadata
 - `pkg:pypi/annotated-doc@0.0.4` — See upstream package metadata
 - `pkg:pypi/annotated-types@0.7.0` — See upstream package metadata
 - `pkg:pypi/anyio@4.14.2` — See upstream package metadata
 - `pkg:pypi/av@18.0.0` — See upstream package metadata
+- `pkg:pypi/backports-tarfile@1.2.0` — See upstream package metadata
 - `pkg:pypi/certifi@2026.6.17` — See upstream package metadata
 - `pkg:pypi/charset-normalizer@3.4.9` — See upstream package metadata
 - `pkg:pypi/click@8.4.2` — See upstream package metadata
@@ -740,7 +744,12 @@
 - `pkg:pypi/httpx@0.28.1` — See upstream package metadata
 - `pkg:pypi/huggingface-hub@1.23.0` — See upstream package metadata
 - `pkg:pypi/idna@3.18` — See upstream package metadata
+- `pkg:pypi/importlib-metadata@9.0.0` — See upstream package metadata
+- `pkg:pypi/jaraco-classes@3.4.0` — See upstream package metadata
+- `pkg:pypi/jaraco-context@6.1.2` — See upstream package metadata
+- `pkg:pypi/jaraco-functools@4.6.0` — See upstream package metadata
 - `pkg:pypi/jinja2@3.1.6` — See upstream package metadata
+- `pkg:pypi/keyring@25.7.0` — See upstream package metadata
 - `pkg:pypi/llvmlite@0.48.0` — See upstream package metadata
 - `pkg:pypi/macholib@1.16.4` — See upstream package metadata
 - `pkg:pypi/markupsafe@3.0.3` — See upstream package metadata
@@ -755,11 +764,14 @@
 - `pkg:pypi/numpy@2.4.6` — See upstream package metadata
 - `pkg:pypi/onnxruntime@1.27.0` — See upstream package metadata
 - `pkg:pypi/packaging@26.2` — See upstream package metadata
+- `pkg:pypi/pillow@12.3.0` — See upstream package metadata
 - `pkg:pypi/protobuf@7.35.1` — See upstream package metadata
 - `pkg:pypi/pydantic-core@2.46.4` — See upstream package metadata
+- `pkg:pypi/pydantic-settings@2.14.2` — See upstream package metadata
 - `pkg:pypi/pydantic@2.13.4` — See upstream package metadata
 - `pkg:pypi/pyinstaller-hooks-contrib@2026.6` — See upstream package metadata
 - `pkg:pypi/pyinstaller@6.21.0` — See upstream package metadata
+- `pkg:pypi/pysubs2@1.8.1` — See upstream package metadata
 - `pkg:pypi/python-dotenv@1.2.2` — See upstream package metadata
 - `pkg:pypi/python-multipart@0.0.32` — See upstream package metadata
 - `pkg:pypi/pyyaml@6.0.3` — See upstream package metadata
@@ -769,6 +781,7 @@
 - `pkg:pypi/setuptools@83.0.0` — See upstream package metadata
 - `pkg:pypi/sherpa-onnx-core@1.13.3` — See upstream package metadata
 - `pkg:pypi/sherpa-onnx@1.13.3` — See upstream package metadata
+- `pkg:pypi/srt@3.5.3` — See upstream package metadata
 - `pkg:pypi/starlette@1.3.1` — See upstream package metadata
 - `pkg:pypi/sympy@1.14.0` — See upstream package metadata
 - `pkg:pypi/tiktoken@0.13.0` — See upstream package metadata
@@ -780,3 +793,4 @@
 - `pkg:pypi/urllib3@2.7.0` — See upstream package metadata
 - `pkg:pypi/uvicorn@0.51.0` — See upstream package metadata
 - `pkg:pypi/yt-dlp@2026.7.4` — See upstream package metadata
+- `pkg:pypi/zipp@4.1.0` — See upstream package metadata

@@ -72,6 +72,8 @@ PYINSTALLER_ARGS=(
   --collect-all sherpa_onnx \
   --collect-all av \
   --collect-all uvicorn \
+  --collect-all pysubs2 \
+  --collect-all PIL \
   --exclude-module torch \
   --hidden-import app.main
 )

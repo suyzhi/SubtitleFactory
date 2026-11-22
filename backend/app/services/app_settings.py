@@ -10,9 +10,33 @@ from ..models.database import get_db
 from .distribution import distribution_capabilities, is_external_model_reference
 
 APP_SETTINGS_DEFAULTS: dict[str, Any] = {
+    "default_workflow": "automatic",
+    "auto_save": True,
+    "startup_behavior": "restore_last",
+    # Automatic selection never downloads a model. It uses a ready
+    # language-specific model when available and otherwise falls back to Small.
+    "default_model": "auto",
+    "source_language": "auto",
+    "custom_model_path": None,
+    "coreml_model_path": None,
+    "coreml_cli_path": None,
+    "translation_target_language": "zh",
+    "bilingual_order": "original_first",
+    "favorite_languages": ["zh", "en", "ja", "ko"],
+    "youtube_media_mode": "local",
+    "download_quality": "best",
+    "download_container": "mp4",
+    "ffmpeg_path": None,
+    "yt_dlp_path": None,
+    "download_directory": None,
     "clean_provider_id": "deepseek",
     "translate_provider_id": "deepseek",
     "transcription_runtime_by_model": {},
+}
+
+_EXTERNAL_PATH_FIELDS = {
+    "custom_model_path", "coreml_model_path", "coreml_cli_path",
+    "ffmpeg_path", "yt_dlp_path", "download_directory",
 }
 
 
@@ -27,7 +51,11 @@ def _decode_settings(raw: str | None) -> dict[str, Any]:
 
 
 def get_app_settings() -> dict[str, Any]:
-    """Read settings merged with safe release defaults."""
+    """Read settings merged with safe release defaults.
+
+    User-selected paths live only in the local SQLite data store. No path is
+    sourced from repository configuration or embedded in a release default.
+    """
     db = get_db()
     try:
         row = db.execute(
@@ -38,6 +66,7 @@ def get_app_settings() -> dict[str, Any]:
     settings = dict(APP_SETTINGS_DEFAULTS)
     if row:
         settings.update(_decode_settings(row["settings_json"]))
+    settings["youtube_media_mode"] = "local"
     return settings
 
 
@@ -46,6 +75,10 @@ def effective_app_settings(settings: Mapping[str, Any]) -> dict[str, Any]:
     effective = dict(settings)
     if distribution_capabilities().external_runtime_paths:
         return effective
+    for field in _EXTERNAL_PATH_FIELDS:
+        effective[field] = None
+    if is_external_model_reference(effective.get("default_model")):
+        effective["default_model"] = "auto"
     runtimes = effective.get("transcription_runtime_by_model")
     if isinstance(runtimes, dict):
         effective["transcription_runtime_by_model"] = {
@@ -69,6 +102,10 @@ def save_app_settings(updates: Mapping[str, Any]) -> dict[str, Any]:
     settings = get_app_settings()
     effective_updates = dict(updates)
     if not distribution_capabilities().external_runtime_paths:
+        for field in _EXTERNAL_PATH_FIELDS:
+            effective_updates.pop(field, None)
+        if is_external_model_reference(effective_updates.get("default_model")):
+            effective_updates.pop("default_model", None)
         requested_runtimes = effective_updates.get("transcription_runtime_by_model")
         if isinstance(requested_runtimes, dict):
             existing_runtimes = settings.get("transcription_runtime_by_model")
@@ -76,8 +113,7 @@ def save_app_settings(updates: Mapping[str, Any]) -> dict[str, Any]:
                 model_id: runtime
                 for model_id, runtime in (
                     existing_runtimes.items()
-                    if isinstance(existing_runtimes, dict)
-                    else []
+                    if isinstance(existing_runtimes, dict) else []
                 )
                 if is_external_model_reference(model_id)
                 or runtime == "external_coreml"
@@ -89,8 +125,7 @@ def save_app_settings(updates: Mapping[str, Any]) -> dict[str, Any]:
                 and runtime != "external_coreml"
             }
             effective_updates["transcription_runtime_by_model"] = {
-                **preserved,
-                **allowed,
+                **preserved, **allowed,
             }
     settings.update(effective_updates)
     now = time.strftime("%Y-%m-%d %H:%M:%S")
@@ -107,4 +142,5 @@ def save_app_settings(updates: Mapping[str, Any]) -> dict[str, Any]:
         db.commit()
     finally:
         db.close()
+    settings["youtube_media_mode"] = "local"
     return settings

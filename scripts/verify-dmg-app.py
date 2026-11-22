@@ -16,8 +16,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 DEPLOYMENT_VERIFIER = ROOT / "scripts/verify-macos-deployment-target.sh"
 UI_MARKERS = (
-    b"subtitle-factory-ui:simple-v1",
-    b"subtitle-factory-ui:single-page-v1",
+    b"subtitle-factory-ui:simple-v2",
+    b"subtitle-factory-ui:library-workspace-simple-v2",
 )
 OLD_UI_MARKER = b"ai-settings-dialog"
 

@@ -1,11 +1,13 @@
 """
-字幕工厂（简洁版）- 语音转写服务（Whisper / Qwen3-ASR / Sherpa / Parakeet）增量版
+字幕工厂 - 语音转写服务（faster-whisper / Parakeet）增量版
 
 将音频转写为带时间戳的字幕段。
 
 两阶段设计：
-  阶段 1：实时转写。模型 segment 逐条写入暂存表 transcription_segments。
-  阶段 2：最终后处理。读取全部暂存段，执行合并/拆分/时长修正，原子替换 segments。
+  阶段 1：实时转写。模型 segment 逐条写入数据库，标记 is_draft=1。
+  阶段 2：最终后处理。读取全部 draft，执行合并/拆分/时长修正，替换为 final。
+
+重要：不要 list(segments_generator) 阻塞等待所有 segment 生成完毕。
 """
 
 import json
@@ -17,6 +19,11 @@ from contextlib import ExitStack
 from ..models.database import get_db
 from ..utils.config import MAX_DURATION, MIN_DURATION, WHISPER_MODEL
 from ..utils.task_manager import task_manager
+from .cloud_asr import (
+    FUN_ASR_MODEL_ID,
+    FUN_ASR_RUNTIME,
+    create_fun_asr_session,
+)
 from .managed_sherpa import create_managed_session
 from .model_catalog import (
     prepare_whisper_model,
@@ -61,6 +68,8 @@ logger = logging.getLogger(__name__)
 LOG_THROTTLE_INTERVAL = 5
 
 __all__ = [
+    "FUN_ASR_MODEL_ID",
+    "FUN_ASR_RUNTIME",
     "LOG_THROTTLE_INTERVAL",
     "MANAGED_SHERPA_MODEL_IDS",
     "ModelResolution",
@@ -109,59 +118,44 @@ class TranscriptionError(RuntimeError):
         self.suggestion = suggestion
 
 
-def transcribe_audio(
-    task_id: str,
-    audio_path: str,
-    project_id: str,
-    language: str = "auto",
-    model_size: str | None = None,
-    runtime: str | None = None,
-):
+def transcribe_audio(task_id: str, audio_path: str, project_id: str, language: str = "auto", model_size: str | None = None, runtime: str | None = None):
     # Workflow preparation does not occupy the inference slot. Standalone
     # transcription already holds it; resource_slot is reentrant in that case.
     with task_manager.resource_slot(task_id, "ml"), ExitStack() as resources:
-        return _transcribe_audio(
-            task_id, audio_path, project_id, language, model_size, runtime, resources
-        )
+        return _transcribe_audio(task_id, audio_path, project_id, language, model_size, runtime, resources)
 
 
-def _transcribe_audio(
-    task_id, audio_path, project_id, language, model_size, runtime, resources
-):
-    """转写音频文件，生成字幕段（segments）。"""
-    task_manager.update_task(
-        task_id, step="loading_model", progress=2, message="正在准备转写模型..."
-    )
+def _transcribe_audio(task_id, audio_path, project_id, language, model_size, runtime, resources):
+    """
+    转写音频文件，生成字幕段（segments）。
+    增量写入：每生成一个 segment 立即写数据库，前端可实时拉取。
+    """
+    task_manager.update_task(task_id, step="loading_model", progress=2, message="正在准备转写模型...")
     task_manager.add_log(task_id, "info", "语音转写", "正在准备转写模型...")
 
     try:
         from .app_settings import get_effective_app_settings as get_app_settings
-
         app_settings = get_app_settings()
     except Exception:
         app_settings = {}
     resolution = resolve_transcription_model(
         model_size or "auto",
         language,
-        default_model=WHISPER_MODEL,
+        default_model=app_settings.get("default_model") or WHISPER_MODEL,
+        custom_model_path=app_settings.get("custom_model_path"),
+        coreml_model_path=app_settings.get("coreml_model_path"),
+        coreml_cli_path=app_settings.get("coreml_cli_path"),
     )
     if resolution.fell_back and model_size and model_size != "auto":
-        raise TranscriptionError(
-            "所选模型不可用，未改用其他模型",
-            "MODEL_UNAVAILABLE",
-            suggestion=resolution.fallback_reason,
-        )
+        raise TranscriptionError("所选模型不可用，未改用其他模型", "MODEL_UNAVAILABLE", suggestion=resolution.fallback_reason)
     model_id = resolution.model_id
-    runtime = runtime or (
-        app_settings.get("transcription_runtime_by_model") or {}
-    ).get(model_id)
+    runtime = runtime or (app_settings.get("transcription_runtime_by_model") or {}).get(model_id)
     if not runtime:
         if model_id == PARAKEET_MODEL_ID:
             runtime = "external_coreml"
-        elif (
-            model_id in QWEN_ASR_MODEL_IDS
-            and model_id not in MANAGED_SHERPA_MODEL_IDS
-        ):
+        elif model_id == FUN_ASR_MODEL_ID:
+            runtime = FUN_ASR_RUNTIME
+        elif model_id in QWEN_ASR_MODEL_IDS and model_id not in MANAGED_SHERPA_MODEL_IDS:
             runtime = "mlx"
         else:
             runtime = "cpu"
@@ -178,7 +172,7 @@ def _transcribe_audio(
             "warning",
             "语音转写",
             resolution.fallback_reason,
-            suggestion="请切换为其他本地转写模型后重试",
+            suggestion="可在转写设置中校验模型后重新选择",
         )
     else:
         task_manager.update_task(
@@ -195,18 +189,30 @@ def _transcribe_audio(
            VALUES (?,?,?,?,?,'running',datetime('now','localtime'))""",
         (run_id, project_id, task_id, model_id, language),
     )
+    project_timing = db_run.execute("SELECT range_start FROM projects WHERE id=?", (project_id,)).fetchone()
+    time_offset = float(project_timing["range_start"] or 0) if project_timing else 0.0
     db_run.commit()
     db_run.close()
-    time_offset = 0.0
-    logger.info(
-        "[Transcriber] 加载模型: %s, 来源: %s, 语言: %s",
-        model_id,
-        resolution.source,
-        language,
-    )
+    logger.info("[Transcriber] 加载模型: %s, 来源: %s, 语言: %s", model_id, resolution.source, language)
     task_manager.add_log(task_id, "info", "语音转写", f"加载模型: {model_id}")
 
-    if model_id in QWEN_ASR_MODEL_IDS and runtime == "mlx":
+    imported = None
+    if model_id.startswith("local:"):
+        from .local_models import validate_imported
+        imported = validate_imported(model_id)
+        if not imported["ready"]:
+            raise TranscriptionError("导入模型路径失效，需要重新定位", "MODEL_NEEDS_RELINK")
+
+    if model_id == FUN_ASR_MODEL_ID:
+        session = create_fun_asr_session(task_id, audio_path, language)
+        segments_gen = session.segments
+        detected_lang = session.detected_language
+        audio_duration = session.audio_duration
+        device = session.device
+        compute_type = session.compute_type
+        runtime_model_name = session.model_label
+        progress_start = session.progress_start
+    elif model_id in QWEN_ASR_MODEL_IDS and runtime == "mlx":
         from .qwen_mlx import create_qwen_mlx_session
 
         session = create_qwen_mlx_session(task_id, audio_path, language, model_id)
@@ -232,12 +238,24 @@ def _transcribe_audio(
         compute_type = session.compute_type
         runtime_model_name = session.model_label
         progress_start = session.progress_start
+    elif imported and imported["format"] == "memo-coreml":
+        session = create_parakeet_session(task_id,audio_path,language,PARAKEET_MODEL_ID,
+            coreml_model_dir=imported["path"],coreml_cli_path=imported.get("cli_path"),runtime="external_coreml")
+        segments_gen=session.segments; detected_lang=session.detected_language; audio_duration=session.audio_duration
+        device=session.device; compute_type=session.compute_type; runtime_model_name=imported["display_name"]; progress_start=session.progress_start
+    elif imported and imported["format"] == "sherpa-onnx":
+        session = create_parakeet_session(task_id,audio_path,language,PARAKEET_ONNX_MODEL_ID,
+            runtime=runtime,onnx_model_dir=imported["path"])
+        segments_gen=session.segments; detected_lang=session.detected_language; audio_duration=session.audio_duration
+        device=session.device; compute_type=session.compute_type; runtime_model_name=imported["display_name"]; progress_start=session.progress_start
     elif model_id in PARAKEET_MODEL_IDS:
         session = create_parakeet_session(
             task_id,
             audio_path,
             language,
             model_id,
+            coreml_model_dir=app_settings.get("coreml_model_path"),
+            coreml_cli_path=app_settings.get("coreml_cli_path"),
             runtime=runtime,
         )
         segments_gen = session.segments
@@ -247,33 +265,31 @@ def _transcribe_audio(
         compute_type = session.compute_type
         runtime_model_name = session.model_label
         progress_start = session.progress_start
-    elif runtime == "mlx":
+    elif runtime == "mlx" or (imported and imported["format"] == "mlx"):
         from types import SimpleNamespace
 
         import mlx_whisper
-
-        model_path = resolve_local_model(model_id, "mlx")
-        if model_path is None:
-            prepare_whisper_model(task_id, model_id, "mlx")
+        if imported:
+            model_path=imported["path"]
+        else:
             model_path = resolve_local_model(model_id, "mlx")
-        if model_path is None:
-            raise TranscriptionError(
-                "Apple GPU 模型准备完成后仍无法加载",
-                "MODEL_INSTALL_FAILED",
-                suggestion="请重新下载此模型的 Apple GPU 格式",
-            )
+            if model_path is None:
+                prepare_whisper_model(task_id, model_id, "mlx")
+                model_path = resolve_local_model(model_id, "mlx")
+            if model_path is None:
+                raise TranscriptionError(
+                    "Apple GPU 模型准备完成后仍无法加载",
+                    "MODEL_INSTALL_FAILED",
+                    suggestion="请在模型中心修复此模型的 Apple GPU 格式",
+                )
         lang = None if language in ("auto", "") else language
         result = mlx_whisper.transcribe(
-            audio_path,
-            path_or_hf_repo=model_path,
-            language=lang,
-            word_timestamps=True,
+            audio_path, path_or_hf_repo=model_path,
+            language=lang, word_timestamps=True,
         )
         mlx_segments = [
             SimpleNamespace(
-                start=float(item["start"]),
-                end=float(item["end"]),
-                text=str(item["text"]),
+                start=float(item["start"]), end=float(item["end"]), text=str(item["text"]),
                 words=item.get("words") or [],
             )
             for item in result.get("segments", [])
@@ -298,27 +314,19 @@ def _transcribe_audio(
                 raise TranscriptionError(
                     "CPU 模型准备完成后仍无法加载",
                     "MODEL_INSTALL_FAILED",
-                    suggestion="请重新下载此模型的 CPU 格式",
+                    suggestion="请在模型中心修复此模型的 CPU 格式",
                 )
             load_target = str(local_model)
         from .model_pool import cpu_model_pool, model_identity
-
         load_started = time_module.perf_counter()
-        model, reused = resources.enter_context(
-            cpu_model_pool.lease(
-                model_identity(str(load_target), device, compute_type),
-                lambda: WhisperModel(load_target, device=device, compute_type=compute_type),
-            )
-        )
-        task_manager.update_task(
-            task_id,
-            details={
-                "model_cache_hit": reused,
-                "model_load_seconds": round(
-                    time_module.perf_counter() - load_started, 3
-                ),
-            },
-        )
+        model, reused = resources.enter_context(cpu_model_pool.lease(
+            model_identity(str(load_target), device, compute_type),
+            lambda: WhisperModel(load_target, device=device, compute_type=compute_type),
+        ))
+        task_manager.update_task(task_id, details={
+            "model_cache_hit": reused,
+            "model_load_seconds": round(time_module.perf_counter() - load_started, 3),
+        })
         task_manager.checkpoint(task_id)
 
         lang = None if language in ("auto", "") else language
@@ -336,21 +344,14 @@ def _transcribe_audio(
         progress_start = 5.0
 
     preparation_seconds = time_module.perf_counter() - inference_started
-    task_manager.update_task(
-        task_id, details={"preparation_seconds": round(preparation_seconds, 3)}
-    )
+    task_manager.update_task(task_id, details={"preparation_seconds": round(preparation_seconds, 3)})
     logger.info(
         "[Transcriber] 运行模型: %s, 设备: %s, 精度: %s",
-        runtime_model_name,
-        device,
-        compute_type,
+        runtime_model_name, device, compute_type,
     )
 
     task_manager.update_task(
-        task_id,
-        step="transcribing",
-        progress=progress_start,
-        message="正在转写音频...",
+        task_id, step="transcribing", progress=progress_start, message="正在转写音频...",
         details={
             "mode": "incremental",
             "model": runtime_model_name,
@@ -361,83 +362,62 @@ def _transcribe_audio(
             "is_postprocessing": False,
             "generated_segments": 0,
             "current_time": 0,
-        },
+        }
     )
     task_manager.add_log(
-        task_id,
-        "info",
-        "语音转写",
+        task_id, "info", "语音转写",
         f"模型 {runtime_model_name} 已加载，设备: {device}",
-        detail=f"精度: {compute_type}",
+        detail=f"精度: {compute_type}"
     )
 
-    logger.info(
-        f"[Transcriber] 检测到语言: {detected_lang}, 音频时长: {audio_duration:.1f}s"
-    )
+    logger.info(f"[Transcriber] 检测到语言: {detected_lang}, 音频时长: {audio_duration:.1f}s")
     task_manager.add_log(
-        task_id,
-        "info",
-        "语音转写",
-        f"检测到语言: {detected_lang}, 音频时长: {audio_duration:.1f}秒",
+        task_id, "info", "语音转写",
+        f"检测到语言: {detected_lang}, 音频时长: {audio_duration:.1f}秒"
     )
 
-    # 核心：逐段迭代，边转写边写入暂存表
+    # 核心：逐段迭代，边转写边写入
     generated_count = 0
     last_log_time = time_module.time()
 
     from .transcription_buffer import DraftWriter
-
     with DraftWriter() as draft_writer:
         for segment in segments_gen:
             task_manager.checkpoint(task_id)
             current_time = segment.end
 
+            # Write to a run-scoped staging table. Existing published subtitles are
+            # intentionally untouched until this run has a valid final result.
             seg_id = str(uuid.uuid4())
             text = segment.text.strip()
             if not text:
                 continue
             generated_count += 1
             timings_json = json.dumps(
-                _segment_word_timings(segment, time_offset),
-                ensure_ascii=False,
-                separators=(",", ":"),
+                _segment_word_timings(segment, time_offset), ensure_ascii=False, separators=(",", ":")
             )
 
-            flushed = draft_writer.append(
-                (
-                    seg_id,
-                    run_id,
-                    project_id,
-                    generated_count,
-                    segment.start + time_offset,
-                    segment.end + time_offset,
-                    text,
-                    timings_json,
-                )
-            )
+            flushed = draft_writer.append((
+                seg_id, run_id, project_id, generated_count, segment.start + time_offset,
+                segment.end + time_offset, text, timings_json,
+            ))
             if not flushed:
                 continue
 
+            # 不同引擎会预留各自的模型准备/CLI 运行进度区间。
             progress_span = 90 - progress_start
-            progress = min(
-                progress_start
-                + (current_time / max(audio_duration, 1)) * progress_span,
-                90,
-            )
+            progress = min(progress_start + (current_time / max(audio_duration, 1)) * progress_span, 90)
 
+            # 节流：每 5 条或每 3 秒写一次日志
             now = time_module.time()
-            should_log = (generated_count % LOG_THROTTLE_INTERVAL == 0) or (
-                now - last_log_time > 3
-            )
+            should_log = (generated_count % LOG_THROTTLE_INTERVAL == 0) or (now - last_log_time > 3)
             log_msg = ""
             if should_log:
-                log_msg = (
-                    f"已转写到 {_fmt_time(current_time)} / {_fmt_time(audio_duration)}，"
-                    f"生成 {generated_count} 条字幕"
-                )
+                log_msg = f"已转写到 {_fmt_time(current_time)} / {_fmt_time(audio_duration)}，生成 {generated_count} 条字幕"
                 last_log_time = now
                 logger.info(f"[Transcriber] {log_msg}")
 
+            # Publish only committed draft counts; avoid per-segment SQLite writes.
             detail_update = {
                 "mode": "incremental",
                 "is_generating_segments": True,
@@ -456,10 +436,7 @@ def _transcribe_audio(
                 task_id,
                 step="transcribing",
                 progress=progress,
-                message=(
-                    f"正在转写 {_fmt_time(current_time)} / {_fmt_time(audio_duration)}，"
-                    f"已生成 {generated_count} 条字幕"
-                ),
+                message=f"正在转写 {_fmt_time(current_time)} / {_fmt_time(audio_duration)}，已生成 {generated_count} 条字幕",
                 details=detail_update,
             )
             if should_log:
@@ -471,8 +448,7 @@ def _transcribe_audio(
         db_empty.execute(
             """UPDATE transcription_runs SET status='failed', error_code='NO_SPEECH_RESULT',
                error_message='模型没有生成有效字幕', finished_at=datetime('now','localtime')
-               WHERE id=?""",
-            (run_id,),
+               WHERE id=?""", (run_id,),
         )
         db_empty.commit()
         db_empty.close()
@@ -485,40 +461,38 @@ def _transcribe_audio(
     # ── 阶段 1 完成 ──
     logger.info(f"[Transcriber] 增量转写完成: {generated_count} 条原始字幕")
     task_manager.update_task(
-        task_id,
-        step="postprocessing",
-        progress=90,
+        task_id, step="postprocessing", progress=90,
         message="转写完成，正在进行字幕后处理...",
         details={
             "is_generating_segments": False,
             "is_postprocessing": True,
             "generated_segments": generated_count,
-        },
+        }
     )
-    task_manager.add_log(
-        task_id, "info", "字幕后处理", f"转写完成, {generated_count} 条原始字幕, 开始后处理"
-    )
+    task_manager.add_log(task_id, "info", "字幕后处理", f"转写完成, {generated_count} 条原始字幕, 开始后处理")
 
     # ── 阶段 2：最终后处理 ──
     task_manager.checkpoint(task_id)
+    # Read only this run's staged segments.
     db_reader = get_db()
     draft_rows = db_reader.execute(
         "SELECT id, idx, start, end, text, timings_json FROM transcription_segments WHERE run_id=? ORDER BY idx",
-        (run_id,),
+        (run_id,)
     ).fetchall()
     db_reader.close()
 
-    draft_segments = [
-        {
+    # 转为 _post_process 需要的格式
+    draft_segments = []
+    for r in draft_rows:
+        draft_segments.append({
             "id": r["id"],
             "start": r["start"],
             "end": r["end"],
             "text": r["text"],
             "timings": _decode_timings(r["timings_json"]),
-        }
-        for r in draft_rows
-    ]
+        })
 
+    needs_review = False
     if draft_segments:
         processed, merge_count, split_count = _post_process_segments(draft_segments)
         task_manager.checkpoint(task_id)
@@ -527,40 +501,27 @@ def _transcribe_audio(
         db_writer = get_db()
         try:
             db_writer.execute("BEGIN IMMEDIATE")
-            db_writer.execute("DELETE FROM segments WHERE project_id=?", (project_id,))
-            for seg_index, seg in enumerate(processed):
-                if seg_index % 20 == 0:
-                    task_manager.checkpoint(task_id)
-                db_writer.execute(
-                    """INSERT INTO segments
-                       (id,project_id,idx,start,end,raw_text,clean_text,is_draft,source_stage,transcription_run_id)
-                       VALUES (?,?,?,?,?,?,?,0,'postprocessed',?)""",
-                    (
-                        str(uuid.uuid4()),
-                        project_id,
-                        seg["index"],
-                        seg["start"],
-                        seg["end"],
-                        seg["text"],
-                        seg["text"],
-                        run_id,
-                    ),
-                )
+            existing = db_writer.execute("SELECT 1 FROM segments WHERE project_id=? LIMIT 1", (project_id,)).fetchone()
+            needs_review = existing is not None
+            if not needs_review:
+                for seg_index, seg in enumerate(processed):
+                    if seg_index % 20 == 0:
+                        task_manager.checkpoint(task_id)
+                    db_writer.execute(
+                        """INSERT INTO segments
+                           (id,project_id,idx,start,end,raw_text,clean_text,is_draft,source_stage,transcription_run_id)
+                           VALUES (?,?,?,?,?,?,?,0,'postprocessed',?)""",
+                        (str(uuid.uuid4()), project_id, seg["index"], seg["start"], seg["end"], seg["text"], seg["text"], run_id)
+                    )
+                db_writer.execute("UPDATE projects SET edit_revision=COALESCE(edit_revision,0)+1, updated_at=datetime('now','localtime') WHERE id=?", (project_id,))
             db_writer.execute(
-                "UPDATE projects SET updated_at=datetime('now','localtime') WHERE id=?",
-                (project_id,),
+                """UPDATE transcription_runs SET status=?, segments_count=?, result_json=?,
+                   finished_at=datetime('now','localtime') WHERE id=?""",
+                ('candidate' if needs_review else 'success', len(processed), json.dumps(processed, ensure_ascii=False), run_id),
             )
-            db_writer.execute(
-                """UPDATE transcription_runs
-                      SET status='success', segments_count=?,
-                          finished_at=datetime('now','localtime')
-                    WHERE id=?""",
-                (len(processed), run_id),
-            )
-            db_writer.execute(
-                "UPDATE transcription_segments SET is_draft=0 WHERE run_id=?",
-                (run_id,),
-            )
+            # Preserve the model's raw segment/token timeline for diagnostics and
+            # future reprocessing.  Published subtitles remain in ``segments``.
+            db_writer.execute("UPDATE transcription_segments SET is_draft=0 WHERE run_id=?", (run_id,))
             task_manager.checkpoint(task_id)
             db_writer.commit()
         except Exception:
@@ -569,6 +530,7 @@ def _transcribe_audio(
         finally:
             db_writer.close()
 
+        # 计算统计
         durations = [s["end"] - s["start"] for s in processed]
         min_dur = min(durations) if durations else 0
         max_dur = max(durations) if durations else 0
@@ -581,11 +543,9 @@ def _transcribe_audio(
             f"[Transcriber] 后处理完成: {total_final} 条（合并 {merge_count}, 拆分 {split_count}）"
         )
         task_manager.add_log(
-            task_id,
-            "info",
-            "字幕后处理",
+            task_id, "info", "字幕后处理",
             f"后处理完成: {total_final} 条字幕（合并 {merge_count} 条，拆分 {split_count} 条）",
-            detail=f"最短: {min_dur:.1f}s, 最长: {max_dur:.1f}s, 平均: {avg_dur:.1f}s",
+            detail=f"最短: {min_dur:.1f}s, 最长: {max_dur:.1f}s, 平均: {avg_dur:.1f}s"
         )
     else:
         total_final = 0
@@ -594,11 +554,10 @@ def _transcribe_audio(
         too_short_count = too_long_count = 0
         task_manager.add_log(task_id, "warning", "字幕后处理", "没有找到草稿字幕，跳过")
 
+    # ── 完成 ──
     task_manager.update_task(
-        task_id,
-        step="transcription_done",
-        progress=100,
-        message=f"转写完成（{detected_lang}），共 {total_final} 条字幕",
+        task_id, step="transcription_done", progress=100,
+        message=(f"新转写候选已生成，共 {total_final} 条；原字幕已保留" if needs_review else f"转写完成（{detected_lang}），共 {total_final} 条字幕"),
         details={
             "mode": "incremental",
             "is_generating_segments": False,
@@ -627,17 +586,15 @@ def _transcribe_audio(
                 "split_long_segments": split_count,
             },
             "run_id": run_id,
+            "candidate_ready": needs_review,
             "elapsed_seconds": round(time_module.time() - started_at, 2),
-            "realtime_factor": round(
-                (time_module.time() - started_at) / max(audio_duration, 0.1), 3
-            ),
-        },
+            "realtime_factor": round((time_module.time() - started_at) / max(audio_duration, 0.1), 3),
+        }
     )
     task_manager.add_log(
-        task_id,
-        "info",
-        "转写完成",
-        f"语言: {detected_lang}, 共 {total_final} 条字幕, 音频时长: {audio_duration:.1f}秒",
+        task_id, "info", "转写完成",
+        f"语言: {detected_lang}, 共 {total_final} 条字幕, 音频时长: {audio_duration:.1f}秒"
     )
 
     return processed if draft_segments else []
+

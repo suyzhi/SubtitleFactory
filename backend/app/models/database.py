@@ -1,5 +1,5 @@
 """
-字幕工厂（简洁版）- 数据库初始化和管理
+字幕工厂 - 数据库初始化和管理
 """
 
 import json
@@ -18,7 +18,11 @@ _INIT_DB_LOCK = threading.RLock()
 
 
 def get_db(timeout: float = 30) -> sqlite3.Connection:
-    """获取数据库连接（WAL 模式，线程安全）"""
+    """获取数据库连接（WAL模式，线程安全）"""
+    # Playlist production deliberately overlaps downloads, transcription and
+    # network AI work.  Their short write transactions can occasionally meet
+    # at the same instant, so wait for the current writer instead of turning a
+    # harmless contention window into a failed video stage.
     conn = sqlite3.connect(str(DB_PATH), timeout=timeout, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.execute(f"PRAGMA busy_timeout={max(0, int(timeout * 1000))}")
@@ -29,6 +33,9 @@ def get_db(timeout: float = 30) -> sqlite3.Connection:
 
 def init_db():
     """初始化数据库表结构（含迁移）"""
+    # Several project-library requests can arrive together during startup.
+    # Serialize schema setup inside one backend process so two worker threads
+    # cannot both observe a half-migrated database and apply the same seed row.
     with _INIT_DB_LOCK:
         _init_db_unlocked()
 
@@ -44,10 +51,15 @@ def _init_db_unlocked():
             source_url TEXT,
             video_path TEXT,
             audio_path TEXT,
+            thumbnail_url TEXT,
+            thumbnail_path TEXT,
+            group_name TEXT,
+            media_mode TEXT NOT NULL DEFAULT 'local',
             language TEXT DEFAULT 'auto',
             target_language TEXT DEFAULT 'zh',
             created_at TEXT NOT NULL,
-            updated_at TEXT NOT NULL
+            updated_at TEXT NOT NULL,
+            deleted_at TEXT
         );
 
         CREATE TABLE IF NOT EXISTS segments (
@@ -59,6 +71,8 @@ def _init_db_unlocked():
             raw_text TEXT DEFAULT '',
             clean_text TEXT DEFAULT '',
             translated_text TEXT DEFAULT '',
+            speaker TEXT DEFAULT '',
+            locked INTEGER DEFAULT 0,
             is_draft INTEGER DEFAULT 0,
             source_stage TEXT DEFAULT 'final',
             transcription_run_id TEXT,
@@ -116,14 +130,19 @@ def _init_db_unlocked():
             available_actions TEXT DEFAULT '[]',
             parent_task_id TEXT,
             attempt INTEGER DEFAULT 1,
-            priority INTEGER NOT NULL DEFAULT 0,
-            resource_class TEXT NOT NULL DEFAULT 'io',
-            max_attempts INTEGER NOT NULL DEFAULT 1,
-            next_retry_at TEXT,
             details TEXT DEFAULT '{}',
             logs TEXT DEFAULT '[]',
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS ai_settings (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            provider TEXT NOT NULL DEFAULT 'deepseek',
+            base_url TEXT NOT NULL DEFAULT 'https://api.deepseek.com/v1',
+            api_key TEXT NOT NULL DEFAULT '',
+            model TEXT NOT NULL DEFAULT 'deepseek-chat',
+            updated_at TEXT NOT NULL DEFAULT ''
         );
 
         CREATE TABLE IF NOT EXISTS app_settings (
@@ -138,8 +157,6 @@ def _init_db_unlocked():
             api_key TEXT NOT NULL DEFAULT '',
             model TEXT NOT NULL,
             enabled INTEGER NOT NULL DEFAULT 1,
-            thinking_enabled INTEGER NOT NULL DEFAULT 0,
-            has_api_key INTEGER NOT NULL DEFAULT 0,
             last_test_status TEXT DEFAULT '',
             last_test_at TEXT DEFAULT '',
             last_latency_ms INTEGER DEFAULT 0,
@@ -159,23 +176,105 @@ def _init_db_unlocked():
             updated_at TEXT NOT NULL,
             PRIMARY KEY (task_id, batch_index)
         );
+
+        CREATE TABLE IF NOT EXISTS imported_models (
+            id TEXT PRIMARY KEY,
+            display_name TEXT NOT NULL,
+            family TEXT NOT NULL,
+            version TEXT DEFAULT '',
+            format TEXT NOT NULL,
+            path TEXT NOT NULL,
+            cli_path TEXT,
+            runtimes_json TEXT NOT NULL DEFAULT '[]',
+            fingerprint TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'ready',
+            last_error TEXT DEFAULT '',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS segment_revisions (
+            id TEXT PRIMARY KEY,
+            project_id TEXT NOT NULL,
+            operation TEXT NOT NULL,
+            segments_json TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_revisions_project ON segment_revisions(project_id, created_at DESC);
     """)
+    # 迁移：为旧表添加 is_draft 和 source_stage 列（如果不存在）
+    try:
+        conn.execute("ALTER TABLE segments ADD COLUMN is_draft INTEGER DEFAULT 0")
+    except sqlite3.OperationalError:
+        pass  # 列已存在
+    try:
+        conn.execute("ALTER TABLE segments ADD COLUMN source_stage TEXT DEFAULT 'final'")
+        # 旧数据标记为 final
+        conn.execute("UPDATE segments SET source_stage = 'final' WHERE source_stage IS NULL")
+    except sqlite3.OperationalError:
+        pass  # 列已存在
+    try:
+        conn.execute("ALTER TABLE segments ADD COLUMN transcription_run_id TEXT")
+    except sqlite3.OperationalError:
+        pass
+    for column in ("thumbnail_url", "thumbnail_path", "group_name", "deleted_at"):
+        try:
+            conn.execute(f"ALTER TABLE projects ADD COLUMN {column} TEXT")
+        except sqlite3.OperationalError:
+            pass
+    try:
+        conn.execute(
+            "ALTER TABLE projects ADD COLUMN media_mode TEXT NOT NULL DEFAULT 'local'"
+        )
+    except sqlite3.OperationalError:
+        pass
+    for column, definition in [
+        ("last_test_status", "TEXT DEFAULT ''"),
+        ("last_test_at", "TEXT DEFAULT ''"),
+        ("last_latency_ms", "INTEGER DEFAULT 0"),
+    ]:
+        try:
+            conn.execute(f"ALTER TABLE ai_settings ADD COLUMN {column} {definition}")
+        except sqlite3.OperationalError:
+            pass
+
+    run_columns = {row[1] for row in conn.execute("PRAGMA table_info(transcription_runs)")}
+    if "result_json" not in run_columns:
+        conn.execute("ALTER TABLE transcription_runs ADD COLUMN result_json TEXT")
+
+    # Migrate the single v0.2 AI configuration into its provider card once.
+    legacy = conn.execute("SELECT * FROM ai_settings WHERE id=1").fetchone()
+    if legacy and not conn.execute("SELECT 1 FROM ai_provider_configs LIMIT 1").fetchone():
+        conn.execute(
+            """INSERT OR IGNORE INTO ai_provider_configs
+               (provider_id,base_url,api_key,model,updated_at,last_test_status,last_test_at,last_latency_ms)
+               VALUES (?,?,?,?,?,?,?,?)""",
+            (legacy["provider"], legacy["base_url"], legacy["api_key"], legacy["model"],
+             legacy["updated_at"], legacy["last_test_status"], legacy["last_test_at"], legacy["last_latency_ms"]),
+        )
 
     conn.commit()
     run_migrations(conn, Path(DB_PATH))
+    # Legacy web projects retain subtitles/audio; local media can be downloaded on demand.
+    conn.execute("UPDATE projects SET media_mode='local' WHERE media_mode='web'")
     conn.commit()
     conn.close()
+    print(f"[DB] 数据库已初始化: {DB_PATH}")
 
 
 def mark_interrupted_tasks():
-    """Finalize every non-terminal worker left by the previous backend process."""
+    """Finalize every non-terminal worker left by the previous backend process.
+
+    Task rows are the public history, while several feature tables keep their
+    own staging state.  Recovery happens before this process can submit new
+    work, so every still-active row belongs to the previous process and can be
+    reconciled in one transaction without racing a live worker.
+    """
     conn = get_db()
-    rows = [
-        dict(row)
-        for row in conn.execute(
-            "SELECT * FROM tasks WHERE status IN ('pending','running','paused')"
-        )
-    ]
+    rows = [dict(row) for row in conn.execute(
+        "SELECT * FROM tasks WHERE status IN ('pending','running','paused')"
+    )]
     now = time.strftime("%Y-%m-%d %H:%M:%S")
 
     def json_object(value) -> dict:
@@ -192,6 +291,7 @@ def mark_interrupted_tasks():
         except (TypeError, ValueError, json.JSONDecodeError):
             return []
 
+    settings_tasks = {"prepare_model"}
     for row in rows:
         previous_status = str(row.get("status") or "running")
         details = json_object(row.get("details"))
@@ -200,8 +300,12 @@ def mark_interrupted_tasks():
             "interrupted_at": now,
             "published_data_preserved": True,
         }
-        suggestion = "项目、已生成字幕和已完成阶段均已保留；请重新开始任务"
-        error = "应用在任务执行期间退出"
+        if previous_status == "paused":
+            suggestion = "该任务在退出前已暂停；请检查参数后手动重新开始，应用不会擅自继续"
+            error = "应用退出时任务仍处于暂停状态"
+        else:
+            suggestion = "项目、已发布字幕和已完成阶段均已保留；请从对应工作区重新开始"
+            error = "应用在任务执行期间退出"
         details["failure_suggestion"] = suggestion
 
         logs = json_array(row.get("logs"))
@@ -215,11 +319,13 @@ def mark_interrupted_tasks():
         })
 
         actions = [
-            action
-            for action in json_array(row.get("available_actions"))
+            action for action in json_array(row.get("available_actions"))
             if isinstance(action, str)
         ]
-        if row.get("project_id") and "retry" not in actions:
+        if row.get("type") in settings_tasks:
+            if "open_settings" not in actions:
+                actions.append("open_settings")
+        elif row.get("project_id") and "retry" not in actions:
             actions.append("retry")
         recoverable = bool(actions)
         conn.execute(
@@ -229,16 +335,14 @@ def mark_interrupted_tasks():
                       details=?,logs=?,next_retry_at=NULL,updated_at=?
                 WHERE id=?""",
             (
-                error,
-                int(recoverable),
-                json.dumps(actions, ensure_ascii=False),
+                error, int(recoverable), json.dumps(actions, ensure_ascii=False),
                 json.dumps(details, ensure_ascii=False),
-                json.dumps(logs, ensure_ascii=False),
-                now,
-                row["id"],
+                json.dumps(logs, ensure_ascii=False), now, row["id"],
             ),
         )
 
+    # A transcription run is an unpublished staging area.  Preserve its draft
+    # segments for diagnostics, but never leave the run claiming to be live.
     conn.execute(
         """UPDATE transcription_runs
               SET status='failed',error_code='APP_INTERRUPTED',
@@ -247,6 +351,9 @@ def mark_interrupted_tasks():
             WHERE status IN ('pending','running')""",
         (now,),
     )
+    # Network AI calls can have an uncertain remote outcome after a crash.
+    # Mark their local staging rows failed so a later user-confirmed retry can
+    # reuse only known-successful cached batches.
     conn.execute(
         """UPDATE ai_batch_results
               SET status='failed',error='应用在 AI 请求期间退出，未自动重试',updated_at=?
@@ -260,6 +367,13 @@ def mark_interrupted_tasks():
 
 def segment_to_dict(row) -> dict:
     """将 segments 行转为字典"""
+    is_draft = False
+    source_stage = "final"
+    try:
+        is_draft = bool(row["is_draft"])
+        source_stage = row["source_stage"] or "final"
+    except (IndexError, KeyError):
+        pass
     row_keys = set(row.keys())
     return {
         "id": row["id"],
@@ -270,8 +384,11 @@ def segment_to_dict(row) -> dict:
         "raw_text": row["raw_text"],
         "clean_text": row["clean_text"],
         "translated_text": row["translated_text"],
-        "is_draft": bool(row["is_draft"]) if "is_draft" in row_keys else False,
-        "source_stage": (row["source_stage"] or "final") if "source_stage" in row_keys else "final",
+        "speaker": row["speaker"],
+        "speaker_id": row["speaker_id"] if "speaker_id" in row_keys else None,
+        "locked": bool(row["locked"]),
+        "is_draft": is_draft,
+        "source_stage": source_stage,
     }
 
 
@@ -301,23 +418,56 @@ def _youtube_video_id(source_url: str | None) -> str | None:
     return video_id if video_id and _YOUTUBE_VIDEO_ID.fullmatch(video_id) else None
 
 
+def _youtube_thumbnail_url(source_url: str | None) -> str | None:
+    """Derive a stable public thumbnail for common legacy YouTube URLs."""
+    video_id = _youtube_video_id(source_url)
+    return f"https://i.ytimg.com/vi/{video_id}/hqdefault.jpg" if video_id else None
+
+
 def project_to_dict(row) -> dict:
     """将 projects 行转为字典"""
+    row_keys = set(row.keys())
+    source_thumbnail_url = row["thumbnail_url"] if "thumbnail_url" in row_keys else None
+    thumbnail_path = row["thumbnail_path"] if "thumbnail_path" in row_keys else None
+    group_name = row["group_name"] if "group_name" in row_keys else None
+    deleted_at = row["deleted_at"] if "deleted_at" in row_keys else None
+    media_mode = "local"
+    thumbnail_url = source_thumbnail_url
+    if not thumbnail_url and row["source_type"] == "youtube":
+        thumbnail_url = _youtube_thumbnail_url(row["source_url"])
+    thumbnail_access_url = None
+    if thumbnail_path and os.path.isfile(thumbnail_path):
+        thumbnail_url = f"/api/projects/{row['id']}/thumbnail"
+        from ..security import signed_media_url
+        thumbnail_access_url = signed_media_url(thumbnail_url)
+
+    video_url = None
+    if row["video_path"] and os.path.isfile(row["video_path"]):
+        from ..security import signed_media_url
+        video_url = signed_media_url(f"/api/projects/{row['id']}/video")
+
     return {
         "id": row["id"],
         "title": row["title"],
         "source_type": row["source_type"],
         "source_url": row["source_url"],
         "video_path": row["video_path"],
+        "video_url": video_url,
         "audio_path": row["audio_path"],
+        "thumbnail_url": thumbnail_url,
+        "thumbnail_access_url": thumbnail_access_url,
+        "group_name": group_name,
         "language": row["language"],
         "target_language": row["target_language"],
         "created_at": row["created_at"],
         "updated_at": row["updated_at"],
+        "deleted_at": deleted_at,
+        "edit_revision": int(row["edit_revision"] or 0) if "edit_revision" in row_keys else 0,
+        "media_status": (row["media_status"] or "ready") if "media_status" in row_keys else "ready",
+        "media_mode": media_mode,
         "youtube_video_id": (
             _youtube_video_id(row["source_url"])
-            if row["source_type"] == "youtube"
-            else None
+            if row["source_type"] == "youtube" else None
         ),
         "video_available": bool(row["video_path"] and os.path.isfile(row["video_path"])),
         "audio_available": bool(row["audio_path"] and os.path.isfile(row["audio_path"])),

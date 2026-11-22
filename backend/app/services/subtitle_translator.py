@@ -1,5 +1,5 @@
 """
-字幕工厂（简洁版）- AI 字幕翻译服务
+字幕工厂 - AI 字幕翻译服务
 
 调用 LLM API 将字幕翻译为目标语言。
 严格保持时间轴不变，翻译自然且适合字幕显示。
@@ -8,6 +8,7 @@
 import json
 import logging
 import time
+import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from ..models.database import get_db
@@ -18,18 +19,13 @@ from .ai_providers import (
     prepare_chat_payload,
     raise_for_provider_status,
 )
+from .editor import SEGMENT_COLUMNS
 from .subtitle_cleaner import AIOutputLengthError, _validate_batch_results
 
 logger = logging.getLogger(__name__)
 
 
-def translate_subtitles(
-    task_id: str,
-    project_id: str,
-    target_language: str = "zh",
-    provider_id: str | None = None,
-    model: str | None = None,
-):
+def translate_subtitles(task_id: str, project_id: str, target_language: str = "zh", provider_id: str | None = None, model: str | None = None):
     """
     翻译项目字幕。
     使用 clean_text（如果有）否则用 raw_text。
@@ -38,9 +34,10 @@ def translate_subtitles(
     db = get_db()
     rows = db.execute(
         """SELECT id, idx, raw_text, clean_text FROM segments
-           WHERE project_id = ? ORDER BY idx""",
-        (project_id,),
+           WHERE project_id = ? AND locked = 0 ORDER BY idx""",
+        (project_id,)
     ).fetchall()
+    project = db.execute("SELECT language,edit_revision FROM projects WHERE id=?", (project_id,)).fetchone()
     db.close()
 
     if not rows:
@@ -48,6 +45,7 @@ def translate_subtitles(
         task_manager.add_log(task_id, "info", "translating", "没有需要翻译的字幕")
         return []
 
+    base_revision = int(project["edit_revision"] or 0) if project else 0
     ai = assigned_provider("translate", provider_id, model)
 
     system_prompt = f"""你是专业视频字幕翻译助手。请把字幕翻译成目标语言。
@@ -74,18 +72,15 @@ def translate_subtitles(
 [{{"id": "1", "translated_text": "..."}}]"""
 
     all_segments = []
-    for row in rows:
-        source_text = row["clean_text"] if row["clean_text"] else row["raw_text"]
-        all_segments.append({"id": str(row["idx"]), "text": source_text})
+    for r in rows:
+        source_text = r["clean_text"] if r["clean_text"] else r["raw_text"]
+        all_segments.append({"id": str(r["idx"]), "text": source_text})
 
     total = len(all_segments)
     logger.info(f"[Translator] 开始翻译 {total} 条字幕 -> {target_language}")
     task_manager.add_log(
-        task_id,
-        "info",
-        "translating",
-        f"开始翻译 {total} 条字幕",
-        detail=f"目标语言: {target_language}",
+        task_id, "info", "translating",
+        f"开始翻译 {total} 条字幕", detail=f"目标语言: {target_language}"
     )
 
     # 40 条一批，并额外附带前后各 3 条上下文。相比逐句翻译能显著改善
@@ -96,114 +91,32 @@ def translate_subtitles(
     retry_count = 0
     total_batches = (total + batch_size - 1) // batch_size
 
-    batches = [
-        all_segments[i : i + batch_size] for i in range(0, total, batch_size)
-    ]
-
-    def process(current_batch: int, batch: list):
-        start = (current_batch - 1) * batch_size
-        before = all_segments[max(0, start - 3) : start]
-        after = all_segments[start + len(batch) : start + len(batch) + 3]
-        fingerprint = json.dumps(
-            {
-                "items": batch,
-                "target_language": target_language,
-                "provider": ai["provider"],
-                "model": ai["model"],
-            },
-            ensure_ascii=False,
-            sort_keys=True,
-        )
-        db = get_db()
-        cached = db.execute(
-            """SELECT result_json FROM ai_batch_results
-               WHERE project_id=? AND operation='translate'
-                 AND input_fingerprint=? AND status='success'
-               ORDER BY updated_at DESC LIMIT 1""",
-            (project_id, fingerprint),
-        ).fetchone()
+    batches=[all_segments[i:i+batch_size] for i in range(0,total,batch_size)]
+    def process(current_batch:int,batch:list):
+        start=(current_batch-1)*batch_size
+        before=all_segments[max(0,start-3):start]; after=all_segments[start+len(batch):start+len(batch)+3]
+        fingerprint=json.dumps({"items":batch,"target_language":target_language,"provider":ai["provider"],"model":ai["model"]},ensure_ascii=False,sort_keys=True)
+        db=get_db();cached=db.execute("SELECT result_json FROM ai_batch_results WHERE project_id=? AND operation='translate' AND input_fingerprint=? AND status='success' ORDER BY updated_at DESC LIMIT 1",(project_id,fingerprint)).fetchone()
         if cached:
-            try:
-                result = json.loads(cached["result_json"])
-                db.close()
-                return current_batch, result, None
-            except (TypeError, ValueError, json.JSONDecodeError):
-                pass
-        db.execute(
-            """INSERT OR REPLACE INTO ai_batch_results
-               (task_id,project_id,operation,batch_index,input_fingerprint,
-                status,result_json,attempts,error,updated_at)
-               VALUES (?,?,?,?,?,'running','[]',0,'',datetime('now','localtime'))""",
-            (task_id, project_id, "translate", current_batch, fingerprint),
-        )
-        db.commit()
-        db.close()
+            try: result=json.loads(cached['result_json']);db.close();return current_batch,result,None
+            except (TypeError,ValueError,json.JSONDecodeError): pass
+        db.execute("INSERT OR REPLACE INTO ai_batch_results (task_id,project_id,operation,batch_index,input_fingerprint,status,result_json,attempts,error,updated_at) VALUES (?,?,?,?,?,'running','[]',0,'',datetime('now','localtime'))",(task_id,project_id,'translate',current_batch,fingerprint));db.commit();db.close()
         try:
-            result = _call_llm_translate(
-                batch, system_prompt, ai, before, after, task_id=task_id
-            )
-            db = get_db()
-            db.execute(
-                """UPDATE ai_batch_results
-                      SET status='success',result_json=?,attempts=3,
-                          updated_at=datetime('now','localtime')
-                    WHERE task_id=? AND batch_index=?""",
-                (json.dumps(result, ensure_ascii=False), task_id, current_batch),
-            )
-            db.commit()
-            db.close()
-            return current_batch, result, None
+            result=_call_llm_translate(batch,system_prompt,ai,before,after,task_id=task_id)
+            db=get_db();db.execute("UPDATE ai_batch_results SET status='success',result_json=?,attempts=3,updated_at=datetime('now','localtime') WHERE task_id=? AND batch_index=?",(json.dumps(result,ensure_ascii=False),task_id,current_batch));db.commit();db.close()
+            return current_batch,result,None
         except Exception as exc:
-            db = get_db()
-            db.execute(
-                """UPDATE ai_batch_results
-                      SET status='failed',attempts=3,error=?,
-                          updated_at=datetime('now','localtime')
-                    WHERE task_id=? AND batch_index=?""",
-                (str(exc)[:500], task_id, current_batch),
-            )
-            db.commit()
-            db.close()
-            return current_batch, [], exc
-
-    completed: dict[int, list] = {}
-    with ThreadPoolExecutor(
-        max_workers=2, thread_name_prefix="subtitle-translate"
-    ) as executor:
-        futures = [
-            executor.submit(process, index, batch)
-            for index, batch in enumerate(batches, 1)
-        ]
-        for done, future in enumerate(as_completed(futures), 1):
-            task_manager.checkpoint(task_id)
-            current_batch, result, error = future.result()
-            completed[current_batch] = result
+            db=get_db();db.execute("UPDATE ai_batch_results SET status='failed',attempts=3,error=?,updated_at=datetime('now','localtime') WHERE task_id=? AND batch_index=?",(str(exc)[:500],task_id,current_batch));db.commit();db.close()
+            return current_batch,[],exc
+    completed={}
+    with ThreadPoolExecutor(max_workers=2,thread_name_prefix='subtitle-translate') as executor:
+        futures=[executor.submit(process,index,batch) for index,batch in enumerate(batches,1)]
+        for done,future in enumerate(as_completed(futures),1):
+            task_manager.checkpoint(task_id); current_batch,result,error=future.result();completed[current_batch]=result
             if error:
-                failed_batches += 1
-                task_manager.add_log(
-                    task_id,
-                    "warning",
-                    "translating",
-                    f"第 {current_batch}/{total_batches} 批翻译失败",
-                    detail=str(error),
-                    suggestion="可重新执行 AI 翻译，已完成批次会自动复用缓存",
-                )
-            task_manager.update_task(
-                task_id,
-                step="translating",
-                progress=5 + done / max(total_batches, 1) * 90,
-                message=f"已完成 {done}/{total_batches} 个翻译批次",
-                details={
-                    "target_language": target_language,
-                    "total_segments": total,
-                    "total_batches": total_batches,
-                    "failed_batches": failed_batches,
-                    "ai_provider": ai["provider"],
-                    "ai_model": ai["model"],
-                },
-            )
-    for index in range(1, total_batches + 1):
-        all_results.extend(completed.get(index, []))
+                failed_batches+=1;task_manager.add_log(task_id,'warning','translating',f'第 {current_batch}/{total_batches} 批翻译失败',detail=str(error),suggestion='可重试失败批次')
+            task_manager.update_task(task_id,step='translating',progress=5+done/max(total_batches,1)*90,message=f'已完成 {done}/{total_batches} 个翻译批次',details={'target_language':target_language,'total_segments':total,'total_batches':total_batches,'failed_batches':failed_batches,'ai_provider':ai['provider'],'ai_model':ai['model']})
+    for index in range(1,total_batches+1): all_results.extend(completed.get(index,[]))
 
     # Write only after all calls have reached a safe checkpoint. The transaction
     # rolls back if cancellation arrives while results are being applied.
@@ -212,6 +125,14 @@ def translate_subtitles(
     updated = 0
     try:
         db.execute("BEGIN IMMEDIATE")
+        current_revision = int(db.execute("SELECT edit_revision FROM projects WHERE id=?", (project_id,)).fetchone()[0] or 0)
+        if current_revision != base_revision:
+            error = RuntimeError("翻译期间字幕已被编辑；AI 结果未覆盖当前内容")
+            error.error_code = "EDIT_REVISION_CONFLICT"; error.recoverable = True
+            error.available_actions = ["retry"]
+            raise error
+        before_rows = [dict(row) for row in db.execute("SELECT * FROM segments WHERE project_id=? ORDER BY idx", (project_id,))]
+        before = [{column: row.get(column) for column in SEGMENT_COLUMNS} for row in before_rows]
         for item_index, item in enumerate(all_results):
             if item_index % 20 == 0:
                 task_manager.checkpoint(task_id)
@@ -219,19 +140,26 @@ def translate_subtitles(
                 idx = int(item["id"])
                 translated = item.get("translated_text", "")
                 db.execute(
-                    """UPDATE segments
-                          SET translated_text = ?, source_stage = 'translated'
-                        WHERE project_id = ? AND idx = ?""",
-                    (translated, project_id, idx),
+                    "UPDATE segments SET translated_text = ?, source_stage = 'translated' WHERE project_id = ? AND idx = ?",
+                    (translated, project_id, idx)
                 )
                 updated += 1
             except (ValueError, KeyError):
                 logger.warning(f"[Translator] 跳过无效结果: {item}")
         task_manager.checkpoint(task_id)
+        after_rows = [dict(row) for row in db.execute("SELECT * FROM segments WHERE project_id=? ORDER BY idx", (project_id,))]
+        after = [{column: row.get(column) for column in SEGMENT_COLUMNS} for row in after_rows]
+        operation_id = str(uuid.uuid4()); next_revision = base_revision + 1
+        db.execute("DELETE FROM edit_operations WHERE project_id=? AND undone=1", (project_id,))
         db.execute(
-            "UPDATE projects SET updated_at=datetime('now','localtime') WHERE id=?",
-            (project_id,),
+            """INSERT INTO edit_operations(id,project_id,operation,before_json,after_json,base_revision,result_revision,undone,created_at)
+               VALUES (?,?,?,?,?,?,?,0,datetime('now','localtime'))""",
+            (operation_id, project_id, "ai_translate", json.dumps(before, ensure_ascii=False), json.dumps(after, ensure_ascii=False), base_revision, next_revision),
         )
+        db.execute("UPDATE projects SET edit_revision=?,updated_at=datetime('now','localtime') WHERE id=?", (next_revision, project_id))
+        db.execute("""DELETE FROM edit_operations WHERE id IN (
+            SELECT id FROM edit_operations WHERE project_id=? AND undone=0
+            ORDER BY result_revision DESC LIMIT -1 OFFSET 500)""", (project_id,))
         db.commit()
     except Exception:
         db.rollback()
@@ -241,15 +169,9 @@ def translate_subtitles(
 
     logger.info(f"[Translator] 翻译完成: 更新 {updated} 条")
     task_manager.update_task(
-        task_id,
-        step="translate_done",
-        progress=100,
+        task_id, step="translate_done", progress=100,
         status="partial" if failed_batches else "running",
-        message=(
-            f"翻译完成, 更新 {updated} 条"
-            if not failed_batches
-            else f"翻译部分完成，{failed_batches} 个批次失败"
-        ),
+        message=f"翻译完成, 更新 {updated} 条" if not failed_batches else f"翻译部分完成，{failed_batches} 个批次失败",
         details={
             "target_language": target_language,
             "total_segments": total,
@@ -258,28 +180,20 @@ def translate_subtitles(
             "processed_segments": updated,
             "failed_batches": failed_batches,
             "retry_count": retry_count,
-        },
+        }
     )
     task_manager.add_log(
-        task_id,
-        "info",
-        "translating",
-        "翻译全部完成",
-        detail=f"目标语言: {target_language}, 更新 {updated}/{total} 条, 失败批次: {failed_batches}",
+        task_id, "info", "translating", "翻译全部完成",
+        detail=f"目标语言: {target_language}, 更新 {updated}/{total} 条, 失败批次: {failed_batches}"
     )
 
     return all_results
 
 
-def _call_llm_translate(
-    batch: list,
-    system_prompt: str,
-    ai: dict,
-    context_before: list | None = None,
-    context_after: list | None = None,
-    task_id: str | None = None,
-) -> list:
-    """调用 LLM 翻译一批字幕，自动重试"""
+def _call_llm_translate(batch: list, system_prompt: str, ai: dict,
+                        context_before: list | None = None, context_after: list | None = None,
+                        task_id: str | None = None) -> list:
+    """调用 LLM 翻译一批字幕，自动重试一次"""
     import httpx
 
     headers = {
@@ -290,17 +204,11 @@ def _call_llm_translate(
         "model": ai["model"],
         "messages": [
             {"role": "system", "content": system_prompt},
-            {
-                "role": "user",
-                "content": json.dumps(
-                    {
-                        "context_before": context_before or [],
-                        "items": batch,
-                        "context_after": context_after or [],
-                    },
-                    ensure_ascii=False,
-                ),
-            },
+            {"role": "user", "content": json.dumps({
+                "context_before": context_before or [],
+                "items": batch,
+                "context_after": context_after or [],
+            }, ensure_ascii=False)}
         ],
         "temperature": 0.1,
         "max_tokens": 4096,
@@ -340,17 +248,17 @@ def _call_llm_translate(
             if not exc.retryable:
                 break
             if attempt < 2:
-                time.sleep(2**attempt)
+                time.sleep(2 ** attempt)
         except httpx.RequestError as exc:
             error = exc
             logger.warning(f"[Translator] AI 网络请求失败 (尝试 {attempt + 1}): {exc}")
             if attempt < 2:
-                time.sleep(2**attempt)
+                time.sleep(2 ** attempt)
         except Exception as e:
             error = e
             logger.warning(f"[Translator] LLM 调用失败 (尝试 {attempt + 1}): {e}")
             if attempt < 2:
-                time.sleep(2**attempt)
+                time.sleep(2 ** attempt)
 
     raise RuntimeError(f"AI 翻译失败：{error or '返回格式不完整'}") from error
 

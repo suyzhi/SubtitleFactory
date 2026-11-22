@@ -1,4 +1,9 @@
-"""Versioned SQLite migrations for durable desktop data."""
+"""Versioned SQLite migrations for durable desktop data.
+
+The legacy initializer still creates the 0.3.x baseline schema.  Migrations in
+this module only describe changes introduced after that baseline so they can be
+applied transactionally and audited independently.
+"""
 
 from __future__ import annotations
 
@@ -7,7 +12,7 @@ import time
 from pathlib import Path
 from typing import Callable
 
-CURRENT_SCHEMA_VERSION = 3
+CURRENT_SCHEMA_VERSION = 13
 
 
 def _columns(conn: sqlite3.Connection, table: str) -> set[str]:
@@ -21,6 +26,10 @@ def _add_column(conn: sqlite3.Connection, table: str, definition: str) -> None:
 
 
 def _migration_v1(conn: sqlite3.Connection) -> None:
+    _add_column(conn, "projects", "edit_revision INTEGER NOT NULL DEFAULT 0")
+    _add_column(conn, "projects", "media_status TEXT NOT NULL DEFAULT 'ready'")
+    _add_column(conn, "segments", "speaker_id TEXT")
+
     for definition in (
         "priority INTEGER NOT NULL DEFAULT 0",
         "resource_class TEXT NOT NULL DEFAULT 'io'",
@@ -29,25 +38,336 @@ def _migration_v1(conn: sqlite3.Connection) -> None:
     ):
         _add_column(conn, "tasks", definition)
 
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS edit_operations (
+            id TEXT PRIMARY KEY,
+            project_id TEXT NOT NULL,
+            operation TEXT NOT NULL,
+            before_json TEXT NOT NULL,
+            after_json TEXT NOT NULL,
+            base_revision INTEGER NOT NULL,
+            result_revision INTEGER NOT NULL,
+            undone INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_edit_operations_project
+            ON edit_operations(project_id, result_revision DESC);
+
+        CREATE TABLE IF NOT EXISTS segment_drafts (
+            project_id TEXT PRIMARY KEY,
+            base_revision INTEGER NOT NULL,
+            draft_json TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+        );
+
+        CREATE TABLE IF NOT EXISTS style_templates (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            builtin INTEGER NOT NULL DEFAULT 0,
+            settings_json TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS project_assets (
+            id TEXT PRIMARY KEY,
+            project_id TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            path TEXT NOT NULL,
+            fingerprint TEXT,
+            metadata_json TEXT NOT NULL DEFAULT '{}',
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_project_assets_project
+            ON project_assets(project_id, kind);
+
+        CREATE TABLE IF NOT EXISTS watch_folders (
+            id TEXT PRIMARY KEY,
+            path TEXT NOT NULL UNIQUE,
+            enabled INTEGER NOT NULL DEFAULT 1,
+            workflow_json TEXT NOT NULL DEFAULT '{}',
+            last_scan_at TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        """
+    )
+
 
 def _migration_v2(conn: sqlite3.Connection) -> None:
+    for definition in (
+        "audio_track_index INTEGER NOT NULL DEFAULT 0",
+        "range_start REAL",
+        "range_end REAL",
+    ):
+        _add_column(conn, "projects", definition)
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS cloud_authorizations (
+            capability TEXT PRIMARY KEY,
+            provider_id TEXT,
+            granted INTEGER NOT NULL DEFAULT 0,
+            disclosure_version TEXT NOT NULL,
+            granted_at TEXT,
+            revoked_at TEXT
+        );
+        """
+    )
+
+
+def _migration_v3(conn: sqlite3.Connection) -> None:
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS watch_folder_files (
+            watch_folder_id TEXT NOT NULL,
+            path TEXT NOT NULL,
+            size INTEGER NOT NULL,
+            modified_ns INTEGER NOT NULL,
+            fingerprint TEXT,
+            stable_since TEXT NOT NULL,
+            imported_project_id TEXT,
+            PRIMARY KEY (watch_folder_id,path),
+            FOREIGN KEY (watch_folder_id) REFERENCES watch_folders(id) ON DELETE CASCADE
+        );
+        CREATE TABLE IF NOT EXISTS batches (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            configuration_json TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS batch_items (
+            id TEXT PRIMARY KEY,
+            batch_id TEXT NOT NULL,
+            project_id TEXT,
+            source_path TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending',
+            error TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY (batch_id) REFERENCES batches(id) ON DELETE CASCADE,
+            FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE SET NULL
+        );
+        """
+    )
+
+
+def _migration_v4(conn: sqlite3.Connection) -> None:
+    """Fold legacy AI-clean revisions into the unified persistent editor history."""
+    import json
+
+    projects = conn.execute("SELECT DISTINCT project_id FROM segment_revisions").fetchall()
+    columns = ("id","project_id","idx","start","end","raw_text","clean_text","translated_text","speaker","speaker_id","locked","is_draft","source_stage","transcription_run_id")
+    for project in projects:
+        project_id = project[0]
+        current_rows = conn.execute("SELECT * FROM segments WHERE project_id=? ORDER BY idx", (project_id,)).fetchall()
+        current = [{key: row[key] if key in row.keys() else None for key in columns} for row in current_rows]
+        revision_row = conn.execute("SELECT edit_revision FROM projects WHERE id=?", (project_id,)).fetchone()
+        revision = int(revision_row[0] or 0) if revision_row else 0
+        legacy_rows = conn.execute("SELECT * FROM segment_revisions WHERE project_id=? ORDER BY created_at,rowid", (project_id,)).fetchall()
+        for legacy in legacy_rows:
+            operation_id = f"legacy:{legacy['id']}"
+            if conn.execute("SELECT 1 FROM edit_operations WHERE id=?", (operation_id,)).fetchone(): continue
+            revision += 1
+            before = json.loads(legacy["segments_json"] or "[]")
+            conn.execute(
+                """INSERT INTO edit_operations
+                   (id,project_id,operation,before_json,after_json,base_revision,result_revision,undone,created_at)
+                   VALUES (?,?,?,?,?,?,?,0,?)""",
+                (operation_id, project_id, legacy["operation"], json.dumps(before, ensure_ascii=False),
+                 json.dumps(current, ensure_ascii=False), revision - 1, revision, legacy["created_at"]),
+            )
+        conn.execute("UPDATE projects SET edit_revision=MAX(edit_revision,?) WHERE id=?", (revision, project_id))
+
+
+def _migration_v5(conn: sqlite3.Connection) -> None:
+    _add_column(conn, "ai_settings", "has_api_key INTEGER NOT NULL DEFAULT 0")
+    _add_column(conn, "ai_settings", "keychain_ref TEXT")
+    _add_column(conn, "ai_provider_configs", "has_api_key INTEGER NOT NULL DEFAULT 0")
+    _add_column(conn, "ai_provider_configs", "keychain_ref TEXT")
+    conn.execute("UPDATE ai_settings SET has_api_key=CASE WHEN api_key<>'' THEN 1 ELSE has_api_key END")
+    conn.execute("UPDATE ai_provider_configs SET has_api_key=CASE WHEN api_key<>'' THEN 1 ELSE has_api_key END")
+
+
+def _migration_v6(conn: sqlite3.Connection) -> None:
+    """Persist the effective style separately from reusable style templates."""
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS project_styles (
+            project_id TEXT PRIMARY KEY,
+            settings_json TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+        );
+        """
+    )
+
+
+def _migration_v7(conn: sqlite3.Connection) -> None:
     """Keep word/token timestamps so subtitle splitting can use real speech boundaries."""
     _add_column(conn, "transcription_segments", "timings_json TEXT NOT NULL DEFAULT '[]'")
 
 
-def _migration_v3(conn: sqlite3.Connection) -> None:
-    """Track configured API keys and per-provider thinking toggle."""
-    _add_column(conn, "ai_provider_configs", "has_api_key INTEGER NOT NULL DEFAULT 0")
-    _add_column(conn, "ai_provider_configs", "thinking_enabled INTEGER NOT NULL DEFAULT 0")
-    conn.execute(
-        "UPDATE ai_provider_configs SET has_api_key=CASE WHEN api_key<>'' THEN 1 ELSE has_api_key END"
+def _migration_v8(conn: sqlite3.Connection) -> None:
+    """Persist YouTube playlist batches and their durable per-item stages."""
+    for definition in (
+        "kind TEXT NOT NULL DEFAULT 'local_files'",
+        "source_url TEXT",
+        "source_external_id TEXT",
+        "title TEXT",
+        "channel TEXT",
+        "thumbnail_url TEXT",
+        "last_synced_at TEXT",
+        "paused INTEGER NOT NULL DEFAULT 0",
+    ):
+        _add_column(conn, "batches", definition)
+    for definition in (
+        "source_id TEXT",
+        "source_url TEXT",
+        "position INTEGER",
+        "title TEXT",
+        "duration REAL NOT NULL DEFAULT 0",
+        "thumbnail_url TEXT",
+        "source_state TEXT NOT NULL DEFAULT 'active'",
+    ):
+        _add_column(conn, "batch_items", definition)
+    conn.executescript(
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_playlist_batches_external_id
+            ON batches(kind, source_external_id)
+            WHERE kind='youtube_playlist' AND source_external_id IS NOT NULL;
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_batch_items_source_id
+            ON batch_items(batch_id, source_id)
+            WHERE source_id IS NOT NULL;
+        CREATE INDEX IF NOT EXISTS idx_batch_items_project
+            ON batch_items(project_id);
+        CREATE TABLE IF NOT EXISTS batch_item_stages (
+            item_id TEXT NOT NULL,
+            stage TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'waiting',
+            task_id TEXT,
+            attempt INTEGER NOT NULL DEFAULT 0,
+            error_code TEXT,
+            error TEXT,
+            configuration_json TEXT NOT NULL DEFAULT '{}',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (item_id, stage),
+            FOREIGN KEY (item_id) REFERENCES batch_items(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_batch_item_stages_task
+            ON batch_item_stages(task_id);
+        """
     )
+
+
+def _migration_v9(conn: sqlite3.Connection) -> None:
+    """Add a local full-text subtitle index and keep it transactionally synced."""
+    conn.executescript(
+        """
+        CREATE VIRTUAL TABLE IF NOT EXISTS segment_search USING fts5(
+            segment_id UNINDEXED,
+            project_id UNINDEXED,
+            project_title,
+            speaker_name,
+            raw_text,
+            clean_text,
+            translated_text,
+            tokenize='trigram'
+        );
+
+        CREATE TRIGGER IF NOT EXISTS segment_search_insert
+        AFTER INSERT ON segments BEGIN
+            INSERT INTO segment_search(
+                segment_id,project_id,project_title,speaker_name,
+                raw_text,clean_text,translated_text
+            ) VALUES (
+                new.id,new.project_id,
+                COALESCE((SELECT title FROM projects WHERE id=new.project_id),''),
+                COALESCE(new.speaker,''),
+                COALESCE(new.raw_text,''),COALESCE(new.clean_text,''),
+                COALESCE(new.translated_text,'')
+            );
+        END;
+
+        CREATE TRIGGER IF NOT EXISTS segment_search_update
+        AFTER UPDATE OF project_id,raw_text,clean_text,translated_text,speaker ON segments BEGIN
+            DELETE FROM segment_search WHERE segment_id=old.id;
+            INSERT INTO segment_search(
+                segment_id,project_id,project_title,speaker_name,
+                raw_text,clean_text,translated_text
+            ) VALUES (
+                new.id,new.project_id,
+                COALESCE((SELECT title FROM projects WHERE id=new.project_id),''),
+                COALESCE(new.speaker,''),
+                COALESCE(new.raw_text,''),COALESCE(new.clean_text,''),
+                COALESCE(new.translated_text,'')
+            );
+        END;
+
+        CREATE TRIGGER IF NOT EXISTS segment_search_delete
+        AFTER DELETE ON segments BEGIN
+            DELETE FROM segment_search WHERE segment_id=old.id;
+        END;
+
+        CREATE TRIGGER IF NOT EXISTS segment_search_project_title
+        AFTER UPDATE OF title ON projects BEGIN
+            UPDATE segment_search SET project_title=new.title
+            WHERE project_id=new.id;
+        END;
+
+        DELETE FROM segment_search;
+        INSERT INTO segment_search(
+            segment_id,project_id,project_title,speaker_name,
+            raw_text,clean_text,translated_text
+        )
+        SELECT s.id,s.project_id,p.title,COALESCE(s.speaker,''),
+               COALESCE(s.raw_text,''),COALESCE(s.clean_text,''),
+               COALESCE(s.translated_text,'')
+        FROM segments s JOIN projects p ON p.id=s.project_id;
+        """
+    )
+
+
+def _migration_v10(conn: sqlite3.Connection) -> None:
+    """Reserved migration slot (removed content packs in simple edition)."""
+    del conn
+
+
+def _migration_v11(conn: sqlite3.Connection) -> None:
+    """Reserved migration slot (removed short clips in simple edition)."""
+    del conn
+
+
+def _migration_v12(conn: sqlite3.Connection) -> None:
+    """Reserved migration slot (removed content packs in simple edition)."""
+    del conn
+
+
+def _migration_v13(conn: sqlite3.Connection) -> None:
+    """Model thinking is an explicit per-provider choice; off keeps subtitle jobs fast."""
+    _add_column(conn, "ai_provider_configs", "thinking_enabled INTEGER NOT NULL DEFAULT 0")
 
 
 MIGRATIONS: tuple[tuple[int, Callable[[sqlite3.Connection], None]], ...] = (
     (1, _migration_v1),
     (2, _migration_v2),
     (3, _migration_v3),
+    (4, _migration_v4),
+    (5, _migration_v5),
+    (6, _migration_v6),
+    (7, _migration_v7),
+    (8, _migration_v8),
+    (9, _migration_v9),
+    (10, _migration_v10),
+    (11, _migration_v11),
+    (12, _migration_v12),
+    (13, _migration_v13),
 )
 
 
