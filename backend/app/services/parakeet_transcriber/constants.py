@@ -30,10 +30,10 @@ SILERO_VAD_URL = (
 
 # Exact release-asset byte sizes. Besides making progress deterministic, this
 # prevents a proxy/login HTML page or a truncated response from becoming cache.
-PARAKEET_ARCHIVE_BYTES = 487_170_055
+PARAKEET_ARCHIVE_BYTES = 487_211_443
 SILERO_VAD_BYTES = 643_854
 PARAKEET_EXTRACTED_ESTIMATE_BYTES = 671_000_000
-PARAKEET_ARCHIVE_SHA256 = "5793d0fd397c5778d2cf2126994d58e9d56b1be7c04d13c7a15bb1b4eafb16bf"
+PARAKEET_ARCHIVE_SHA256 = "1495e91b59d7fc53ddca91f3431758ec99f8fa253fdb0e1e851be0f72b14b0f9"
 SILERO_VAD_SHA256 = "9e2449e1087496d8d4caba907f23e0bd3f78d91fa552479bb9c23ac09cbb1fd6"
 
 # Core ML conversion of nvidia/parakeet-tdt-0.6b-v3 (CC-BY-4.0) published by
