@@ -97,7 +97,7 @@ export function getProject(projectId: string): Promise<Project> {
 export function createProject(data: {
   source_type: 'youtube' | 'local'; source_url?: string; title: string; language: string; target_language: string;
 }): Promise<{ project_id: string }> {
-  return request('/api/projects', json('POST', { ...data, media_mode: 'local' }));
+  return request('/api/projects', json('POST', data));
 }
 
 export function deleteProject(projectId: string): Promise<unknown> {
@@ -108,7 +108,6 @@ export function uploadLocalVideo(projectId: string, file: File, onProgress?: (pe
   return initializeBackendSession().then(() => new Promise((resolve, reject) => {
     const form = new FormData();
     form.append('file', file);
-    form.append('autostart', 'false');
     const xhr = new XMLHttpRequest();
     xhr.open('POST', `${BASE_URL}/api/projects/${projectId}/import-local`);
     if (API_TOKEN) xhr.setRequestHeader('Authorization', `Bearer ${API_TOKEN}`);
@@ -222,7 +221,7 @@ export async function saveAIProvider(providerId: string, data: Pick<AIProviderCa
 
 export function assignAIProvider(providerId: string): Promise<unknown> {
   return request('/api/settings/ai/assignments', json('PUT', {
-    clean_provider_id: providerId, translate_provider_id: providerId, content_provider_id: providerId,
+    clean_provider_id: providerId, translate_provider_id: providerId,
   }));
 }
 

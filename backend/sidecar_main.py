@@ -1,6 +1,5 @@
 """Frozen desktop backend entry point."""
 
-import io
 import multiprocessing
 import os
 import signal
@@ -19,7 +18,7 @@ def _verify_runtime_dependencies() -> None:
 
     Importing the Python package alone is not sufficient for release QA: the
     failure we need to catch is a missing or mis-routed Mach-O dependency after
-    PyInstaller has rewritten ``@rpath`` entries.  Keep this check model-free so
+    PyInstaller has rewritten ``@rpath`` entries. Keep this check model-free so
     release builds can run it deterministically without downloads.
     """
     import av
@@ -30,11 +29,9 @@ def _verify_runtime_dependencies() -> None:
     import mlx_whisper
     import numpy as np
     import onnxruntime
-    import pysubs2
     import scipy.signal
     import sherpa_onnx
     import tiktoken
-    from PIL import Image
 
     if not mx.is_available(mx.gpu):
         raise RuntimeError("MLX Metal GPU is unavailable")
@@ -48,12 +45,6 @@ def _verify_runtime_dependencies() -> None:
     finally:
         mx.set_default_device(previous_device)
 
-    image = Image.new("RGB", (2, 2), color="black")
-    image_buffer = io.BytesIO()
-    image.save(image_buffer, format="PNG")
-    if not image_buffer.getvalue().startswith(b"\x89PNG"):
-        raise RuntimeError("Pillow runtime failed to encode PNG")
-
     resampled = scipy.signal.resample(np.array([0.0, 1.0]), 4)
     if np.asarray(resampled).shape != (4,):
         raise RuntimeError("SciPy runtime returned an unexpected result")
@@ -65,8 +56,6 @@ def _verify_runtime_dependencies() -> None:
     )
     if encoding.encode("ok") != [0]:
         raise RuntimeError("tiktoken runtime failed to encode text")
-    if not isinstance(pysubs2.SSAFile(), pysubs2.SSAFile):
-        raise RuntimeError("pysubs2 runtime failed to create a subtitle file")
     if "CoreMLExecutionProvider" not in onnxruntime.get_available_providers():
         raise RuntimeError("ONNX Runtime does not expose Core ML")
     if ctranslate2.get_cuda_device_count() != 0:
@@ -81,14 +70,17 @@ def _verify_runtime_dependencies() -> None:
         "mlx_whisper": mlx_whisper.__version__,
         "sherpa_onnx": sherpa_onnx.__version__,
     }
-    print("冻结运行时自检通过：" + "、".join(f"{key} {value}" for key, value in versions.items()))
+    print(
+        "冻结运行时自检通过："
+        + "、".join(f"{key} {value}" for key, value in versions.items())
+    )
 
 
 def _terminate_managed_process_group() -> None:
     """Ask the frozen sidecar and its helpers to stop after the App disappears."""
     if os.name == "posix":
         try:
-            # Tauri launches the backend as its own process-group leader.  A
+            # Tauri launches the backend as its own process-group leader. A
             # group signal also reaches FFmpeg/model helpers that would
             # otherwise be re-parented when the desktop process crashes.
             os.killpg(os.getpgrp(), signal.SIGTERM)

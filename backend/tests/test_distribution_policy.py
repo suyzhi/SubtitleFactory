@@ -54,7 +54,8 @@ class DistributionPolicyTests(unittest.TestCase):
         with (
             patch.dict(os.environ, {CHANNEL_ENV: APP_STORE_CHANNEL}),
             patch.object(
-                runtime_diagnostics, "_yt_dlp_module",
+                runtime_diagnostics,
+                "_yt_dlp_module",
                 side_effect=AssertionError("App Store health loaded yt-dlp"),
             ),
         ):
@@ -71,23 +72,32 @@ class DistributionPolicyTests(unittest.TestCase):
         self.assertEqual(runtime["ejs"]["status"], "disabled")
 
     def test_app_store_does_not_resume_interrupted_youtube_workflow(self):
-        created = self.client.post("/api/projects", json={
-            "title": "legacy direct project",
-            "source_type": "youtube",
-            "source_url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
-        })
-        self.assertEqual(created.status_code, 201, created.text)
-        interrupted = [{
-            "id": "legacy-task",
-            "type": "workflow",
-            "details": json.dumps({"resume_payload": {
-                "project_id": created.json()["project_id"],
-                "model": "small",
-                "language": "auto",
-                "runtime": "cpu",
+        created = self.client.post(
+            "/api/projects",
+            json={
+                "title": "legacy direct project",
+                "source_type": "youtube",
                 "source_url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
-            }}),
-        }]
+            },
+        )
+        self.assertEqual(created.status_code, 201, created.text)
+        interrupted = [
+            {
+                "id": "legacy-task",
+                "type": "workflow",
+                "details": json.dumps(
+                    {
+                        "resume_payload": {
+                            "project_id": created.json()["project_id"],
+                            "model": "small",
+                            "language": "auto",
+                            "runtime": "cpu",
+                            "source_url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+                        }
+                    }
+                ),
+            }
+        ]
         with (
             patch.dict(os.environ, {CHANNEL_ENV: APP_STORE_CHANNEL}),
             patch.object(task_manager, "create_task") as create_task,
@@ -96,25 +106,39 @@ class DistributionPolicyTests(unittest.TestCase):
         self.assertEqual(resumed, 0)
         create_task.assert_not_called()
 
-    def test_restart_never_auto_resumes_paused_or_cloud_workflows(self):
+    def test_restart_never_auto_resumes_ai_workflows(self):
         interrupted = [
             {
-                "id": "paused-workflow",
-                "type": "workflow",
-                "status": "paused",
-                "details": {"resume_payload": {
-                    "project_id": "project", "model": "small", "language": "en",
-                    "runtime": "cpu",
-                }},
-            },
-            {
-                "id": "cloud-workflow",
+                "id": "ai-clean-workflow",
                 "type": "workflow",
                 "status": "running",
-                "details": json.dumps({"resume_payload": {
-                    "project_id": "project", "model": "fun-asr-realtime", "language": "zh",
-                    "runtime": "dashscope_cloud",
-                }}),
+                "details": json.dumps(
+                    {
+                        "resume_payload": {
+                            "project_id": "project",
+                            "model": "small",
+                            "language": "en",
+                            "runtime": "cpu",
+                            "options": {"enable_clean": True},
+                        }
+                    }
+                ),
+            },
+            {
+                "id": "ai-translate-workflow",
+                "type": "workflow",
+                "status": "running",
+                "details": json.dumps(
+                    {
+                        "resume_payload": {
+                            "project_id": "project",
+                            "model": "small",
+                            "language": "en",
+                            "runtime": "cpu",
+                            "options": {"enable_translate": True},
+                        }
+                    }
+                ),
             },
         ]
         with (
@@ -126,14 +150,21 @@ class DistributionPolicyTests(unittest.TestCase):
         create_task.assert_not_called()
 
     def test_restart_links_automatic_local_workflow_continuation(self):
-        created = self.client.post("/api/projects", json={
-            "title": "local restart recovery", "source_type": "local",
-        })
+        created = self.client.post(
+            "/api/projects",
+            json={
+                "title": "local restart recovery",
+                "source_type": "local",
+            },
+        )
         self.assertEqual(created.status_code, 201, created.text)
         project_id = created.json()["project_id"]
         payload = {
-            "project_id": project_id, "model": "small", "language": "en",
-            "runtime": "cpu", "source_url": None,
+            "project_id": project_id,
+            "model": "small",
+            "language": "en",
+            "runtime": "cpu",
+            "source_url": None,
         }
         db = get_db()
         try:
@@ -144,7 +175,7 @@ class DistributionPolicyTests(unittest.TestCase):
                    ) VALUES (
                        'local-workflow-before-restart',?,'workflow','failed',
                        '上次运行被中断','应用在任务执行期间退出','APP_INTERRUPTED',1,
-                       '[\"retry\"]',?,'[]','before','before'
+                       '["retry"]',?,'[]','before','before'
                    )""",
                 (project_id, json.dumps({"resume_payload": payload})),
             )
@@ -152,13 +183,19 @@ class DistributionPolicyTests(unittest.TestCase):
         finally:
             db.close()
 
-        interrupted = [{
-            "id": "local-workflow-before-restart", "type": "workflow",
-            "status": "running", "details": json.dumps({"resume_payload": payload}),
-        }]
+        interrupted = [
+            {
+                "id": "local-workflow-before-restart",
+                "type": "workflow",
+                "status": "running",
+                "details": json.dumps({"resume_payload": payload}),
+            }
+        ]
         with (
             patch.dict(os.environ, {CHANNEL_ENV: DIRECT_CHANNEL}),
-            patch.object(task_manager, "create_task", return_value="continued-workflow") as create_task,
+            patch.object(
+                task_manager, "create_task", return_value="continued-workflow"
+            ) as create_task,
             patch.object(task_manager, "update_task") as update_task,
             patch.object(task_manager, "run_background") as run_background,
         ):
@@ -179,61 +216,59 @@ class DistributionPolicyTests(unittest.TestCase):
         self.assertFalse(original["recoverable"])
         self.assertEqual(json.loads(original["available_actions"]), [])
         self.assertEqual(original["message"], "应用重启后已在新任务中继续")
-        self.assertEqual(json.loads(original["details"])["resumed_by_task_id"], "continued-workflow")
+        self.assertEqual(
+            json.loads(original["details"])["resumed_by_task_id"], "continued-workflow"
+        )
 
-    def test_app_store_rejects_all_youtube_entry_points_before_work(self):
+    def test_app_store_rejects_youtube_entry_points_before_work(self):
         with patch.dict(os.environ, {CHANNEL_ENV: APP_STORE_CHANNEL}):
-            responses = [
-                self.client.post("/api/projects", json={
+            response = self.client.post(
+                "/api/projects",
+                json={
                     "title": "blocked",
                     "source_type": "youtube",
                     "source_url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
-                }),
-            ]
-        for response in responses:
-            self.assertEqual(response.status_code, 403, response.text)
-            payload = response.json()["error"]
-            self.assertEqual(payload["code"], "DISTRIBUTION_FEATURE_UNAVAILABLE")
-            self.assertEqual(payload["details"]["feature"], "youtube")
-            self.assertFalse(payload["recoverable"])
+                },
+            )
+        self.assertEqual(response.status_code, 403, response.text)
+        payload = response.json()["error"]
+        self.assertEqual(payload["code"], "DISTRIBUTION_FEATURE_UNAVAILABLE")
+        self.assertEqual(payload["details"]["feature"], "youtube")
+        self.assertFalse(payload["recoverable"])
 
-
-    def test_app_store_projects_settings_without_erasing_direct_preferences(self):
+    def test_app_store_projects_runtime_settings_without_erasing_direct_preferences(self):
         original = app_settings.get_app_settings()
         try:
             with patch.dict(os.environ, {CHANNEL_ENV: DIRECT_CHANNEL}):
-                app_settings.save_app_settings({
-                    "default_model": "local:direct-model",
-                    "ffmpeg_path": "/tmp/direct-ffmpeg",
-                    "coreml_model_path": "/tmp/direct-coreml",
-                    "transcription_runtime_by_model": {
-                        "small": "cpu",
-                        "local:direct-model": "external_coreml",
-                    },
-                })
+                app_settings.save_app_settings(
+                    {
+                        "transcription_runtime_by_model": {
+                            "small": "cpu",
+                            "parakeet-tdt-0.6b-v3-coreml": "external_coreml",
+                        },
+                    }
+                )
             with patch.dict(os.environ, {CHANNEL_ENV: APP_STORE_CHANNEL}):
                 effective = app_settings.get_effective_app_settings()
-                self.assertEqual(effective["default_model"], "auto")
-                self.assertIsNone(effective["ffmpeg_path"])
-                self.assertIsNone(effective["coreml_model_path"])
                 self.assertEqual(
-                    effective["transcription_runtime_by_model"], {"small": "cpu"},
+                    effective["transcription_runtime_by_model"], {"small": "cpu"}
                 )
-                app_settings.save_app_settings({
-                    "source_language": "ja",
-                    "ffmpeg_path": "/tmp/app-store-must-ignore",
-                    "transcription_runtime_by_model": {"small": "mlx"},
-                })
+                app_settings.save_app_settings(
+                    {
+                        "clean_provider_id": "openai",
+                        "transcription_runtime_by_model": {"small": "mlx"},
+                    }
+                )
             with patch.dict(os.environ, {CHANNEL_ENV: DIRECT_CHANNEL}):
                 persisted = app_settings.get_app_settings()
-                self.assertEqual(persisted["default_model"], "local:direct-model")
-                self.assertEqual(persisted["ffmpeg_path"], "/tmp/direct-ffmpeg")
-                self.assertEqual(persisted["coreml_model_path"], "/tmp/direct-coreml")
-                self.assertEqual(persisted["source_language"], "ja")
-                self.assertEqual(persisted["transcription_runtime_by_model"], {
-                    "small": "mlx",
-                    "local:direct-model": "external_coreml",
-                })
+                self.assertEqual(persisted["clean_provider_id"], "openai")
+                self.assertEqual(
+                    persisted["transcription_runtime_by_model"],
+                    {
+                        "small": "mlx",
+                        "parakeet-tdt-0.6b-v3-coreml": "external_coreml",
+                    },
+                )
         finally:
             with patch.dict(os.environ, {CHANNEL_ENV: DIRECT_CHANNEL}):
                 app_settings.save_app_settings(original)
@@ -243,7 +278,8 @@ class DistributionPolicyTests(unittest.TestCase):
             patch.dict(os.environ, {CHANNEL_ENV: APP_STORE_CHANNEL}),
             patch.object(runtime_diagnostics, "_bundled_candidates", return_value=[]),
             patch.object(
-                runtime_diagnostics.shutil, "which",
+                runtime_diagnostics.shutil,
+                "which",
                 side_effect=AssertionError("App Store resolver consulted PATH"),
             ),
         ):
@@ -252,11 +288,14 @@ class DistributionPolicyTests(unittest.TestCase):
 
     def test_app_store_ignores_ambient_path_overrides(self):
         external = "/tmp/must-not-be-treated-as-bundled/ffmpeg"
-        with patch.dict(os.environ, {
-            CHANNEL_ENV: APP_STORE_CHANNEL,
-            "SUBTITLE_FACTORY_ALLOW_ENV_PATHS": "1",
-            "SUBTITLE_FACTORY_BUNDLED_FFMPEG": external,
-        }):
+        with patch.dict(
+            os.environ,
+            {
+                CHANNEL_ENV: APP_STORE_CHANNEL,
+                "SUBTITLE_FACTORY_ALLOW_ENV_PATHS": "1",
+                "SUBTITLE_FACTORY_BUNDLED_FFMPEG": external,
+            },
+        ):
             self.assertFalse(config.environment_path_overrides_enabled())
             candidates = list(runtime_diagnostics._bundled_candidates("ffmpeg"))
         self.assertNotIn(Path(external), {path for path, _source in candidates})
@@ -264,34 +303,31 @@ class DistributionPolicyTests(unittest.TestCase):
     def test_app_store_hides_and_rejects_external_models(self):
         with patch.dict(os.environ, {CHANNEL_ENV: APP_STORE_CHANNEL}):
             catalog = self.client.get("/api/transcription/models")
-            responses = [
-                self.client.get("/api/transcription/models/imported"),
-                self.client.get("/api/transcription/models/custom/validate"),
-                self.client.post(
-                    "/api/transcription/models/parakeet-tdt-0.6b-v3-coreml/prepare",
-                    json={"runtime": "external_coreml"},
-                ),
-                self.client.put("/api/settings/app", json={
-                    "default_model": "local:external-model",
-                }),
-            ]
+            blocked = self.client.post(
+                "/api/transcription/models/parakeet-tdt-0.6b-v3-coreml/prepare",
+                json={"runtime": "external_coreml"},
+            )
         self.assertEqual(catalog.status_code, 200, catalog.text)
-        model_ids = {item["id"] for item in catalog.json()["models"]}
+        models = catalog.json()["models"]
+        model_ids = {item["id"] for item in models}
+        self.assertEqual(len(models), 27)
         self.assertNotIn("custom", model_ids)
         self.assertNotIn("parakeet-tdt-0.6b-v3-coreml", model_ids)
         self.assertFalse(any(model_id.startswith("local:") for model_id in model_ids))
-        for response in responses:
-            self.assertEqual(response.status_code, 403, response.text)
-            error = response.json()["error"]
-            self.assertEqual(error["code"], "DISTRIBUTION_FEATURE_UNAVAILABLE")
-            self.assertEqual(error["details"]["feature"], "external_runtime_paths")
+        self.assertEqual(blocked.status_code, 403, blocked.text)
+        error = blocked.json()["error"]
+        self.assertEqual(error["code"], "DISTRIBUTION_FEATURE_UNAVAILABLE")
+        self.assertEqual(error["details"]["feature"], "external_runtime_paths")
 
     def test_app_store_hides_legacy_youtube_projects_without_mutating_them(self):
-        created = self.client.post("/api/projects", json={
-            "title": "legacy hidden project",
-            "source_type": "youtube",
-            "source_url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
-        })
+        created = self.client.post(
+            "/api/projects",
+            json={
+                "title": "legacy hidden project",
+                "source_type": "youtube",
+                "source_url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+            },
+        )
         self.assertEqual(created.status_code, 201, created.text)
         project_id = created.json()["project_id"]
         db = get_db()
@@ -299,11 +335,17 @@ class DistributionPolicyTests(unittest.TestCase):
             db.execute(
                 """INSERT INTO segments(
                        id,project_id,idx,start,end,raw_text,clean_text,
-                       translated_text,speaker,locked,is_draft,source_stage
-                   ) VALUES (?,?,?,?,?,?,?,?,?,0,0,'final')""",
+                       translated_text,is_draft,source_stage
+                   ) VALUES (?,?,?,?,?,?,?,?,0,'final')""",
                 (
-                    f"legacy-segment-{project_id}", project_id, 1, 0.0, 1.0,
-                    "legacyneedle hidden text", "legacyneedle hidden text", "", "",
+                    f"legacy-segment-{project_id}",
+                    project_id,
+                    1,
+                    0.0,
+                    1.0,
+                    "legacyneedle hidden text",
+                    "legacyneedle hidden text",
+                    "",
                 ),
             )
             db.commit()
@@ -312,26 +354,21 @@ class DistributionPolicyTests(unittest.TestCase):
         with patch.dict(os.environ, {CHANNEL_ENV: APP_STORE_CHANNEL}):
             listing = self.client.get("/api/projects")
             detail = self.client.get(f"/api/projects/{project_id}")
-            youtube_filter = self.client.get("/api/projects?source_type=youtube")
         self.assertEqual(listing.status_code, 200, listing.text)
         self.assertNotIn(
-            project_id, {item["id"] for item in listing.json()["projects"]},
+            project_id, {item["id"] for item in listing.json()["projects"]}
         )
-        for response in (detail, youtube_filter):
-            self.assertEqual(response.status_code, 403, response.text)
-            self.assertEqual(
-                response.json()["error"]["details"]["feature"], "youtube",
-            )
+        self.assertEqual(detail.status_code, 403, detail.text)
+        self.assertEqual(detail.json()["error"]["details"]["feature"], "youtube")
         db = get_db()
         try:
             persisted = db.execute(
-                "SELECT source_type,source_url FROM projects WHERE id=?", (project_id,),
+                "SELECT source_type,source_url FROM projects WHERE id=?", (project_id,)
             ).fetchone()
         finally:
             db.close()
         self.assertEqual(persisted["source_type"], "youtube")
         self.assertIn("youtube.com", persisted["source_url"])
-
 
 
 if __name__ == "__main__":

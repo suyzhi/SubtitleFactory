@@ -1,28 +1,10 @@
-"""End-to-end integration test for the core subtitle workflow.
+"""End-to-end integration test for the simple-edition subtitle workflow.
 
-This test drives the real HTTP API surface (project creation, audio
-preparation, transcription, segment editing, and SRT export) without any
-network, FFmpeg/yt-dlp, or real model inference.  It covers the primary user
-journey:
+Covers the complete user journey through the real HTTP API without network,
+FFmpeg, or real ML inference:
 
-    创建本地项目 → 准备音频 → 转写 → 编辑字幕（改时间/文本、锁定）
-    → 导出 SRT → 校验导出内容
-
-Mocks (all offline and deterministic):
-  * Audio preparation: a minimal 16 kHz mono 16-bit WAV is written directly to
-    the managed audio directory and linked into the project row, replacing any
-    FFmpeg/PyAV extraction step.
-  * Transcription: ``app.api.projects.transcribe_audio`` is monkeypatched to
-    publish two fixed subtitle segments straight into ``segments`` (the same
-    schema the real transcriber writes), and ``app.api.projects.task_manager``
-    is replaced with a synchronous fake so the background worker runs inline
-    and the endpoint returns only after segments are committed.
-  * Everything else (creation, editing, locking, export) runs through the real
-    endpoints and real file system.
-
-A second test exercises a recovery-oriented invariant: a locked segment is
-never silently overwritten by a content edit, and the exported SRT still
-carries the locked original text.
+    创建本地项目 → 导入本地视频 → 一键工作流（音频提取 + 转写 + AI 整理 + AI 翻译）
+    → 读取字幕 → 导出并下载原文/双语 SRT
 """
 
 import os
@@ -31,6 +13,7 @@ import tempfile
 import unittest
 import uuid
 import wave
+from contextlib import nullcontext
 from pathlib import Path
 from unittest.mock import patch
 
@@ -54,9 +37,15 @@ class _SynchronousTaskManager:
     def __init__(self) -> None:
         self._counter = 0
 
+    def active_task_ids(self, _project_id):
+        return []
+
     def create_task(self, _project_id, kind, **_options):
         self._counter += 1
         return f"e2e-task-{kind}-{self._counter}"
+
+    def get_task(self, _task_id):
+        return {"status": "running", "details": {}}
 
     def update_task(self, *_args, **_kwargs):
         return None
@@ -64,8 +53,10 @@ class _SynchronousTaskManager:
     def add_log(self, *_args, **_kwargs):
         return None
 
+    def resource_slot(self, *_args, **_kwargs):
+        return nullcontext()
+
     def run_background(self, _task_id, worker, *args, **kwargs):
-        # Execute the worker inline; no thread is spawned.
         worker(_task_id, *args, **kwargs)
         return None
 
@@ -74,7 +65,6 @@ class _SynchronousTaskManager:
 
 
 def _make_minimal_wav(path: Path, seconds: int = 2) -> Path:
-    """Write a valid 16 kHz mono 16-bit PCM WAV long enough to pass preflight."""
     path.parent.mkdir(parents=True, exist_ok=True)
     with wave.open(str(path), "wb") as output:
         output.setnchannels(1)
@@ -85,7 +75,6 @@ def _make_minimal_wav(path: Path, seconds: int = 2) -> Path:
 
 
 def _publish_segments(_task_id, _audio_path, project_id, _language, _model, _runtime=None):
-    """Replace real model inference: write deterministic segments atomically."""
     segments = [
         (1, 0.0, 1.5, "Hello world"),
         (2, 1.6, 3.0, "This is the second line"),
@@ -117,7 +106,6 @@ class EndToEndFlowTests(unittest.TestCase):
         root = Path(self.temp_dir.name)
         self.db_patch = patch.object(database, "DB_PATH", root / "factory.db")
         self.db_patch.start()
-        # Pin every managed directory under the isolated temp root.
         self.path_patches = [
             patch.object(projects, "DATA_DIR", root),
             patch.object(projects, "PROJECTS_DIR", root / "projects"),
@@ -143,17 +131,26 @@ class EndToEndFlowTests(unittest.TestCase):
         self.db_patch.stop()
         self.temp_dir.cleanup()
 
-    def _create_project(self) -> str:
-        response = self.client.post("/api/projects", json={
-            "source_type": "local",
-            "title": "端到端流程",
-            "language": "en",
-            "target_language": "zh",
-        })
-        self.assertEqual(response.status_code, 201, response.text)
-        return response.json()["project_id"]
+    def _create_and_import_project(self) -> str:
+        created = self.client.post(
+            "/api/projects",
+            json={
+                "source_type": "local",
+                "title": "端到端流程",
+                "language": "en",
+                "target_language": "zh",
+            },
+        )
+        self.assertEqual(created.status_code, 201, created.text)
+        project_id = created.json()["project_id"]
+        uploaded = self.client.post(
+            f"/api/projects/{project_id}/import-local",
+            files={"file": ("sample.mp4", b"fake-mp4-bytes", "video/mp4")},
+        )
+        self.assertEqual(uploaded.status_code, 200, uploaded.text)
+        return project_id
 
-    def _prepare_audio(self, project_id: str) -> Path:
+    def _fake_extract_audio(self, _task_id, project_id, _video_path, **_kwargs):
         audio_path = _make_minimal_wav(self.root / "audio" / project_id / "audio.wav")
         db = database.get_db()
         db.execute(
@@ -161,65 +158,34 @@ class EndToEndFlowTests(unittest.TestCase):
         )
         db.commit()
         db.close()
-        return audio_path
-
-    def _transcribe(self, project_id: str):
-        manager = _SynchronousTaskManager()
-        with patch("app.api.projects.task_manager", manager), patch(
-            "app.api.projects.transcribe_audio", new=_publish_segments
-        ):
-            response = self.client.post(
-                f"/api/projects/{project_id}/transcribe",
-                data={"model": "small", "runtime": "cpu", "language": "en"},
-            )
-        self.assertEqual(response.status_code, 200, response.text)
-        return response.json()["task_id"]
 
     def _segments(self, project_id: str):
         response = self.client.get(f"/api/projects/{project_id}/segments")
         self.assertEqual(response.status_code, 200, response.text)
         return response.json()["segments"]
 
-    def test_full_workflow_creates_edits_and_exports_subtitles(self):
-        # 1) 创建本地项目
-        project_id = self._create_project()
+    def test_workflow_transcribes_and_exports_downloadable_srt(self):
+        project_id = self._create_and_import_project()
+        manager = _SynchronousTaskManager()
 
-        # 2) 准备音频（写入最小 WAV，替代 FFmpeg 提取）
-        audio_path = self._prepare_audio(project_id)
-        self.assertTrue(audio_path.is_file())
+        with (
+            patch("app.api.projects.task_manager", manager),
+            patch("app.api.projects._do_extract_audio", side_effect=self._fake_extract_audio),
+            patch("app.api.projects.transcribe_audio", new=_publish_segments),
+        ):
+            started = self.client.post(
+                f"/api/projects/{project_id}/workflow",
+                json={"model": "small", "runtime": "cpu", "language": "en"},
+            )
+        self.assertEqual(started.status_code, 200, started.text)
+        self.assertTrue(started.json()["task_id"])
 
-        # 3) 转写（monkeypatch 推理，写入确定性子幕段）
-        task_id = self._transcribe(project_id)
-        self.assertTrue(task_id)
         segments = self._segments(project_id)
-        self.assertEqual([item["clean_text"] for item in segments], [
-            "Hello world", "This is the second line",
-        ])
-
-        # 4) 编辑：改第一条的文本与时间码；锁定第二条
-        edited = self.client.patch(
-            f"/api/projects/{project_id}/segments/1",
-            json={"start": 0.1, "end": 1.4, "clean_text": "Hello edited world"},
+        self.assertEqual(
+            [item["clean_text"] for item in segments],
+            ["Hello world", "This is the second line"],
         )
-        self.assertEqual(edited.status_code, 200, edited.text)
-        self.assertEqual(edited.json()["clean_text"], "Hello edited world")
-        self.assertAlmostEqual(edited.json()["start"], 0.1)
-        self.assertAlmostEqual(edited.json()["end"], 1.4)
 
-        locked = self.client.patch(
-            f"/api/projects/{project_id}/segments/2",
-            json={"locked": True},
-        )
-        self.assertEqual(locked.status_code, 200, locked.text)
-        self.assertTrue(locked.json()["locked"])
-
-        # 读回验证编辑已持久化
-        segments = self._segments(project_id)
-        self.assertEqual(segments[0]["clean_text"], "Hello edited world")
-        self.assertTrue(segments[1]["locked"])
-        self.assertEqual(segments[1]["clean_text"], "This is the second line")
-
-        # 5) 导出 SRT
         exported = self.client.post(
             f"/api/projects/{project_id}/export",
             json={"format": "srt", "bilingual": False},
@@ -228,40 +194,76 @@ class EndToEndFlowTests(unittest.TestCase):
         srt_path = Path(exported.json()["path"])
         self.assertTrue(srt_path.is_file())
 
-        # 6) 校验导出内容包含编辑后的文本与锁定原文
-        content = srt_path.read_text(encoding="utf-8")
-        self.assertIn("Hello edited world", content)
-        self.assertIn("This is the second line", content)
-        self.assertIn("00:00:00,100 --> 00:00:01,400", content)
-
-    def test_locked_segment_survives_content_edit_and_export(self):
-        # 创建、准备音频、转写（与主链路一致）
-        project_id = self._create_project()
-        self._prepare_audio(project_id)
-        self._transcribe(project_id)
-
-        # 锁定第二条，随后尝试改它的 clean_text（不带 include_locked）
-        self.client.patch(
-            f"/api/projects/{project_id}/segments/2",
-            json={"locked": True},
+        downloaded = self.client.get(
+            f"/api/projects/{project_id}/export/download?fmt=srt"
         )
-        attempted = self.client.patch(
-            f"/api/projects/{project_id}/segments/2",
-            json={"clean_text": "Must not overwrite"},
-        )
-        # 单条编辑接口对锁定段的正文修改保持静默跳过（正文未变化）
-        self.assertEqual(attempted.status_code, 200)
-        self.assertEqual(attempted.json()["clean_text"], "This is the second line")
+        self.assertEqual(downloaded.status_code, 200, downloaded.text)
+        self.assertIn("Hello world", downloaded.text)
+        self.assertIn("This is the second line", downloaded.text)
+        self.assertIn("00:00:00,000 --> 00:00:01,500", downloaded.text)
 
-        # 导出后锁定原文仍存在，且锁定状态仍为 True
+    def test_clean_translate_and_bilingual_srt_export(self):
+        project_id = self._create_and_import_project()
+        manager = _SynchronousTaskManager()
+
+        def fake_clean(_task_id, pid, _target_length, *_args):
+            db = database.get_db()
+            db.execute(
+                "UPDATE segments SET clean_text='Hello, world.' WHERE project_id=? AND idx=1",
+                (pid,),
+            )
+            db.commit()
+            db.close()
+
+        def fake_translate(_task_id, pid, _target_lang, *_args):
+            db = database.get_db()
+            db.execute(
+                "UPDATE segments SET translated_text='你好，世界。' WHERE project_id=? AND idx=1",
+                (pid,),
+            )
+            db.execute(
+                "UPDATE segments SET translated_text='这是第二行。' WHERE project_id=? AND idx=2",
+                (pid,),
+            )
+            db.commit()
+            db.close()
+
+        with (
+            patch("app.api.projects.task_manager", manager),
+            patch("app.api.projects._do_extract_audio", side_effect=self._fake_extract_audio),
+            patch("app.api.projects.transcribe_audio", new=_publish_segments),
+            patch("app.api.projects._do_clean", side_effect=fake_clean),
+            patch("app.api.projects._do_translate", side_effect=fake_translate),
+        ):
+            response = self.client.post(
+                f"/api/projects/{project_id}/workflow",
+                json={
+                    "model": "small",
+                    "runtime": "cpu",
+                    "language": "en",
+                    "enable_clean": True,
+                    "enable_translate": True,
+                    "target_language": "zh",
+                    "text_processing_consent": True,
+                },
+            )
+        self.assertEqual(response.status_code, 200, response.text)
+
         exported = self.client.post(
             f"/api/projects/{project_id}/export",
-            json={"format": "srt"},
+            json={
+                "format": "srt-bilingual",
+                "bilingual": True,
+                "primary_language": "translated",
+            },
         )
-        content = Path(exported.json()["path"]).read_text(encoding="utf-8")
-        self.assertIn("This is the second line", content)
-        self.assertNotIn("Must not overwrite", content)
-        self.assertTrue(self._segments(project_id)[1]["locked"])
+        self.assertEqual(exported.status_code, 200, exported.text)
+        downloaded = self.client.get(
+            f"/api/projects/{project_id}/export/download?fmt=srt-bilingual"
+        )
+        self.assertEqual(downloaded.status_code, 200, downloaded.text)
+        self.assertIn("你好，世界。\nHello, world.", downloaded.text)
+        self.assertIn("这是第二行。\nThis is the second line", downloaded.text)
 
 
 if __name__ == "__main__":

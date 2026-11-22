@@ -295,7 +295,7 @@ QWEN_ASR_MODEL_CATALOG: tuple[ModelDefinition, ...] = (
 
 QWEN_ASR_CATALOG_BY_ID = {item.id: item for item in QWEN_ASR_MODEL_CATALOG}
 MODEL_CATALOG_BY_ID = {**WHISPER_CATALOG_BY_ID, **QWEN_ASR_CATALOG_BY_ID}
-MODEL_CATEGORY_ORDER = ("lightweight", "balanced", "performance", "english", "parakeet", "cloud")
+MODEL_CATEGORY_ORDER = ("lightweight", "balanced", "performance", "english", "parakeet")
 _MANIFEST_NAME = ".subtitle-factory-manifest.json"
 _DOWNLOAD_LOCK = threading.Lock()
 

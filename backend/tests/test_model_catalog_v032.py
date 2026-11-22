@@ -65,7 +65,7 @@ EXPECTED_REPOSITORIES = {
 
 
 class CatalogContractTests(unittest.TestCase):
-    def test_api_exposes_exactly_twenty_nine_grouped_release_models(self):
+    def test_api_exposes_exactly_twenty_eight_grouped_release_models(self):
         response = TestClient(app).get(
             "/api/transcription/models",
             headers={},
@@ -76,14 +76,14 @@ class CatalogContractTests(unittest.TestCase):
             item for item in payload["models"]
             if item.get("category_id") in payload["category_order"]
         ]
-        self.assertEqual(len(release_models), 29)
+        self.assertEqual(len(release_models), 28)
         self.assertEqual(payload["recommended_model"], "small")
         self.assertEqual(
             payload["category_order"],
             [
                 "lightweight", "balanced", "performance", "multilingual",
                 "chinese", "dialects", "english", "east_asian", "european",
-                "specialized", "parakeet", "cloud",
+                "specialized", "parakeet",
             ],
         )
         for item in release_models:

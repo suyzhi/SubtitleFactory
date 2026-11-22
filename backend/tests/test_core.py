@@ -1,4 +1,5 @@
 import os
+import re
 import sys
 import tempfile
 import threading
@@ -27,8 +28,6 @@ from app.services.ai_providers import (
     prepare_chat_payload,
     save_provider,
 )
-from app.services.ai_settings import get_ai_settings, save_ai_settings
-from app.services.ffmpeg_encoding import select_h264_encoder_args
 from app.services.subtitle_cleaner import (
     _build_semantic_batches,
     _call_llm_group,
@@ -38,13 +37,11 @@ from app.services.subtitle_cleaner import (
     _validate_batch_results,
     _validate_grouped_results,
     clean_subtitles,
-    retry_clean_batch,
-    undo_last_clean,
 )
-from app.services.subtitle_exporter import export_ass, export_srt
+from app.services.subtitle_exporter import _format_srt_time, export_srt
 from app.services.subtitle_translator import _call_llm_translate
 from app.services.transcriber import _post_process_segments
-from app.utils.task_manager import TaskManager, task_manager
+from app.utils.task_manager import TaskManager
 
 
 class TimestampSegmentationTests(unittest.TestCase):
@@ -75,7 +72,6 @@ class TimestampSegmentationTests(unittest.TestCase):
             {"start": 3.2, "end": 4.5, "text": "three"},
         ])
         self.assertEqual([item["index"] for item in output], list(range(1, len(output) + 1)))
-        # 错位配对（前一条与后一条比较），长度刻意不等，禁用 B905
         for previous, current in zip(output, output[1:]):  # noqa: B905
             self.assertLessEqual(previous["end"], current["start"])
             self.assertGreater(current["end"], current["start"])
@@ -146,8 +142,6 @@ class AIResultValidationTests(unittest.TestCase):
 
     def test_deepseek_thinking_is_disabled_for_every_model_name_by_default(self):
         base = {"model": "deepseek-flash", "messages": [], "max_tokens": 4096}
-        # deepseek-flash is the current API name; the old exact-name check missed
-        # it and left thinking on, truncating JSON and forcing recursive splits.
         for model in ("deepseek-flash", "deepseek-v4-flash", "deepseek-v4-pro", "deepseek-chat"):
             deepseek = prepare_chat_payload({"provider": "deepseek", "model": model}, base)
             self.assertEqual(deepseek["thinking"], {"type": "disabled"}, model)
@@ -199,7 +193,8 @@ class AIResultValidationTests(unittest.TestCase):
                 f"UPDATE ai_provider_configs SET {','.join(f'{column}=?' for column in columns)} WHERE provider_id='deepseek'",
                 [snapshot[column] for column in columns],
             )
-            db.commit(); db.close()
+            db.commit()
+            db.close()
 
     def test_cleaner_length_finish_adaptively_splits_and_recovers(self):
         batch = [
@@ -269,11 +264,13 @@ class AIResultValidationTests(unittest.TestCase):
             {"idx": idx, "start": float(idx - 1), "end": float(idx), "raw_text": text}
             for idx, text in enumerate(["One.", "Two.", "Three.", "Four."], 1)
         ]
+
         def invalid():
             return SimpleNamespace(
                 raise_for_status=lambda: None,
                 json=lambda: {"choices": [{"finish_reason": "stop", "message": {"content": "not-json"}}]},
             )
+
         left = SimpleNamespace(
             raise_for_status=lambda: None,
             json=lambda: {"choices": [{"finish_reason": "stop", "message": {"content":
@@ -296,7 +293,7 @@ class AIResultValidationTests(unittest.TestCase):
 
     def test_semantic_batches_are_bounded_to_32_rows(self):
         rows = [
-            {"idx": idx, "raw_text": f"Sentence {idx}.", "locked": 0}
+            {"idx": idx, "raw_text": f"Sentence {idx}."}
             for idx in range(1, 66)
         ]
         batches = _build_semantic_batches(rows)
@@ -321,7 +318,6 @@ class AIResultValidationTests(unittest.TestCase):
         self.assertEqual(supplied["context_before"][0]["id"], "1")
         self.assertEqual(supplied["context_after"][0]["id"], "3")
         self.assertEqual(result, [{"id": "2", "translated_text": "当前句"}])
-
 
     def test_reorders_valid_ai_results_to_input_order(self):
         batch = [{"id": "1"}, {"id": "2"}]
@@ -384,7 +380,7 @@ class AIResultValidationTests(unittest.TestCase):
             "The launch was delayed because the engine failed twice",
         )
 
-    def test_cleanup_rewrite_is_undoable(self):
+    def test_cleanup_commit_merges_segments_atomically(self):
         init_db()
         project_id = str(__import__("uuid").uuid4())
         now = time.strftime("%Y-%m-%d %H:%M:%S")
@@ -394,104 +390,52 @@ class AIResultValidationTests(unittest.TestCase):
             (project_id, "group test", "local", "en", "zh", now, now),
         )
         original = []
-        for idx, text in enumerate(["I want to", "show you this", "Locked line"], 1):
+        for idx, text in enumerate(["I want to", "show you this", "Final line."], 1):
             row = {
                 "id": str(__import__("uuid").uuid4()), "project_id": project_id, "idx": idx,
                 "start": float(idx - 1), "end": float(idx), "raw_text": text, "clean_text": text,
-                "translated_text": "旧译文", "speaker": "", "locked": 1 if idx == 3 else 0,
-                "is_draft": 0, "source_stage": "postprocessed",
+                "translated_text": "旧译文", "is_draft": 0, "source_stage": "postprocessed",
             }
             original.append(row)
             db.execute(
-                "INSERT INTO segments (id,project_id,idx,start,end,raw_text,clean_text,translated_text,speaker,locked,is_draft,source_stage) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-                tuple(row[key] for key in ["id","project_id","idx","start","end","raw_text","clean_text","translated_text","speaker","locked","is_draft","source_stage"]),
+                "INSERT INTO segments (id,project_id,idx,start,end,raw_text,clean_text,translated_text,is_draft,source_stage) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                tuple(row[key] for key in ["id", "project_id", "idx", "start", "end", "raw_text", "clean_text", "translated_text", "is_draft", "source_stage"]),
             )
-        db.commit(); db.close()
+        db.commit()
+        db.close()
 
-        final = _compose_final_segments(original, [{"ids": ["1", "2"], "clean_text": "I want to show you this."}])
+        final = _compose_final_segments(
+            original,
+            [
+                {"ids": ["1", "2"], "clean_text": "I want to show you this."},
+                {"ids": ["3"], "clean_text": "Final line."},
+            ],
+        )
         self.assertEqual(len(final), 2)
         self.assertEqual(final[0]["end"], 2.0)
         self.assertEqual(final[0]["translated_text"], "")
-        self.assertEqual(final[1]["locked"], 1)
-        _commit_restructured_segments(project_id, original, _fingerprint(original), final)
-        self.assertEqual(undo_last_clean(project_id), 3)
+        conflicts = _commit_restructured_segments(project_id, original, _fingerprint(original), final)
+        self.assertEqual(conflicts, 0)
         db = get_db()
-        restored = db.execute("SELECT * FROM segments WHERE project_id=? ORDER BY idx", (project_id,)).fetchall()
+        published = db.execute("SELECT * FROM segments WHERE project_id=? ORDER BY idx", (project_id,)).fetchall()
         db.close()
-        self.assertEqual([row["raw_text"] for row in restored], ["I want to", "show you this", "Locked line"])
-
-    def test_failed_clean_batch_retry_only_reconciles_stored_range(self):
-        init_db()
-        project_id = str(__import__("uuid").uuid4())
-        now = time.strftime("%Y-%m-%d %H:%M:%S")
-        db = get_db()
-        db.execute(
-            "INSERT INTO projects (id,title,source_type,language,target_language,created_at,updated_at) VALUES (?,?,?,?,?,?,?)",
-            (project_id, "single batch retry", "local", "en", "zh", now, now),
-        )
-        rows = []
-        for idx, text in enumerate(["Keep this.", "Merge", "these", "Keep that."], 1):
-            row = {
-                "id": str(__import__("uuid").uuid4()), "project_id": project_id, "idx": idx,
-                "start": float(idx - 1), "end": float(idx), "raw_text": text, "clean_text": text,
-                "translated_text": "", "speaker": "", "locked": 0, "is_draft": 0,
-                "source_stage": "postprocessed",
-            }
-            rows.append(row)
-            db.execute(
-                "INSERT INTO segments (id,project_id,idx,start,end,raw_text,clean_text,translated_text,speaker,locked,is_draft,source_stage) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-                tuple(row[key] for key in ["id","project_id","idx","start","end","raw_text","clean_text","translated_text","speaker","locked","is_draft","source_stage"]),
-            )
-        original_task = task_manager.create_task(project_id, "clean")
-        retry_task = task_manager.create_task(project_id, "clean", max_attempts=1)
-        fingerprint = __import__("json").dumps({
-            "segments": _fingerprint(rows[1:3]), "provider": "deepseek",
-            "model": "deepseek-chat", "target_length": 42,
-        }, ensure_ascii=False, sort_keys=True)
-        db.execute(
-            """INSERT INTO ai_batch_results
-               (task_id,project_id,operation,batch_index,input_fingerprint,status,result_json,attempts,error,updated_at)
-               VALUES (?,?,?,?,?,'failed','[]',3,'invalid json',?)""",
-            (original_task, project_id, "clean", 2, fingerprint, now),
-        )
-        db.commit(); db.close()
-
-        provider = {"provider": "deepseek", "model": "deepseek-chat", "base_url": "http://example.test/v1", "api_key": "secret"}
-        with patch("app.services.subtitle_cleaner.assigned_provider", return_value=provider), patch(
-            "app.services.subtitle_cleaner._call_llm_group",
-            return_value=[{"ids": ["2", "3"], "clean_text": "Merge these."}],
-        ) as call:
-            retry_clean_batch(retry_task, original_task, 2)
-
-        call.assert_called_once()
-        self.assertEqual([row["idx"] for row in call.call_args.args[0]], [2, 3])
-        db = get_db()
-        published = db.execute(
-            "SELECT raw_text,clean_text FROM segments WHERE project_id=? ORDER BY idx", (project_id,),
-        ).fetchall()
-        batch_status = db.execute(
-            "SELECT status FROM ai_batch_results WHERE task_id=? AND batch_index=2", (original_task,),
-        ).fetchone()["status"]
-        db.close()
-        self.assertEqual([row["raw_text"] for row in published], ["Keep this.", "Merge these", "Keep that."])
-        self.assertEqual(published[1]["clean_text"], "Merge these.")
-        self.assertEqual(batch_status, "success")
+        self.assertEqual([row["clean_text"] for row in published], ["I want to show you this.", "Final line."])
+        self.assertEqual([row["idx"] for row in published], [1, 2])
 
 
-class TaskPauseTests(unittest.TestCase):
+class TaskBehaviorTests(unittest.TestCase):
     def test_task_api_promotes_failure_suggestion_and_actions(self):
         public = _task_dict({
             "id": "task", "project_id": "project", "type": "download",
             "status": "failed", "details": {
-                "failure_suggestion": "请在 Chrome 中确认权限",
-                "download": {"authenticated_attempted": True},
+                "failure_suggestion": "请检查网络后重试",
+                "download": {"authenticated_attempted": False},
             },
-            "logs": [], "available_actions": ["retry", "open_settings"],
+            "logs": [], "available_actions": ["retry"],
             "recoverable": 1,
         })
-        self.assertEqual(public["suggestion"], "请在 Chrome 中确认权限")
-        self.assertEqual(public["available_actions"], ["retry", "open_settings"])
-        self.assertTrue(public["details"]["download"]["authenticated_attempted"])
+        self.assertEqual(public["suggestion"], "请检查网络后重试")
+        self.assertEqual(public["available_actions"], ["retry"])
 
     def test_successful_automatic_retry_clears_transient_error_fields(self):
         manager = TaskManager(max_workers=1)
@@ -530,7 +474,7 @@ class TaskPauseTests(unittest.TestCase):
             recoverable = True
             automatic_retry = False
             available_actions = ["retry"]
-            suggestion = "请切换到有权限的账号"
+            suggestion = "请检查视频权限"
 
         def worker(_runtime_task_id):
             nonlocal calls
@@ -546,85 +490,8 @@ class TaskPauseTests(unittest.TestCase):
         self.assertEqual(task["error_code"], "MEMBERSHIP_REQUIRED")
         manager.shutdown()
 
-    def test_worker_pauses_and_resumes_at_checkpoint(self):
-        manager = TaskManager(max_workers=1)
-        task_id = manager.create_task("project", "translate")
-        checkpoints = []
-
-        def worker(runtime_task_id):
-            for index in range(4):
-                manager.wait_if_paused(runtime_task_id)
-                checkpoints.append(index)
-                time.sleep(0.08)
-
-        manager.run_background(task_id, worker)
-        deadline = time.time() + 2
-        while len(checkpoints) < 1 and time.time() < deadline:
-            time.sleep(0.01)
-        self.assertTrue(manager.pause_task(task_id))
-        paused_count = len(checkpoints)
-        time.sleep(0.2)
-        self.assertLessEqual(len(checkpoints), paused_count + 1)
-        self.assertEqual(manager.get_task(task_id)["status"], "paused")
-        self.assertTrue(manager.resume_task(task_id))
-        deadline = time.time() + 2
-        while manager.get_task(task_id)["status"] != "success" and time.time() < deadline:
-            time.sleep(0.02)
-        self.assertEqual(manager.get_task(task_id)["status"], "success")
-        self.assertEqual(checkpoints, [0, 1, 2, 3])
-        manager.shutdown()
-
 
 class TaskCancellationTests(unittest.TestCase):
-    def test_active_tasks_keeps_an_unwinding_future_visible(self):
-        manager = TaskManager(max_workers=1)
-        started = threading.Event()
-        release = threading.Event()
-
-        def worker(_task_id):
-            started.set()
-            release.wait(2)
-
-        task_id = manager.create_task("project", "render")
-        future = manager.run_background(task_id, worker)
-        self.assertTrue(started.wait(1))
-        self.assertEqual([task["id"] for task in manager.active_tasks()], [task_id])
-        self.assertTrue(manager.cancel_task(task_id))
-        self.assertEqual([task["id"] for task in manager.active_tasks()], [task_id])
-        release.set()
-        future.result(timeout=2)
-        deadline = time.time() + 1
-        while manager.active_tasks() and time.time() < deadline:
-            time.sleep(0.01)
-        self.assertEqual(manager.active_tasks(), [])
-        manager.shutdown()
-
-    def test_exclusive_maintenance_closes_the_task_creation_race(self):
-        manager = TaskManager(max_workers=1)
-        acquired, active = manager.begin_exclusive_maintenance("database_restore")
-        self.assertTrue(acquired)
-        self.assertEqual(active, [])
-        with self.assertRaisesRegex(RuntimeError, "数据库恢复已开始"):
-            manager.create_task("project", "render")
-        manager.end_exclusive_maintenance("database_restore")
-        task_id = manager.create_task("project", "render")
-        self.assertTrue(task_id)
-        manager.shutdown()
-
-    def test_exclusive_maintenance_refuses_an_in_flight_api_write(self):
-        manager = TaskManager(max_workers=1)
-        self.assertTrue(manager.begin_api_mutation())
-        acquired, active = manager.begin_exclusive_maintenance("database_restore")
-        self.assertFalse(acquired)
-        self.assertEqual(active[0]["type"], "database_write")
-        manager.end_api_mutation()
-        acquired, active = manager.begin_exclusive_maintenance("database_restore")
-        self.assertTrue(acquired)
-        self.assertEqual(active, [])
-        self.assertFalse(manager.begin_api_mutation())
-        manager.end_exclusive_maintenance("database_restore")
-        manager.shutdown()
-
     def test_pending_task_is_cancelled_before_worker_starts(self):
         manager = TaskManager(max_workers=1)
         blocker_started = threading.Event()
@@ -671,33 +538,7 @@ class TaskCancellationTests(unittest.TestCase):
         future.result(timeout=2)
         self.assertFalse(passed_checkpoint.is_set())
         self.assertEqual(manager.get_task(task_id)["status"], "cancelled")
-        # Late worker updates cannot revive the terminal task.
         manager.update_task(task_id, status="success", progress=100)
-        self.assertEqual(manager.get_task(task_id)["status"], "cancelled")
-        manager.shutdown()
-
-    def test_cancelling_paused_task_wakes_worker(self):
-        manager = TaskManager(max_workers=1)
-        started = threading.Event()
-        enter_checkpoint = threading.Event()
-        passed_checkpoint = threading.Event()
-
-        def worker(runtime_task_id):
-            started.set()
-            enter_checkpoint.wait(2)
-            manager.checkpoint(runtime_task_id)
-            passed_checkpoint.set()
-
-        task_id = manager.create_task("project", "paused")
-        future = manager.run_background(task_id, worker)
-        self.assertTrue(started.wait(1))
-        self.assertTrue(manager.pause_task(task_id))
-        enter_checkpoint.set()
-        time.sleep(0.05)
-        self.assertEqual(manager.get_task(task_id)["status"], "paused")
-        self.assertTrue(manager.cancel_task(task_id))
-        future.result(timeout=2)
-        self.assertFalse(passed_checkpoint.is_set())
         self.assertEqual(manager.get_task(task_id)["status"], "cancelled")
         manager.shutdown()
 
@@ -714,10 +555,10 @@ class TaskCancellationTests(unittest.TestCase):
         for idx, text in enumerate(original_texts, 1):
             db.execute(
                 """INSERT INTO segments
-                   (id,project_id,idx,start,end,raw_text,clean_text,translated_text,speaker,locked,is_draft,source_stage)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+                   (id,project_id,idx,start,end,raw_text,clean_text,translated_text,is_draft,source_stage)
+                   VALUES (?,?,?,?,?,?,?,?,?,?)""",
                 (str(__import__("uuid").uuid4()), project_id, idx, idx - 1, idx,
-                 text, text, "", "", 0, 0, "postprocessed"),
+                 text, text, "", 0, "postprocessed"),
             )
         db.commit()
         db.close()
@@ -736,7 +577,7 @@ class TaskCancellationTests(unittest.TestCase):
 
         task_id = manager.create_task(project_id, "clean")
         with patch("app.services.subtitle_cleaner.task_manager", manager), patch(
-            "app.services.subtitle_cleaner.get_ai_settings",
+            "app.services.subtitle_cleaner.assigned_provider",
             return_value={
                 "api_key": "secret", "provider": "test", "model": "test",
                 "base_url": "http://example.test/v1",
@@ -753,13 +594,9 @@ class TaskCancellationTests(unittest.TestCase):
             "SELECT raw_text, clean_text FROM segments WHERE project_id=? ORDER BY idx",
             (project_id,),
         ).fetchall()
-        revision_count = db.execute(
-            "SELECT COUNT(*) FROM segment_revisions WHERE project_id=?", (project_id,)
-        ).fetchone()[0]
         db.close()
         self.assertEqual([row["raw_text"] for row in rows], original_texts)
         self.assertEqual([row["clean_text"] for row in rows], original_texts)
-        self.assertEqual(revision_count, 0)
         self.assertEqual(manager.get_task(task_id)["status"], "cancelled")
         manager.shutdown()
 
@@ -769,11 +606,11 @@ class PersistenceAndExportTests(unittest.TestCase):
     def setUpClass(cls):
         init_db()
 
-    def test_ai_secret_is_masked_on_read(self):
-        saved = save_ai_settings("custom", "http://127.0.0.1:11434/v1", "local-model", "secret")
+    def test_ai_provider_secret_is_masked_on_read(self):
+        saved = save_provider("custom", "http://127.0.0.1:11434/v1", "local-model", "secret")
         self.assertTrue(saved["has_api_key"])
         self.assertEqual(saved["api_key"], "")
-        self.assertEqual(get_ai_settings(include_secret=True)["api_key"], "secret")
+        self.assertEqual(get_provider("custom", include_secret=True)["api_key"], "secret")
 
     def test_bilingual_srt_preserves_timestamps_and_order(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -798,33 +635,66 @@ class PersistenceAndExportTests(unittest.TestCase):
             self.assertNotIn("Hello!", content)
             self.assertIn("00:00:01,000 --> 00:00:02,000\nBye.\n", content)
 
-    def test_ass_export_works_with_installed_pysubs2_api(self):
+    def test_srt_timestamps_round_trip_without_losing_a_millisecond(self):
+        # Every millisecond of two seconds plus hour-scale values. Float
+        # seconds such as 1.001 used to be truncated to 00:00:01,000.
+        milliseconds = [*range(1000, 2000), *range(59000, 60001), 3723004, 39599999]
+
+        def stamp(value):
+            hours, rest = divmod(value, 3600000)
+            minutes, rest = divmod(rest, 60000)
+            seconds, millis = divmod(rest, 1000)
+            return f"{hours:02d}:{minutes:02d}:{seconds:02d},{millis:03d}"
+
         with tempfile.TemporaryDirectory() as folder:
-            path = Path(folder) / "out.ass"
-            export_ass([{
-                "index": 1, "start": 0.0, "end": 1.5,
-                "raw_text": "Hello", "clean_text": "Hello\nWorld", "translated_text": "你好\n世界",
-            }], str(path), bilingual=True)
-            content = path.read_text(encoding="utf-8-sig")
-            self.assertIn("[V4+ Styles]", content)
-            self.assertIn(r"Hello\NWorld", content)
-            self.assertIn(r"你好\N世界", content)
-            self.assertNotIn("Hello\nWorld", content)
+            expected_timings = [
+                f"{stamp(start)} --> {stamp(end)}"
+                for start, end in zip(milliseconds, milliseconds[1:], strict=False)
+            ]
+            segments = [
+                {
+                    "index": index,
+                    "start": start / 1000.0,
+                    "end": end / 1000.0,
+                    "raw_text": f"Cue {index}",
+                    "clean_text": f"Cue {index}",
+                    "translated_text": "",
+                }
+                for index, (start, end) in enumerate(
+                    zip(milliseconds, milliseconds[1:], strict=False), 1
+                )
+            ]
+            path = Path(folder) / "out.srt"
+            export_srt(segments, str(path))
+            exported = re.findall(r"^\S+ --> \S+$", path.read_text(encoding="utf-8"), re.M)
+            self.assertEqual(exported, expected_timings)
 
+    def test_timestamp_rounding_carries_into_seconds_minutes_and_hours(self):
+        self.assertEqual(_format_srt_time(1.001), "00:00:01,001")
+        self.assertEqual(_format_srt_time(1.0004), "00:00:01,000")
+        self.assertEqual(_format_srt_time(59.9996), "00:01:00,000")
+        self.assertEqual(_format_srt_time(3599.9996), "01:00:00,000")
+        self.assertEqual(_format_srt_time(-0.0004), "00:00:00,000")
 
-    def test_encoder_probe_uses_videotoolbox_without_x264_options(self):
-        probe = SimpleNamespace(
-            stdout=" V....D h264_videotoolbox VideoToolbox H.264 Encoder\n",
-            stderr="",
-        )
-        with patch("app.services.ffmpeg_encoding.subprocess.run", return_value=probe):
-            arguments, name = select_h264_encoder_args("/app/bin/ffmpeg")
-        self.assertEqual(name, "h264_videotoolbox")
-        self.assertIn("6M", arguments)
-        self.assertNotIn("-preset", arguments)
-        self.assertNotIn("-crf", arguments)
-
-
+    def test_blank_lines_inside_a_cue_do_not_split_srt(self):
+        segments = [
+            {"index": 1, "start": 0.0, "end": 1.0, "raw_text": "",
+             "clean_text": "line one\n\nline two\r\n  \nline three",
+             "translated_text": "译文\n\n第二行"},
+            {"index": 2, "start": 1.5, "end": 2.0,
+             "raw_text": "next cue", "clean_text": "", "translated_text": ""},
+        ]
+        for bilingual in (False, True):
+            with self.subTest(bilingual=bilingual), tempfile.TemporaryDirectory() as folder:
+                path = Path(folder) / "out.srt"
+                export_srt(segments, str(path), bilingual=bilingual)
+                blocks = [block.strip() for block in path.read_text(encoding="utf-8").strip().split("\n\n")]
+                self.assertEqual(len(blocks), 2)
+                first = "line one\nline two\nline three"
+                if bilingual:
+                    first += "\n译文\n第二行"
+                self.assertEqual(blocks[0], f"1\n00:00:00,000 --> 00:00:01,000\n{first}")
+                self.assertEqual(blocks[1], "2\n00:00:01,500 --> 00:00:02,000\nnext cue")
 
 
 if __name__ == "__main__":

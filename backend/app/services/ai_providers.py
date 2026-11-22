@@ -5,8 +5,70 @@ from typing import Any
 from urllib.parse import urlparse
 
 from ..models.database import get_db
-from .ai_settings import PROVIDER_PRESETS
-from .secret_store import get_secret, keychain_enabled, save_secret
+
+PROVIDER_PRESETS = [
+    {
+        "id": "deepseek",
+        "name": "DeepSeek",
+        "base_url": "https://api.deepseek.com/v1",
+        "model": "deepseek-flash",
+        "models": ["deepseek-flash", "deepseek-v4-pro"],
+        "supports_thinking": True,
+    },
+    {
+        "id": "openai",
+        "name": "OpenAI",
+        "base_url": "https://api.openai.com/v1",
+        "model": "gpt-4.1-mini",
+        "models": ["gpt-4.1-mini", "gpt-4.1", "gpt-4o-mini"],
+    },
+    {
+        "id": "openrouter",
+        "name": "OpenRouter",
+        "base_url": "https://openrouter.ai/api/v1",
+        "model": "openai/gpt-4.1-mini",
+        "models": [
+            "openai/gpt-4.1-mini",
+            "anthropic/claude-sonnet-4",
+            "google/gemini-2.5-flash",
+        ],
+    },
+    {
+        "id": "siliconflow",
+        "name": "SiliconFlow",
+        "base_url": "https://api.siliconflow.cn/v1",
+        "model": "deepseek-ai/DeepSeek-V3",
+        "models": ["deepseek-ai/DeepSeek-V3", "Qwen/Qwen3-32B"],
+    },
+    {
+        "id": "moonshot",
+        "name": "Moonshot",
+        "base_url": "https://api.moonshot.cn/v1",
+        "model": "moonshot-v1-8k",
+        "models": ["moonshot-v1-8k", "moonshot-v1-32k"],
+    },
+    {
+        "id": "dashscope",
+        "name": "通义千问",
+        "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+        "model": "qwen-plus",
+        "models": ["qwen-plus", "qwen-max", "qwen-turbo"],
+    },
+    {
+        "id": "gemini",
+        "name": "Gemini (OpenAI 兼容)",
+        "base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
+        "model": "gemini-2.5-flash",
+        "models": ["gemini-2.5-flash", "gemini-2.5-pro"],
+    },
+    {
+        "id": "custom",
+        "name": "自定义 OpenAI 兼容服务",
+        "base_url": "http://127.0.0.1:11434/v1",
+        "model": "",
+        "models": [],
+    },
+]
 
 PRESETS = {item["id"]: item for item in PROVIDER_PRESETS}
 # Extra output room when thinking is on: reasoning tokens share max_tokens with
@@ -39,7 +101,9 @@ def prepare_chat_payload(ai: dict, payload: dict[str, Any]) -> dict[str, Any]:
         # so the user's toggle is always sent explicitly.
         if ai.get("thinking_enabled"):
             prepared["thinking"] = {"type": "enabled"}
-            prepared["max_tokens"] = int(prepared.get("max_tokens") or 0) + THINKING_OUTPUT_ALLOWANCE
+            prepared["max_tokens"] = (
+                int(prepared.get("max_tokens") or 0) + THINKING_OUTPUT_ALLOWANCE
+            )
         else:
             prepared["thinking"] = {"type": "disabled"}
     return prepared
@@ -102,70 +166,123 @@ def ensure_provider_cards() -> None:
                (provider_id,base_url,model,updated_at) VALUES (?,?,?,?)""",
             (provider_id, preset["base_url"], preset["model"] or "custom-model", now),
         )
-    db.commit(); db.close()
+    db.commit()
+    db.close()
 
 
 def list_provider_cards(include_secret: bool = False) -> list[dict]:
     ensure_provider_cards()
-    db = get_db(); rows = db.execute("SELECT * FROM ai_provider_configs ORDER BY rowid").fetchall(); db.close()
+    db = get_db()
+    rows = db.execute("SELECT * FROM ai_provider_configs ORDER BY rowid").fetchall()
+    db.close()
     result = []
     for row in rows:
-        item = dict(row); preset = PRESETS.get(item["provider_id"], {})
-        item.update({"name": preset.get("name", item["provider_id"]), "models": preset.get("models", []),
-                     "supports_thinking": bool(preset.get("supports_thinking"))})
-        item["api_key"] = get_secret(f"provider:{item['provider_id']}", item.get("api_key", ""))
-        item["enabled"] = bool(item["enabled"]); item["has_api_key"] = bool(item["api_key"])
+        item = dict(row)
+        preset = PRESETS.get(item["provider_id"], {})
+        item.update(
+            {
+                "name": preset.get("name", item["provider_id"]),
+                "models": preset.get("models", []),
+                "supports_thinking": bool(preset.get("supports_thinking")),
+            }
+        )
+        secret = str(item.get("api_key") or "").strip()
+        item["enabled"] = bool(item["enabled"])
+        item["has_api_key"] = bool(secret)
         item["thinking_enabled"] = bool(item.get("thinking_enabled"))
-        if not include_secret: item["api_key"] = ""
+        item["api_key"] = secret if include_secret else ""
         result.append(item)
     return result
 
 
 def get_provider(provider_id: str, include_secret: bool = True) -> dict:
-    ensure_provider_cards(); db = get_db()
-    row = db.execute("SELECT * FROM ai_provider_configs WHERE provider_id=?", (provider_id,)).fetchone(); db.close()
-    if not row: raise ValueError("AI 供应商不存在")
+    ensure_provider_cards()
+    db = get_db()
+    row = db.execute(
+        "SELECT * FROM ai_provider_configs WHERE provider_id=?", (provider_id,)
+    ).fetchone()
+    db.close()
+    if not row:
+        raise ValueError("AI 供应商不存在")
     result = dict(row)
+    secret = str(result.get("api_key") or "").strip()
+    result["enabled"] = bool(result["enabled"])
     result["thinking_enabled"] = bool(result.get("thinking_enabled"))
-    result["api_key"] = get_secret(f"provider:{provider_id}", result.get("api_key", ""))
-    if not include_secret:
-        result["has_api_key"] = bool(result["api_key"]); result["api_key"] = ""
+    result["has_api_key"] = bool(secret)
+    result["api_key"] = secret if include_secret else ""
     return result
 
 
 def save_provider(
-    provider_id: str, base_url: str, model: str, api_key: str | None, enabled: bool = True,
+    provider_id: str,
+    base_url: str,
+    model: str,
+    api_key: str | None,
+    enabled: bool = True,
     thinking_enabled: bool | None = None,
 ) -> dict:
     current = get_provider(provider_id, True)
     secret = current["api_key"] if not api_key else api_key.strip()
     model = (model or "").strip()
-    if not model: raise ValueError("模型名称不能为空")
+    if not model:
+        raise ValueError("模型名称不能为空")
     # Older clients omit the field; keep the stored choice instead of resetting it.
-    thinking = current["thinking_enabled"] if thinking_enabled is None else bool(thinking_enabled)
-    save_secret(f"provider:{provider_id}", secret)
-    stored_secret = "" if keychain_enabled() else secret
-    db = get_db(); db.execute(
-        """UPDATE ai_provider_configs SET base_url=?,api_key=?,model=?,enabled=?,thinking_enabled=?,updated_at=?,has_api_key=?,keychain_ref=?,
-           last_test_status='',last_test_at='',last_latency_ms=0 WHERE provider_id=?""",
-        (_validate_url(base_url), stored_secret, model, int(enabled), int(thinking), time.strftime("%Y-%m-%d %H:%M:%S"), int(bool(secret)), f"provider:{provider_id}" if keychain_enabled() else None, provider_id),
-    ); db.commit(); db.close()
+    thinking = (
+        current["thinking_enabled"]
+        if thinking_enabled is None
+        else bool(thinking_enabled)
+    )
+    db = get_db()
+    db.execute(
+        """UPDATE ai_provider_configs
+              SET base_url=?, api_key=?, model=?, enabled=?, thinking_enabled=?,
+                  updated_at=?, has_api_key=?, last_test_status='',
+                  last_test_at='', last_latency_ms=0
+            WHERE provider_id=?""",
+        (
+            _validate_url(base_url),
+            secret,
+            model,
+            int(enabled),
+            int(thinking),
+            time.strftime("%Y-%m-%d %H:%M:%S"),
+            int(bool(secret)),
+            provider_id,
+        ),
+    )
+    db.commit()
+    db.close()
     return get_provider(provider_id, False)
 
 
-def assigned_provider(operation: str, override: str | None = None, model_override: str | None = None) -> dict:
+def assigned_provider(
+    operation: str, override: str | None = None, model_override: str | None = None
+) -> dict:
     from .app_settings import get_app_settings
+
     settings = get_app_settings()
     provider_id = override or settings.get(f"{operation}_provider_id") or "deepseek"
     provider = get_provider(provider_id, True)
-    if model_override: provider["model"] = model_override.strip()
-    if not provider.get("api_key"): raise ValueError(f"{provider_id} API Key 未配置")
+    if model_override:
+        provider["model"] = model_override.strip()
+    if not provider.get("api_key"):
+        raise ValueError(f"{provider_id} API Key 未配置")
     provider["provider"] = provider_id
     return provider
 
 
 def record_test(provider_id: str, ok: bool, latency_ms: int = 0) -> None:
-    db = get_db(); db.execute(
-        "UPDATE ai_provider_configs SET last_test_status=?,last_test_at=?,last_latency_ms=? WHERE provider_id=?",
-        ("success" if ok else "failed", time.strftime("%Y-%m-%d %H:%M:%S"), latency_ms, provider_id),
-    ); db.commit(); db.close()
+    db = get_db()
+    db.execute(
+        """UPDATE ai_provider_configs
+              SET last_test_status=?, last_test_at=?, last_latency_ms=?
+            WHERE provider_id=?""",
+        (
+            "success" if ok else "failed",
+            time.strftime("%Y-%m-%d %H:%M:%S"),
+            latency_ms,
+            provider_id,
+        ),
+    )
+    db.commit()
+    db.close()

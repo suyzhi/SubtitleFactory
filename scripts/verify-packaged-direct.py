@@ -16,7 +16,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 COMMON_SCRIPT = ROOT / "scripts/verify-packaged-app-store.py"
 VENDOR_FFMPEG = ROOT / "vendor/ffmpeg/darwin-arm64/ffmpeg-darwin-arm64"
-EXPECTED_MODEL_COUNT = 29
+EXPECTED_MODEL_COUNT = 28
 
 COMMON_SPEC = importlib.util.spec_from_file_location(
     "verify_packaged_app_common", COMMON_SCRIPT,
@@ -78,8 +78,6 @@ def verify_direct_api(
     common.require("parakeet-tdt-0.6b-v3-coreml" in ids, "直装模型目录缺少外部 Core ML 入口")
     common.require("custom" not in ids, "空白隔离数据目录不应凭空出现 custom 模型")
 
-    common.json_response(session, "/api/transcription/models/imported", expected=200)
-
     youtube_project: str | None = None
     local_project: str | None = None
     try:
@@ -119,23 +117,18 @@ def verify_direct_api(
         project_root = data_directory / "projects" / local_project
         common.require(video_path.parent == project_root, "本地媒体没有复制到隔离项目目录")
         common.require(video_path.is_file(), "直装项目媒体文件不存在")
-        common.require(
-            imported.get("thumbnail_url") == f"/api/projects/{local_project}/thumbnail",
-            "包内 FFmpeg 没有生成直装项目缩略图",
-        )
         detail = common.json_response(
             session, f"/api/projects/{local_project}", expected=200,
         )
         common.require(detail.get("video_path") == str(video_path), "项目媒体路径与导入结果不一致")
         common.require(detail.get("source_type") == "local", "导入后项目类型不是 local")
-        common.require(detail.get("media_mode") == "local", "导入后媒体模式不是 local")
-        for field in ("video_url", "thumbnail_access_url"):
-            media_url = detail.get(field)
-            common.require(bool(media_url) and "signature=" in media_url, f"{field} 缺少受限媒体签名")
-            status, media = common.request(session, media_url, authorized=False)
-            common.require(status == 200 and bool(media), f"{field} 无法供播放器读取")
-        status, _ = common.request(session, f"/api/projects/{local_project}/video", authorized=False)
-        common.require(status == 401, "未签名的媒体请求未被拒绝")
+        common.require(detail.get("video_available") is True, "导入后视频未标记为可用")
+        status, _ = common.request(
+            session,
+            f"/api/projects/{local_project}/export/download?fmt=srt",
+            authorized=False,
+        )
+        common.require(status == 401, "未鉴权的导出下载请求未被拒绝")
 
         common.json_response(
             session,

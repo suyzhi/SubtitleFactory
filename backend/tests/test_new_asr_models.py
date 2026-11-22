@@ -1,4 +1,3 @@
-import json
 import os
 import sys
 import tempfile
@@ -17,7 +16,7 @@ if "SUBTITLE_FACTORY_DATA_DIR" not in os.environ:
         prefix="subtitle-factory-new-asr-tests-",
     )
 
-from app.services import cloud_asr, qwen_mlx
+from app.services import qwen_mlx
 from app.utils.task_manager import task_manager
 
 
@@ -27,95 +26,6 @@ def _wav(path: Path, seconds: float = 1.0) -> None:
         output.setsampwidth(2)
         output.setframerate(16_000)
         output.writeframes(b"\0\0" * int(16_000 * seconds))
-
-
-class FunAsrTests(unittest.TestCase):
-    def test_endpoint_accepts_only_official_beijing_or_dashscope_hosts(self):
-        self.assertEqual(
-            cloud_asr._endpoint("https://dashscope.aliyuncs.com/compatible-mode/v1"),
-            "https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation",
-        )
-        self.assertEqual(
-            cloud_asr._endpoint("https://workspace.cn-beijing.maas.aliyuncs.com/compatible-mode/v1"),
-            "https://workspace.cn-beijing.maas.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation",
-        )
-        self.assertEqual(
-            cloud_asr._endpoint("https://workspace.cn-beijing.maas.aliyuncs.com/api/v1"),
-            "https://workspace.cn-beijing.maas.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation",
-        )
-        with self.assertRaises(cloud_asr.CloudAsrError):
-            cloud_asr._endpoint("https://example.invalid/compatible-mode/v1")
-
-    def test_status_requires_key_endpoint_and_named_transcription_consent(self):
-        provider = {
-            "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-            "has_api_key": True,
-            "enabled": True,
-        }
-        with patch.object(cloud_asr, "get_provider", return_value=provider), patch.object(
-            cloud_asr, "_authorization_granted", return_value=True,
-        ):
-            status = cloud_asr.fun_asr_status()
-        self.assertTrue(status["ready"])
-        self.assertTrue(status["uploads_audio"])
-        self.assertFalse(status["download_required"])
-
-    def test_sse_result_becomes_incremental_word_timed_segment(self):
-        captured = {}
-        event = {
-            "output": {
-                "sentence": {
-                    "sentence_id": 1,
-                    "sentence_end": True,
-                    "begin_time": 160,
-                    "end_time": 1680,
-                    "text": "欢迎使用字幕工厂。",
-                    "words": [{
-                        "begin_time": 160, "end_time": 520,
-                        "text": "欢迎", "punctuation": "，",
-                    }],
-                },
-            },
-        }
-
-        class Response:
-            status_code = 200
-            text = ""
-
-            def __enter__(self): return self
-            def __exit__(self, *_args): return False
-            def iter_lines(self): return iter([f"data:{json.dumps(event, ensure_ascii=False)}"])
-
-        class Client:
-            def __init__(self, *args, **kwargs): captured["timeout"] = kwargs.get("timeout")
-            def __enter__(self): return self
-            def __exit__(self, *_args): return False
-            def stream(self, method, url, **kwargs):
-                captured.update({"method": method, "url": url, **kwargs})
-                return Response()
-
-        with tempfile.TemporaryDirectory() as folder:
-            audio = Path(folder) / "audio.wav"
-            _wav(audio)
-            task_id = task_manager.create_task(None, "transcribe")
-            provider = {
-                "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-                "api_key": "secret-key",
-                "enabled": True,
-            }
-            with patch.object(cloud_asr, "_authorization_granted", return_value=True), patch.object(
-                cloud_asr, "get_provider", return_value=provider,
-            ), patch.object(cloud_asr.httpx, "Client", Client):
-                session = cloud_asr.create_fun_asr_session(task_id, str(audio), "zh")
-                segments = list(session.segments)
-        self.assertEqual(len(segments), 1)
-        self.assertEqual(segments[0].text, "欢迎使用字幕工厂。")
-        self.assertAlmostEqual(segments[0].start, 0.16)
-        self.assertEqual(segments[0].words[0]["text"], "欢迎，")
-        self.assertEqual(captured["method"], "POST")
-        self.assertEqual(captured["headers"]["X-DashScope-SSE"], "enable")
-        audio_data = captured["json"]["input"]["messages"][0]["content"][0]["audio"]
-        self.assertTrue(audio_data.startswith("data:audio/wav;base64,"))
 
 
 class QwenMlxTests(unittest.TestCase):

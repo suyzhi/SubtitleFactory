@@ -36,13 +36,10 @@ from app.utils.task_manager import TaskCancelled
 
 
 class ManagedCatalogTests(unittest.TestCase):
-    def test_catalog_has_eighteen_unique_pinned_models_and_twenty_nine_total(self):
+    def test_catalog_has_eighteen_unique_pinned_models_and_twenty_eight_total(self):
         self.assertEqual(len(MANAGED_SHERPA_MODELS), 18)
         self.assertEqual(len(MANAGED_SHERPA_BY_ID), 18)
-        self.assertEqual(
-            len([item for item in SUPPORTED_TRANSCRIPTION_MODELS if item != "custom"]),
-            29,
-        )
+        self.assertEqual(len(SUPPORTED_TRANSCRIPTION_MODELS), 28)
         for definition in MANAGED_SHERPA_MODELS:
             self.assertEqual(definition.id, definition.id.lower())
             self.assertTrue(definition.package.startswith("sherpa-onnx-"))

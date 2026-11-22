@@ -28,7 +28,7 @@ ALLOWED_ORIGINS = tuple(
     if origin.strip()
 )
 
-QUERY_TOKEN_SUFFIXES = ("/video", "/thumbnail", "/export/download")
+QUERY_TOKEN_SUFFIXES = ("/export/download",)
 
 
 def signed_media_url(path: str, ttl_seconds: int = 21_600) -> str:

@@ -17,11 +17,11 @@ if "SUBTITLE_FACTORY_DATA_DIR" not in os.environ:
     )
 
 from app.api import projects, settings
-from app.models import database
+from app.models import database, migrations
 
 
-class V02DatabaseMigrationTests(unittest.TestCase):
-    def test_legacy_database_gets_deleted_at_and_local_app_settings(self):
+class DatabaseMigrationTests(unittest.TestCase):
+    def test_legacy_database_migrates_cleanly_with_pre_migration_backup(self):
         with tempfile.TemporaryDirectory() as folder:
             db_path = Path(folder) / "legacy.db"
             conn = sqlite3.connect(db_path)
@@ -41,41 +41,55 @@ class V02DatabaseMigrationTests(unittest.TestCase):
             with patch.object(database, "DB_PATH", db_path):
                 database.init_db()
                 conn = database.get_db()
-                columns = {
-                    row["name"] for row in conn.execute("PRAGMA table_info(projects)")
+                tables = {
+                    row["name"]
+                    for row in conn.execute(
+                        "SELECT name FROM sqlite_master WHERE type='table'"
+                    )
                 }
-                app_settings_table = conn.execute(
-                    "SELECT name FROM sqlite_master WHERE type='table' AND name='app_settings'"
-                ).fetchone()
-                row = conn.execute("SELECT deleted_at FROM projects").fetchone()
-                conn.close()
-            self.assertIn("deleted_at", columns)
-            self.assertIn("media_mode", columns)
-            self.assertIsNotNone(app_settings_table)
-            self.assertIsNone(row["deleted_at"])
-            with patch.object(database, "DB_PATH", db_path):
-                conn = database.get_db()
-                self.assertEqual(conn.execute("SELECT media_mode FROM projects").fetchone()["media_mode"], "local")
+                version = conn.execute(
+                    "SELECT MAX(version) FROM schema_migrations"
+                ).fetchone()[0]
+                provider_cols = {
+                    row["name"]
+                    for row in conn.execute("PRAGMA table_info(ai_provider_configs)")
+                }
                 conn.close()
 
-    def test_legacy_web_mode_migrates_without_losing_project_content(self):
+            self.assertEqual(version, migrations.CURRENT_SCHEMA_VERSION)
+            self.assertIn("app_settings", tables)
+            self.assertIn("ai_provider_configs", tables)
+            self.assertIn("thinking_enabled", provider_cols)
+            self.assertTrue(list((Path(folder) / "backups").glob("schema-v*.db")))
+
+    def test_failed_migration_rolls_back_without_advancing_schema_version(self):
         with tempfile.TemporaryDirectory() as folder:
-            with patch.object(database, "DB_PATH", Path(folder) / "legacy-web.db"):
-                database.init_db()
-                conn = database.get_db()
-                conn.execute("INSERT INTO projects (id,title,source_type,source_url,media_mode,audio_path,created_at,updated_at) VALUES ('web','Keep title','youtube','https://youtu.be/dQw4w9WgXcQ','web','/existing/audio.wav','old','old')")
-                conn.commit()
-                before = dict(conn.execute("SELECT * FROM projects WHERE id='web'").fetchone())
-                conn.close()
-                database.init_db()
-                conn = database.get_db()
-                after = dict(conn.execute("SELECT * FROM projects WHERE id='web'").fetchone())
-                conn.close()
-                before['media_mode'] = 'local'
-                self.assertEqual(after, before)
+            db_path = Path(folder) / "rollback.db"
+            conn = sqlite3.connect(db_path)
+            conn.execute("CREATE TABLE projects (id TEXT PRIMARY KEY, title TEXT)")
+            conn.execute("INSERT INTO projects VALUES ('p1', 'keep')")
+            conn.commit()
+
+            def broken_step(_conn):
+                _conn.execute("INSERT INTO projects VALUES ('p2', 'transient')")
+                raise RuntimeError("boom")
+
+            with (
+                patch.object(migrations, "MIGRATIONS", ((1, broken_step),)),
+                self.assertRaisesRegex(RuntimeError, "boom"),
+            ):
+                migrations.run_migrations(conn, db_path)
+
+            applied = [
+                row[0] for row in conn.execute("SELECT version FROM schema_migrations")
+            ]
+            ids = [row[0] for row in conn.execute("SELECT id FROM projects")]
+            conn.close()
+            self.assertEqual(applied, [])
+            self.assertEqual(ids, ["p1"])
 
 
-class ProjectTrashAPITests(unittest.TestCase):
+class ProjectCRUDAPITests(unittest.TestCase):
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
         root = Path(self.temp_dir.name)
@@ -106,71 +120,46 @@ class ProjectTrashAPITests(unittest.TestCase):
         self.db_patch.stop()
         self.temp_dir.cleanup()
 
-    def insert_project(self, project_id: str, deleted_at=None):
+    def insert_project(self, project_id: str):
         db = database.get_db()
         db.execute(
             """INSERT INTO projects
-               (id,title,source_type,language,target_language,created_at,updated_at,deleted_at)
-               VALUES (?,?,'local','auto','zh','now','now',?)""",
-            (project_id, project_id, deleted_at),
+               (id,title,source_type,language,target_language,created_at,updated_at)
+               VALUES (?,?,'local','auto','zh','now','now')""",
+            (project_id, project_id),
         )
         db.commit()
         db.close()
 
-    def test_default_list_filters_trash_and_restore_round_trip(self):
-        self.insert_project("active")
-        self.insert_project("deleted", "2026-01-01 00:00:00")
-        self.assertEqual(
-            [item["id"] for item in self.client.get("/api/projects").json()["projects"]],
-            ["active"],
-        )
-        self.assertEqual(
-            [item["id"] for item in self.client.get("/api/projects?deleted=true").json()["projects"]],
-            ["deleted"],
-        )
-        trashed = self.client.post("/api/projects/active/trash")
-        self.assertEqual(trashed.status_code, 200)
-        self.assertIsNotNone(trashed.json()["project"]["deleted_at"])
-        restored = self.client.post("/api/projects/active/restore")
-        self.assertEqual(restored.status_code, 200)
-        self.assertIsNone(restored.json()["project"]["deleted_at"])
-
-    def test_new_youtube_project_ignores_legacy_web_default(self):
-        with patch.object(projects, "get_app_settings", return_value={"youtube_media_mode": "web"}):
-            created = self.client.post("/api/projects", json={
+    def test_new_youtube_project_canonicalizes_url(self):
+        created = self.client.post(
+            "/api/projects",
+            json={
                 "source_type": "youtube",
                 "source_url": "https://youtu.be/dQw4w9WgXcQ?t=110",
-                "title": "Web project",
-            })
+                "title": "YouTube project",
+            },
+        )
         self.assertEqual(created.status_code, 201, created.text)
-        project = self.client.get(f"/api/projects/{created.json()['project_id']}").json()
-        self.assertEqual(project["media_mode"], "local")
+        project = self.client.get(
+            f"/api/projects/{created.json()['project_id']}"
+        ).json()
         self.assertEqual(project["youtube_video_id"], "dQw4w9WgXcQ")
-        self.assertEqual(project["source_url"], "https://www.youtube.com/watch?v=dQw4w9WgXcQ")
+        self.assertEqual(
+            project["source_url"], "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+        )
 
-        explicit = self.client.post("/api/projects", json={
-            "source_type": "youtube",
-            "source_url": "https://www.youtube.com/watch?v=aaaaaaaaaaa",
-            "media_mode": "local",
-        })
-        project = self.client.get(f"/api/projects/{explicit.json()['project_id']}").json()
-        self.assertEqual(project["media_mode"], "local")
-
-    def test_active_task_requires_termination_confirmation(self):
+    def test_delete_rejects_project_with_active_tasks(self):
         self.insert_project("busy")
-        with patch.object(projects.task_manager, "active_task_ids", return_value=["task-1"]), patch.object(
-            projects.task_manager, "cancel_project_tasks", return_value=["task-1"]
-        ) as cancel:
-            conflict = self.client.post("/api/projects/busy/trash")
-            self.assertEqual(conflict.status_code, 409)
-            self.assertEqual(conflict.json()["detail"]["code"], "ACTIVE_TASKS")
-            accepted = self.client.post("/api/projects/busy/trash?terminate=true")
-            self.assertEqual(accepted.status_code, 200)
-            self.assertEqual(accepted.json()["terminated_task_ids"], ["task-1"])
-            cancel.assert_called_once_with("busy")
+        with patch.object(
+            projects.task_manager, "active_task_ids", return_value=["task-1"]
+        ):
+            conflict = self.client.delete("/api/projects/busy?permanent=true")
+        self.assertEqual(conflict.status_code, 409)
+        self.assertEqual(conflict.json()["detail"]["code"], "ACTIVE_TASKS")
 
     def test_permanent_delete_removes_managed_files_and_database_rows(self):
-        self.insert_project("purge", "2026-01-01 00:00:00")
+        self.insert_project("purge")
         project_dir = self.root / "projects" / "purge"
         download_dir = self.root / "downloads" / "purge"
         project_dir.mkdir()
@@ -184,43 +173,49 @@ class ProjectTrashAPITests(unittest.TestCase):
         db.execute(
             """INSERT INTO tasks
                (id,project_id,type,status,created_at,updated_at)
-               VALUES ('done','purge','export','success','now','now')"""
+               VALUES ('done','purge','workflow','success','now','now')"""
         )
         db.commit()
         db.close()
+
         deleted = self.client.delete("/api/projects/purge?permanent=true")
         self.assertEqual(deleted.status_code, 200, deleted.text)
+        self.assertFalse(project_dir.exists())
         self.assertFalse(download_dir.exists())
         self.assertFalse(export.exists())
         db = database.get_db()
-        self.assertEqual(db.execute("SELECT COUNT(*) FROM projects WHERE id='purge'").fetchone()[0], 0)
-        self.assertEqual(db.execute("SELECT COUNT(*) FROM tasks WHERE project_id='purge'").fetchone()[0], 0)
+        self.assertEqual(
+            db.execute("SELECT COUNT(*) FROM projects WHERE id='purge'").fetchone()[0], 0
+        )
+        self.assertEqual(
+            db.execute("SELECT COUNT(*) FROM tasks WHERE project_id='purge'").fetchone()[0],
+            0,
+        )
         db.close()
 
-    def test_rename_and_confirmed_empty_trash(self):
-        self.insert_project("rename")
-        renamed = self.client.patch("/api/projects/rename", json={"title": "  New title  "})
-        self.assertEqual(renamed.status_code, 200)
-        self.assertEqual(renamed.json()["title"], "New title")
-        self.client.post("/api/projects/rename/trash")
-        self.assertEqual(self.client.delete("/api/projects/trash").status_code, 400)
-        emptied = self.client.delete("/api/projects/trash?confirm=true")
-        self.assertEqual(emptied.status_code, 200)
-        self.assertEqual(emptied.json()["deleted_count"], 1)
+    def test_managed_path_guard_never_removes_a_storage_root(self):
+        self.assertFalse(projects._path_is_managed(self.root))
+        self.assertFalse(projects._path_is_managed(self.root / "projects"))
+        self.assertFalse(
+            projects._path_is_managed(self.root / "projects" / "escape" / "..")
+        )
+        self.assertTrue(
+            projects._path_is_managed(self.root / "projects" / "other-project")
+        )
 
-    def test_model_validation_matches_model_list_contract(self):
-        response = self.client.get("/api/transcription/models/small/validate")
+    def test_model_catalog_lists_28_local_models_without_cloud_or_custom(self):
+        response = self.client.get("/api/transcription/models")
         self.assertEqual(response.status_code, 200)
-        payload = response.json()
-        for key in (
-            "id", "name", "ready", "download_required", "runtime_error",
-            "languages", "source", "status",
-        ):
-            self.assertIn(key, payload)
-        self.assertEqual(payload["id"], "small")
+        models = response.json()["models"]
+        ids = {item["id"] for item in models}
+        self.assertEqual(len(models), 28)
+        self.assertIn("small", ids)
+        self.assertIn("parakeet-tdt-0.6b-v3-coreml", ids)
+        self.assertNotIn("fun-asr-realtime", ids)
+        self.assertNotIn("custom", ids)
 
 
-class AppSettingsAPITests(unittest.TestCase):
+class AIProviderSettingsAPITests(unittest.TestCase):
     def setUp(self):
         self.temp_dir = tempfile.TemporaryDirectory()
         self.db_patch = patch.object(
@@ -237,58 +232,37 @@ class AppSettingsAPITests(unittest.TestCase):
         self.db_patch.stop()
         self.temp_dir.cleanup()
 
-    def test_defaults_are_safe_and_partial_updates_persist(self):
-        initial = self.client.get("/api/settings/app").json()
-        self.assertEqual(initial["settings"]["default_model"], "auto")
-        self.assertEqual(initial["settings"]["youtube_media_mode"], "local")
-        self.assertIsNone(initial["settings"]["coreml_model_path"])
-        updated = self.client.put(
-            "/api/settings/app",
-            json={
-                "source_language": "vi",
-                "translation_target_language": "uk",
-                "youtube_media_mode": "local",
-            },
-        )
-        self.assertEqual(updated.status_code, 200)
-        reloaded = self.client.get("/api/settings/app").json()["settings"]
-        self.assertEqual(reloaded["source_language"], "vi")
-        self.assertEqual(reloaded["translation_target_language"], "uk")
-        self.assertEqual(reloaded["youtube_media_mode"], "local")
-
-    def test_invalid_model_path_falls_back_and_secret_fields_are_rejected(self):
-        response = self.client.put(
-            "/api/settings/app",
-            json={
-                "default_model": "parakeet-tdt-0.6b-v3-coreml",
-                "coreml_model_path": "/definitely/missing/model",
-            },
-        )
-        self.assertEqual(response.status_code, 200)
-        payload = response.json()
-        self.assertEqual(payload["settings"]["default_model"], "small")
-        self.assertIsNone(payload["settings"]["coreml_model_path"])
-        self.assertTrue(payload["warnings"])
+    def test_provider_cards_save_and_assignments_persist(self):
+        initial = self.client.get("/api/settings/ai/providers")
+        self.assertEqual(initial.status_code, 200)
+        payload = initial.json()
         self.assertEqual(
-            self.client.put("/api/settings/app", json={"api_key": "secret"}).status_code,
-            422,
+            payload["assignments"],
+            {"clean_provider_id": "deepseek", "translate_provider_id": "deepseek"},
         )
 
-    def test_path_validation_and_home_path_redaction(self):
-        executable = Path(self.temp_dir.name) / "tool"
-        executable.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
-        executable.chmod(0o755)
-        valid = self.client.post(
-            "/api/settings/app/validate-path",
-            json={"kind": "cli", "path": str(executable)},
+        saved = self.client.put(
+            "/api/settings/ai/providers/openai",
+            json={
+                "base_url": "https://api.openai.com/v1",
+                "model": "gpt-4.1-mini",
+                "api_key": "sk-test-123",
+                "enabled": True,
+            },
         )
-        self.assertEqual(valid.status_code, 200)
-        self.assertTrue(valid.json()["ok"])
-        redacted = self.client.post(
-            "/api/settings/app/validate-path",
-            json={"kind": "model", "path": str(Path.home() / "private-model")},
-        ).json()
-        self.assertTrue(redacted["resolved_path"].startswith("~/"))
+        self.assertEqual(saved.status_code, 200, saved.text)
+        self.assertTrue(saved.json()["provider"]["has_api_key"])
+        self.assertEqual(saved.json()["provider"]["api_key"], "")
+
+        assigned = self.client.put(
+            "/api/settings/ai/assignments",
+            json={"clean_provider_id": "openai", "translate_provider_id": "deepseek"},
+        )
+        self.assertEqual(assigned.status_code, 200, assigned.text)
+        self.assertEqual(
+            assigned.json()["assignments"],
+            {"clean_provider_id": "openai", "translate_provider_id": "deepseek"},
+        )
 
 
 if __name__ == "__main__":

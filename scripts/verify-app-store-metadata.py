@@ -152,7 +152,7 @@ def validate_public_metadata(metadata_path: Path) -> tuple[list[str], dict[str, 
     require(review.get("sign_in_required") is False, "当前版本必须明确无需登录")
     require(isinstance(review_notes, str) and 0 < utf8_size(review_notes) <= 4000, "审核备注必须为 1 至 4000 UTF-8 bytes")
     if isinstance(review_notes, str):
-        for required_phrase in ("No account is required", "Mac App Store build", "Fun-Realtime-ASR", "never silently"):
+        for required_phrase in ("No account is required", "Mac App Store build", "never silently"):
             require(required_phrase in review_notes, f"审核备注缺少关键说明：{required_phrase}")
 
     require(privacy_manifest.get("NSPrivacyTracking") is privacy.get("tracking"), "隐私清单的跟踪声明与元数据不一致")

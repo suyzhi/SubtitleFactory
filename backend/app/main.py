@@ -1,5 +1,5 @@
 """
-字幕工厂 - FastAPI 应用主入口
+字幕工厂（简洁版）- FastAPI 应用主入口
 """
 
 import logging
@@ -18,15 +18,8 @@ from fastapi.responses import JSONResponse
 # 将项目根加入 sys.path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from .models.database import init_db, mark_interrupted_tasks
-from .services.backups import apply_pending_restore, scheduled_backup
-from .utils.config import DATA_DIR, LOGS_DIR, is_frozen_app
-
-# Restore before importing route modules: a route must never open SQLite and
-# then watch the database file get replaced underneath its connection.
-applied_restore = apply_pending_restore()
-
 from .api import projects, settings, tasks
+from .models.database import init_db, mark_interrupted_tasks
 from .security import ALLOWED_ORIGINS, require_local_origin
 from .services.distribution import (
     DistributionPolicyError,
@@ -34,7 +27,7 @@ from .services.distribution import (
     require_project_distribution,
 )
 from .services.workflow_recovery import resume_interrupted_workflows
-from .utils.task_manager import TaskCreationBlocked, task_manager
+from .utils.config import DATA_DIR, LOGS_DIR, is_frozen_app
 from .version import VERSION
 
 # ── 日志配置（轮转：单文件 5 MiB，保留 5 份历史） ──
@@ -44,7 +37,10 @@ logging.basicConfig(
     format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
     handlers=[
         RotatingFileHandler(
-            LOGS_DIR / "app.log", maxBytes=5 * 1024 * 1024, backupCount=5, encoding="utf-8",
+            LOGS_DIR / "app.log",
+            maxBytes=5 * 1024 * 1024,
+            backupCount=5,
+            encoding="utf-8",
         ),
         logging.StreamHandler(),
     ],
@@ -57,14 +53,8 @@ DOCS_ENABLED = not is_frozen_app()
 # ── 初始化数据库 ──
 init_db()
 interrupted_tasks = mark_interrupted_tasks()
-if applied_restore:
-    logger.info("已在启动前恢复数据库备份：%s", applied_restore.get("source_name"))
-try:
-    scheduled_backup()
-except Exception:
-    logger.exception("自动数据库备份失败")
 
-# ── 运行期服务 ──
+
 @asynccontextmanager
 async def lifespan(application: FastAPI):
     del application
@@ -74,8 +64,8 @@ async def lifespan(application: FastAPI):
 
 # ── 创建 FastAPI 应用 ──
 app = FastAPI(
-    title="字幕工厂 API",
-    description="YouTube 视频转写字幕桌面软件的 API 服务",
+    title="字幕工厂 API（简洁版）",
+    description="视频下载、本地模型转写、AI 整理与翻译的本地 API 服务",
     version=VERSION,
     lifespan=lifespan,
     docs_url="/docs" if DOCS_ENABLED else None,
@@ -90,26 +80,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-
-@app.middleware("http")
-async def block_writes_during_database_restore(request: Request, call_next):
-    mutating = request.method.upper() not in {"GET", "HEAD", "OPTIONS"}
-    if not mutating:
-        return await call_next(request)
-    if not task_manager.begin_api_mutation():
-        return JSONResponse(status_code=409, content={"error": {
-            "code": "DATABASE_RESTORE_PENDING",
-            "message": "数据库恢复已排队，暂时不能继续修改数据",
-            "suggestion": "请等待 App 完成安全重启",
-            "details": {},
-            "recoverable": True,
-        }})
-    try:
-        return await call_next(request)
-    finally:
-        task_manager.end_api_mutation()
-
 
 # Reject requests originating from unrelated websites.
 app.middleware("http")(require_local_origin)
@@ -149,49 +119,57 @@ async def structured_http_error(request: Request, exc: HTTPException):
 
 @app.exception_handler(RequestValidationError)
 async def structured_validation_error(request: Request, exc: RequestValidationError):
-    return JSONResponse(status_code=422, content={"error": {
-        "code": "REQUEST_VALIDATION_FAILED", "message": "请求参数无效",
-        "suggestion": "请检查输入内容后重试", "details": {"errors": exc.errors()},
-        "recoverable": True,
-    }})
+    del request
+    return JSONResponse(
+        status_code=422,
+        content={
+            "error": {
+                "code": "REQUEST_VALIDATION_FAILED",
+                "message": "请求参数无效",
+                "suggestion": "请检查输入内容后重试",
+                "details": {"errors": exc.errors()},
+                "recoverable": True,
+            }
+        },
+    )
 
 
 @app.exception_handler(DistributionPolicyError)
-async def distribution_policy_error(
-    request: Request, exc: DistributionPolicyError,
-):
-    return JSONResponse(status_code=403, content={"error": {
-        "code": exc.error_code,
-        "message": str(exc),
-        "suggestion": exc.suggestion,
-        "details": {"feature": exc.feature},
-        "recoverable": exc.recoverable,
-        "available_actions": exc.available_actions,
-    }})
-
-
-@app.exception_handler(TaskCreationBlocked)
-async def task_creation_blocked(request: Request, exc: TaskCreationBlocked):
+async def distribution_policy_error(request: Request, exc: DistributionPolicyError):
     del request
-    return JSONResponse(status_code=409, content={"error": {
-        "code": exc.error_code,
-        "message": str(exc),
-        "suggestion": "请等待 App 完成恢复并重新启动",
-        "details": {},
-        "recoverable": True,
-    }})
+    return JSONResponse(
+        status_code=403,
+        content={
+            "error": {
+                "code": exc.error_code,
+                "message": str(exc),
+                "suggestion": exc.suggestion,
+                "details": {"feature": exc.feature},
+                "recoverable": exc.recoverable,
+                "available_actions": exc.available_actions,
+            }
+        },
+    )
 
 
 @app.exception_handler(Exception)
 async def structured_unexpected_error(request: Request, exc: Exception):
     logger.exception("未处理的 API 错误: %s", request.url.path, exc_info=exc)
     if request.url.path.startswith("/api"):
-        return JSONResponse(status_code=500, content={"error": {
-            "code": "INTERNAL_ERROR", "message": "本地引擎处理失败",
-            "suggestion": "请重试；若问题持续，请重启 App", "details": {},
-            "recoverable": True,
-        }})
+        return JSONResponse(
+            status_code=500,
+            content={
+                "error": {
+                    "code": "INTERNAL_ERROR",
+                    "message": "本地引擎处理失败",
+                    "suggestion": "请重试；若问题持续，请重启 App",
+                    "details": {},
+                    "recoverable": True,
+                }
+            },
+        )
     raise exc
+
 
 # ── 注册路由 ──
 project_distribution_dependency = [Depends(require_project_distribution)]
@@ -204,11 +182,12 @@ app.include_router(settings.router)
 @app.get("/")
 def root():
     return {
-        "name": "字幕工厂 API",
+        "name": "字幕工厂 API（简洁版）",
         "version": VERSION,
         "docs": "/docs",
         "distribution": distribution_capabilities().as_dict(),
     }
+
 
 @app.get("/api/health")
 def health_check():
@@ -222,9 +201,8 @@ def health_check():
     }
 
 
-# ── 启动提醒 ──
 logger.info("=" * 50)
-logger.info("字幕工厂 API 启动")
+logger.info("字幕工厂 API（简洁版）启动")
 logger.info(f"数据目录: {DATA_DIR}")
 if DOCS_ENABLED:
     logger.info("文档地址: http://127.0.0.1:%s/docs", os.getenv("SUBTITLE_FACTORY_PORT", "8000"))

@@ -22,7 +22,7 @@ from typing import BinaryIO
 
 ROOT = Path(__file__).resolve().parents[1]
 VENDOR_FFMPEG = ROOT / "vendor/ffmpeg/darwin-arm64/ffmpeg-darwin-arm64"
-EXPECTED_MODEL_COUNT = 28
+EXPECTED_MODEL_COUNT = 27
 
 
 class VerificationError(RuntimeError):
@@ -287,10 +287,9 @@ def verify_api(
             "title": "blocked-review", "source_type": "youtube",
             "source_url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
         }),
-        ("/api/settings/app/validate-path", "POST", {
-            "kind": "download_directory", "path": "/tmp",
+        ("/api/transcription/models/parakeet-tdt-0.6b-v3-coreml/prepare", "POST", {
+            "runtime": "external_coreml", "repair": False,
         }),
-        ("/api/transcription/models/imported", "GET", None),
     ]
     for path, method, payload in blocked:
         result = json_response(session, path, expected=403, method=method, payload=payload)
@@ -322,14 +321,10 @@ def verify_api(
         project_root = managed_data / "projects" / project_id
         require(video_path.parent == project_root, "本地媒体没有复制到沙箱项目目录")
         require(video_path.is_file(), "沙箱项目媒体文件不存在")
-        require(
-            imported.get("thumbnail_url") == f"/api/projects/{project_id}/thumbnail",
-            "包内 FFmpeg 没有生成项目缩略图",
-        )
         detail = json_response(session, f"/api/projects/{project_id}", expected=200)
         require(detail.get("id") == project_id, "读取到错误的本地项目")
         require(detail.get("source_type") == "local", "本地项目 source_type 错误")
-        require(detail.get("media_mode") == "local", "本地项目 media_mode 错误")
+        require(detail.get("video_available") is True, "本地项目视频未标记为可用")
         require(detail.get("video_path") == str(video_path), "项目媒体路径与导入结果不一致")
 
         json_response(

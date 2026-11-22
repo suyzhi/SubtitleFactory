@@ -4,7 +4,6 @@ import json
 import logging
 import re
 import time
-import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from difflib import SequenceMatcher
 
@@ -16,19 +15,8 @@ from .ai_providers import (
     prepare_chat_payload,
     raise_for_provider_status,
 )
-from .ai_settings import get_ai_settings
-from .editor import SEGMENT_COLUMNS, history_step
 
 logger = logging.getLogger(__name__)
-
-
-class BatchRetryError(RuntimeError):
-    def __init__(self, message: str, error_code: str = "CLEAN_BATCH_RETRY_CONFLICT"):
-        super().__init__(message)
-        self.error_code = error_code
-        self.recoverable = False
-        self.available_actions = []
-        self.suggestion = "字幕在失败后已被修改，请重新执行整份 AI 整理"
 
 
 class AIOutputLengthError(ValueError):
@@ -54,20 +42,28 @@ CLEANER_SYSTEM_PROMPT = """你是谨慎、忠实的视频字幕整理助手。�
 唯一合法输出：{"groups":[{"ids":["1","2"],"clean_text":"I want to show you this."}]}"""
 
 
-def clean_subtitles(task_id: str, project_id: str, target_length: int = 42, provider_id: str | None = None, model: str | None = None):
+def clean_subtitles(
+    task_id: str,
+    project_id: str,
+    target_length: int = 42,
+    provider_id: str | None = None,
+    model: str | None = None,
+):
     target_length = max(16, min(100, int(target_length)))
-    try:
-        ai = assigned_provider("clean", provider_id, model)
-    except ValueError:
-        ai = get_ai_settings(include_secret=True)
+    ai = assigned_provider("clean", provider_id, model)
 
     db = get_db()
-    rows = [dict(row) for row in db.execute(
-        "SELECT * FROM segments WHERE project_id = ? ORDER BY idx", (project_id,)
-    ).fetchall()]
+    rows = [
+        dict(row)
+        for row in db.execute(
+            "SELECT * FROM segments WHERE project_id = ? ORDER BY idx", (project_id,)
+        ).fetchall()
+    ]
     db.close()
     if not rows:
-        task_manager.update_task(task_id, step="cleaning", progress=100, message="没有字幕需要处理")
+        task_manager.update_task(
+            task_id, step="cleaning", progress=100, message="没有字幕需要处理"
+        )
         return []
 
     initial_fingerprint = _fingerprint(rows)
@@ -85,46 +81,101 @@ def clean_subtitles(task_id: str, project_id: str, target_length: int = 42, prov
     reasoning_tokens = 0
     failed_leaf_batches = 0
     task_manager.add_log(
-        task_id, "info", "AI 句子重组",
+        task_id,
+        "info",
+        "AI 句子重组",
         f"开始分析 {len(rows)} 条字幕，将在 {total_batches} 个语义批次中识别完整句子",
         detail=(
             f"AI: {ai['provider']} · {ai['model']} · "
             f"{'思考开启' if ai.get('thinking_enabled') else '思考关闭'} · "
             f"输入字符 {_batch_character_count(rows)} · 单批最多 32 条/3500 字符"
-        )
+        ),
     )
 
     def process(batch_index: int, batch: list[dict]):
-        fingerprint = json.dumps({"segments":_fingerprint(batch),"provider":ai["provider"],"model":ai["model"],"target_length":target_length}, ensure_ascii=False, sort_keys=True)
-        db=get_db()
-        cached=db.execute("SELECT result_json FROM ai_batch_results WHERE project_id=? AND operation='clean' AND input_fingerprint=? AND status='success' ORDER BY updated_at DESC LIMIT 1",(project_id,fingerprint)).fetchone()
+        fingerprint = json.dumps(
+            {
+                "segments": _fingerprint(batch),
+                "provider": ai["provider"],
+                "model": ai["model"],
+                "target_length": target_length,
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        )
+        db = get_db()
+        cached = db.execute(
+            """SELECT result_json FROM ai_batch_results
+               WHERE project_id=? AND operation='clean'
+                 AND input_fingerprint=? AND status='success'
+               ORDER BY updated_at DESC LIMIT 1""",
+            (project_id, fingerprint),
+        ).fetchone()
         if cached:
             try:
-                groups=json.loads(cached["result_json"]);db.close();return batch_index,groups,None,{"cache_hits":1}
-            except (TypeError,ValueError,json.JSONDecodeError):
+                groups = json.loads(cached["result_json"])
+                db.close()
+                return batch_index, groups, None, {"cache_hits": 1}
+            except (TypeError, ValueError, json.JSONDecodeError):
                 pass
-        db.execute("""INSERT OR REPLACE INTO ai_batch_results
-            (task_id,project_id,operation,batch_index,input_fingerprint,status,result_json,attempts,error,updated_at)
-            VALUES (?,?,?,?,?,'running','[]',0,'',?)""", (task_id,project_id,"clean",batch_index,fingerprint,_now())); db.commit(); db.close()
+        db.execute(
+            """INSERT OR REPLACE INTO ai_batch_results
+               (task_id,project_id,operation,batch_index,input_fingerprint,
+                status,result_json,attempts,error,updated_at)
+               VALUES (?,?,?,?,?,'running','[]',0,'',?)""",
+            (task_id, project_id, "clean", batch_index, fingerprint, _now()),
+        )
+        db.commit()
+        db.close()
         diagnostics: dict[str, int] = {}
         try:
             groups = _call_llm_group(
-                batch, ai, target_length, task_id=task_id, diagnostics=diagnostics,
+                batch, ai, target_length, task_id=task_id, diagnostics=diagnostics
             )
             attempts = int(diagnostics.get("request_attempts", 0))
-            db=get_db(); db.execute("UPDATE ai_batch_results SET status='success',result_json=?,attempts=?,error='',updated_at=? WHERE task_id=? AND batch_index=?", (json.dumps(groups,ensure_ascii=False),attempts,_now(),task_id,batch_index)); db.commit(); db.close()
+            db = get_db()
+            db.execute(
+                """UPDATE ai_batch_results
+                      SET status='success',result_json=?,attempts=?,error='',updated_at=?
+                    WHERE task_id=? AND batch_index=?""",
+                (
+                    json.dumps(groups, ensure_ascii=False),
+                    attempts,
+                    _now(),
+                    task_id,
+                    batch_index,
+                ),
+            )
+            db.commit()
+            db.close()
             return batch_index, groups, None, diagnostics
         except Exception as exc:
             attempts = int(diagnostics.get("request_attempts", 0))
-            db=get_db(); db.execute("UPDATE ai_batch_results SET status='failed',attempts=?,error=?,updated_at=? WHERE task_id=? AND batch_index=?", (attempts,str(exc)[:500],_now(),task_id,batch_index)); db.commit(); db.close()
-            groups=[{"ids":[str(row["idx"])],"clean_text":row["clean_text"] or row["raw_text"]} for row in batch]
+            db = get_db()
+            db.execute(
+                """UPDATE ai_batch_results
+                      SET status='failed',attempts=?,error=?,updated_at=?
+                    WHERE task_id=? AND batch_index=?""",
+                (attempts, str(exc)[:500], _now(), task_id, batch_index),
+            )
+            db.commit()
+            db.close()
+            groups = [
+                {"ids": [str(row["idx"])], "clean_text": row["clean_text"] or row["raw_text"]}
+                for row in batch
+            ]
             return batch_index, groups, exc, diagnostics
 
-    completed={}
+    completed = {}
     with ThreadPoolExecutor(max_workers=2, thread_name_prefix="subtitle-ai") as executor:
-        futures=[executor.submit(process,index,batch) for index,batch in enumerate(batches,1)]
-        for done_count, future in enumerate(as_completed(futures),1):
-            task_manager.checkpoint(task_id); index,groups,error,diagnostics=future.result(); completed[index]=groups
+        futures = [
+            executor.submit(process, index, batch)
+            for index, batch in enumerate(batches, 1)
+        ]
+        for done_count, future in enumerate(as_completed(futures), 1):
+            task_manager.checkpoint(task_id)
+            index, groups, error, diagnostics = future.result()
+            completed[index] = groups
             request_attempts += int(diagnostics.get("request_attempts", 0))
             adaptive_splits += int(diagnostics.get("adaptive_splits", 0))
             length_recoveries += int(diagnostics.get("length_recoveries", 0))
@@ -134,9 +185,41 @@ def clean_subtitles(task_id: str, project_id: str, target_length: int = 42, prov
             reasoning_tokens += int(diagnostics.get("reasoning_tokens", 0))
             failed_leaf_batches += int(diagnostics.get("failed_leaf_batches", 0))
             if error:
-                failed_batches += 1; failed_batch_indexes.append(index); task_manager.add_log(task_id,"warning","AI 句子重组",f"第 {index}/{total_batches} 批未能重组",detail=str(error),suggestion="可在“整理”设置中单独重试该批次")
-            task_manager.update_task(task_id,step="restructuring",progress=5+done_count/max(total_batches,1)*88,message=f"已完成 {done_count}/{total_batches} 个批次",details={"total_segments":len(rows),"total_batches":total_batches,"completed_batches":done_count,"failed_batches":failed_batches,"failed_batch_indexes":sorted(failed_batch_indexes),"ai_provider":ai["provider"],"ai_model":ai["model"],"request_attempts":request_attempts,"adaptive_splits":adaptive_splits,"length_recoveries":length_recoveries,"cache_hits":cache_hits,"prompt_tokens":prompt_tokens,"completion_tokens":completion_tokens,"reasoning_tokens":reasoning_tokens,"failed_leaf_batches":failed_leaf_batches})
-    for index in range(1,total_batches+1): grouped_results.extend(completed[index])
+                failed_batches += 1
+                failed_batch_indexes.append(index)
+                task_manager.add_log(
+                    task_id,
+                    "warning",
+                    "AI 句子重组",
+                    f"第 {index}/{total_batches} 批未能重组",
+                    detail=str(error),
+                    suggestion="可重新执行 AI 整理，已完成批次会自动复用缓存",
+                )
+            task_manager.update_task(
+                task_id,
+                step="restructuring",
+                progress=5 + done_count / max(total_batches, 1) * 88,
+                message=f"已完成 {done_count}/{total_batches} 个批次",
+                details={
+                    "total_segments": len(rows),
+                    "total_batches": total_batches,
+                    "completed_batches": done_count,
+                    "failed_batches": failed_batches,
+                    "failed_batch_indexes": sorted(failed_batch_indexes),
+                    "ai_provider": ai["provider"],
+                    "ai_model": ai["model"],
+                    "request_attempts": request_attempts,
+                    "adaptive_splits": adaptive_splits,
+                    "length_recoveries": length_recoveries,
+                    "cache_hits": cache_hits,
+                    "prompt_tokens": prompt_tokens,
+                    "completion_tokens": completion_tokens,
+                    "reasoning_tokens": reasoning_tokens,
+                    "failed_leaf_batches": failed_leaf_batches,
+                },
+            )
+    for index in range(1, total_batches + 1):
+        grouped_results.extend(completed[index])
 
     # AI results stay in memory until every batch has completed. Cancellation at
     # either checkpoint below leaves the original subtitle rows untouched.
@@ -152,12 +235,20 @@ def clean_subtitles(task_id: str, project_id: str, target_length: int = 42, prov
     if failed_batches:
         message += f"，{failed_batches} 个批次保持原样"
     task_manager.update_task(
-        task_id, step="cleaning_done", progress=100, status=status, message=message,
+        task_id,
+        step="cleaning_done",
+        progress=100,
+        status=status,
+        message=message,
         details={
-            "source_segments": len(rows), "total_segments": len(final_segments),
-            "merged_segments": max(0, merged_count), "failed_batches": failed_batches,
+            "source_segments": len(rows),
+            "total_segments": len(final_segments),
+            "merged_segments": max(0, merged_count),
+            "failed_batches": failed_batches,
             "conflict_batches": conflicts,
-            "total_batches": total_batches, "ai_provider": ai["provider"], "ai_model": ai["model"],
+            "total_batches": total_batches,
+            "ai_provider": ai["provider"],
+            "ai_model": ai["model"],
             "target_length": target_length,
             "failed_batch_indexes": sorted(failed_batch_indexes),
             "request_attempts": request_attempts,
@@ -170,187 +261,17 @@ def clean_subtitles(task_id: str, project_id: str, target_length: int = 42, prov
             "failed_leaf_batches": failed_leaf_batches,
         },
     )
-    task_manager.add_log(task_id, "info", "AI 句子重组", message, suggestion="如效果不合适，可使用“撤销整理”恢复")
+    task_manager.add_log(task_id, "info", "AI 句子重组", message)
     return final_segments
 
 
-def retry_clean_batch(task_id: str, original_task_id: str, batch_index: int):
-    """Retry one stored failed batch and reconcile only its original segment range."""
-    db = get_db()
-    try:
-        failed = db.execute(
-            """SELECT * FROM ai_batch_results
-               WHERE task_id=? AND operation='clean' AND batch_index=? AND status='failed'""",
-            (original_task_id, batch_index),
-        ).fetchone()
-        if not failed:
-            raise BatchRetryError("这个失败批次不存在，或已经重试成功", "CLEAN_BATCH_NOT_FOUND")
-        failed = dict(failed)
-        try:
-            stored = json.loads(failed["input_fingerprint"] or "{}")
-            stored_segments = stored["segments"]
-        except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
-            raise BatchRetryError("失败批次缺少可恢复的输入快照", "CLEAN_BATCH_SNAPSHOT_INVALID") from exc
-        current = [dict(row) for row in db.execute(
-            "SELECT * FROM segments WHERE project_id=? ORDER BY idx", (failed["project_id"],)
-        ).fetchall()]
-    finally:
-        db.close()
-
-    if not stored_segments:
-        raise BatchRetryError("失败批次的输入快照为空", "CLEAN_BATCH_SNAPSHOT_INVALID")
-    positions = {row["id"]: index for index, row in enumerate(current)}
-    stored_ids = [str(item[0]) for item in stored_segments]
-    if any(segment_id not in positions for segment_id in stored_ids):
-        raise BatchRetryError("失败批次中的字幕已被删除或合并，不能安全覆盖")
-    selected_positions = [positions[segment_id] for segment_id in stored_ids]
-    first_position = min(selected_positions)
-    if selected_positions != list(range(first_position, first_position + len(stored_ids))):
-        raise BatchRetryError("失败批次中的字幕顺序已改变，不能安全覆盖")
-
-    batch = [current[position] for position in selected_positions]
-    for snapshot, row in zip(stored_segments, batch, strict=True):
-        current_signature = (
-            row["id"], float(row["start"]), float(row["end"]), row.get("raw_text", ""),
-            row.get("clean_text", ""), row.get("translated_text", ""), int(bool(row.get("locked"))),
-        )
-        stored_signature = (
-            str(snapshot[0]), float(snapshot[2]), float(snapshot[3]), snapshot[4] or "",
-            snapshot[5] or "", snapshot[6] or "", int(bool(snapshot[7])),
-        )
-        if current_signature != stored_signature:
-            raise BatchRetryError("失败批次中的字幕内容或时间已经修改，不能安全覆盖")
-
-    provider_id = stored.get("provider")
-    model = stored.get("model")
-    target_length = max(16, min(100, int(stored.get("target_length") or 42)))
-    try:
-        ai = assigned_provider("clean", provider_id, model)
-    except ValueError:
-        ai = get_ai_settings(include_secret=True)
-
-    retry_fingerprint = json.dumps(
-        {"segments": _fingerprint(batch), "provider": ai["provider"], "model": ai["model"],
-         "target_length": target_length, "retry_of": original_task_id},
-        ensure_ascii=False, sort_keys=True,
-    )
-    task_manager.update_task(
-        task_id, step="retrying_failed_batch", progress=10,
-        message=f"正在单独重试第 {batch_index} 批（{len(batch)} 条字幕）",
-        details={"retry_of": original_task_id, "batch_index": batch_index,
-                 "batch_segments": len(batch), "target_length": target_length},
-    )
-    task_manager.add_log(
-        task_id, "info", "AI 批次重试", f"只重试第 {batch_index} 批",
-        detail=f"范围 {batch[0]['start']:.2f}s–{batch[-1]['end']:.2f}s，共 {len(batch)} 条",
-    )
-    db = get_db()
-    db.execute(
-        """INSERT OR REPLACE INTO ai_batch_results
-           (task_id,project_id,operation,batch_index,input_fingerprint,status,result_json,attempts,error,updated_at)
-           VALUES (?,?,?,?,?,'running','[]',0,'',?)""",
-        (task_id, failed["project_id"], "clean", batch_index, retry_fingerprint, _now()),
-    )
-    db.commit()
-    db.close()
-
-    try:
-        diagnostics: dict[str, int] = {}
-        groups = _call_llm_group(
-            batch, ai, target_length, task_id=task_id, diagnostics=diagnostics,
-        )
-        task_manager.update_task(task_id, progress=75, message=f"第 {batch_index} 批返回有效 JSON，正在应用")
-        final_segments = _compose_final_segments(current, groups)
-        conflicts = _commit_restructured_segments(
-            failed["project_id"], current, _fingerprint(current), final_segments, task_id=task_id
-        )
-        if conflicts:
-            raise BatchRetryError("应用重试结果时检测到字幕被同时修改，结果未覆盖原字幕")
-    except Exception as exc:
-        db = get_db()
-        attempts = int(locals().get("diagnostics", {}).get("request_attempts", 0))
-        db.execute(
-            "UPDATE ai_batch_results SET status='failed',attempts=?,error=?,updated_at=? WHERE task_id=? AND batch_index=?",
-            (attempts, str(exc)[:500], _now(), task_id, batch_index),
-        )
-        db.commit()
-        db.close()
-        task_manager.update_task(
-            task_id,
-            details={"failed_batches": 1, "failed_batch_indexes": [batch_index],
-                     "batch_index": batch_index, "single_batch_retry": True},
-        )
-        raise
-
-    db = get_db()
-    try:
-        result_json = json.dumps(groups, ensure_ascii=False)
-        attempts = int(diagnostics.get("request_attempts", 0))
-        db.execute(
-            "UPDATE ai_batch_results SET status='success',result_json=?,attempts=?,error='',updated_at=? WHERE task_id=? AND batch_index=?",
-            (result_json, attempts, _now(), task_id, batch_index),
-        )
-        db.execute(
-            "UPDATE ai_batch_results SET status='success',result_json=?,error='',updated_at=? WHERE task_id=? AND batch_index=?",
-            (result_json, _now(), original_task_id, batch_index),
-        )
-        remaining_rows = db.execute(
-            "SELECT batch_index FROM ai_batch_results WHERE task_id=? AND status='failed' ORDER BY batch_index",
-            (original_task_id,),
-        ).fetchall()
-        db.commit()
-    finally:
-        db.close()
-
-    remaining = [int(row["batch_index"]) for row in remaining_rows]
-    original = task_manager.get_task(original_task_id)
-    if original:
-        task_manager.update_task(
-            original_task_id,
-            status="partial" if remaining else "success",
-            message=(f"仍有 {len(remaining)} 个整理批次失败" if remaining else "所有整理批次均已成功"),
-            details={"failed_batches": len(remaining), "failed_batch_indexes": remaining},
-        )
-    task_manager.update_task(
-        task_id, step="batch_retry_done", progress=100,
-        message=f"第 {batch_index} 批已重新整理成功",
-        details={
-            "failed_batches": len(remaining), "remaining_failed_batch_indexes": remaining,
-            "request_attempts": int(diagnostics.get("request_attempts", 0)),
-            "adaptive_splits": int(diagnostics.get("adaptive_splits", 0)),
-            "length_recoveries": int(diagnostics.get("length_recoveries", 0)),
-        },
-    )
-    return final_segments
-
-
-def undo_last_clean(project_id: str) -> int:
-    db = get_db()
-    latest = db.execute(
-        "SELECT operation FROM edit_operations WHERE project_id=? AND undone=0 ORDER BY result_revision DESC LIMIT 1",
-        (project_id,),
-    ).fetchone()
-    project = db.execute("SELECT edit_revision FROM projects WHERE id=?", (project_id,)).fetchone()
-    db.close()
-    if not latest or latest["operation"] != "ai_clean" or not project:
-        raise ValueError("最近一次编辑不是可撤销的 AI 整理")
-    return history_step(project_id, int(project["edit_revision"] or 0), "undo")["affected_count"]
-
-
-def _build_semantic_batches(rows: list[dict], max_size: int = 32, max_chars: int = 3500) -> list[list[dict]]:
-    """Locked rows are hard boundaries; unlocked runs end near punctuation when possible."""
-    batches = []
-    run = []
-    for row in rows:
-        if row.get("locked"):
-            if run:
-                batches.extend(_split_run(run, max_size, max_chars))
-                run = []
-            continue
-        run.append(row)
-    if run:
-        batches.extend(_split_run(run, max_size, max_chars))
-    return batches
+def _build_semantic_batches(
+    rows: list[dict], max_size: int = 32, max_chars: int = 3500
+) -> list[list[dict]]:
+    """Split subtitle runs near sentence-ending punctuation when possible."""
+    if not rows:
+        return []
+    return _split_run(rows, max_size, max_chars)
 
 
 def _split_run(run: list[dict], max_size: int, max_chars: int = 6000) -> list[list[dict]]:
@@ -360,18 +281,23 @@ def _split_run(run: list[dict], max_size: int, max_chars: int = 6000) -> list[li
         remaining = len(run) - cursor
         char_limit = cursor
         chars = 0
-        while char_limit < len(run) and char_limit-cursor < max_size:
-            next_chars=len(run[char_limit].get("raw_text", ""))
-            if char_limit > cursor and chars+next_chars > max_chars: break
-            chars += next_chars; char_limit += 1
+        while char_limit < len(run) and char_limit - cursor < max_size:
+            next_chars = len(run[char_limit].get("raw_text", ""))
+            if char_limit > cursor and chars + next_chars > max_chars:
+                break
+            chars += next_chars
+            char_limit += 1
         if remaining <= max_size and char_limit == len(run):
             result.append(run[cursor:])
             break
-        high = max(cursor+1,char_limit)
-        low = min(high, cursor + max(12, (high-cursor)-12))
+        high = max(cursor + 1, char_limit)
+        low = min(high, cursor + max(12, (high - cursor) - 12))
         candidates = [
-            pos for pos in range(low, high + 1)
-            if re.search(r"[.!?。！？][\"'”’)]?$", (run[pos - 1]["raw_text"] or "").strip())
+            pos
+            for pos in range(low, high + 1)
+            if re.search(
+                r"[.!?。！？][\"'”’)]?$", (run[pos - 1]["raw_text"] or "").strip()
+            )
         ]
         cut = candidates[-1] if candidates else high
         result.append(run[cursor:cut])
@@ -380,8 +306,11 @@ def _split_run(run: list[dict], max_size: int, max_chars: int = 6000) -> list[li
 
 
 def _call_llm_group(
-    batch: list[dict], ai: dict, target_length: int = 42,
-    task_id: str | None = None, diagnostics: dict[str, int] | None = None,
+    batch: list[dict],
+    ai: dict,
+    target_length: int = 42,
+    task_id: str | None = None,
+    diagnostics: dict[str, int] | None = None,
     _depth: int = 0,
 ) -> list[dict]:
     import httpx
@@ -391,10 +320,16 @@ def _call_llm_group(
     if diagnostics is None:
         diagnostics = {}
     diagnostics["max_split_depth"] = max(
-        int(diagnostics.get("max_split_depth", 0)), _depth,
+        int(diagnostics.get("max_split_depth", 0)),
+        _depth,
     )
     prompt_batch = [
-        {"id": str(row["idx"]), "start": round(row["start"], 3), "end": round(row["end"], 3), "raw_text": row["raw_text"]}
+        {
+            "id": str(row["idx"]),
+            "start": round(row["start"], 3),
+            "end": round(row["end"], 3),
+            "raw_text": row["raw_text"],
+        }
         for row in batch
     ]
     length_instruction = f"""
@@ -410,18 +345,32 @@ def _call_llm_group(
         try:
             retry_instruction = (
                 "\n\n上一次响应不是可接受的严格 JSON。现在必须只返回一个 JSON 对象："
-                "{\"groups\":[{\"ids\":[\"...\"],\"clean_text\":\"...\"}]}。"
+                '{"groups":[{"ids":["..."],"clean_text":"..."}]}。'
                 "不要使用 Markdown，不要解释；逐词对照输入，只做保守合并和标点修正。"
-                if attempt else ""
+                if attempt
+                else ""
             )
             payload = {
                 "model": ai["model"],
                 "messages": [
-                    {"role": "system", "content": CLEANER_SYSTEM_PROMPT + length_instruction + retry_instruction},
-                    {"role": "user", "content": json.dumps({
-                        "required_output_schema": {"groups": [{"ids": ["string"], "clean_text": "string"}]},
-                        "segments": prompt_batch,
-                    }, ensure_ascii=False)},
+                    {
+                        "role": "system",
+                        "content": CLEANER_SYSTEM_PROMPT
+                        + length_instruction
+                        + retry_instruction,
+                    },
+                    {
+                        "role": "user",
+                        "content": json.dumps(
+                            {
+                                "required_output_schema": {
+                                    "groups": [{"ids": ["string"], "clean_text": "string"}]
+                                },
+                                "segments": prompt_batch,
+                            },
+                            ensure_ascii=False,
+                        ),
+                    },
                 ],
                 "temperature": 0,
                 "max_tokens": _output_token_budget(prompt_batch),
@@ -429,11 +378,17 @@ def _call_llm_group(
             if ai.get("provider") in {"deepseek", "openai"}:
                 payload["response_format"] = {"type": "json_object"}
             payload = prepare_chat_payload(ai, payload)
-            diagnostics["request_attempts"] = int(diagnostics.get("request_attempts", 0)) + 1
+            diagnostics["request_attempts"] = (
+                int(diagnostics.get("request_attempts", 0)) + 1
+            )
             response = httpx.post(
                 f"{ai['base_url'].rstrip('/')}/chat/completions",
-                headers={"Authorization": f"Bearer {ai['api_key']}", "Content-Type": "application/json"},
-                json=payload, timeout=120,
+                headers={
+                    "Authorization": f"Bearer {ai['api_key']}",
+                    "Content-Type": "application/json",
+                },
+                json=payload,
+                timeout=120,
             )
             raise_for_provider_status(response)
             if task_id:
@@ -441,11 +396,19 @@ def _call_llm_group(
             response_data = response.json()
             choice = response_data["choices"][0]
             usage = response_data.get("usage") or {}
-            diagnostics["prompt_tokens"] = int(diagnostics.get("prompt_tokens", 0)) + int(usage.get("prompt_tokens") or 0)
-            diagnostics["completion_tokens"] = int(diagnostics.get("completion_tokens", 0)) + int(usage.get("completion_tokens") or 0)
+            diagnostics["prompt_tokens"] = int(diagnostics.get("prompt_tokens", 0)) + int(
+                usage.get("prompt_tokens") or 0
+            )
+            diagnostics["completion_tokens"] = int(
+                diagnostics.get("completion_tokens", 0)
+            ) + int(usage.get("completion_tokens") or 0)
             completion_details = usage.get("completion_tokens_details") or {}
-            diagnostics["reasoning_tokens"] = int(diagnostics.get("reasoning_tokens", 0)) + int(
-                completion_details.get("reasoning_tokens") or usage.get("reasoning_tokens") or 0
+            diagnostics["reasoning_tokens"] = int(
+                diagnostics.get("reasoning_tokens", 0)
+            ) + int(
+                completion_details.get("reasoning_tokens")
+                or usage.get("reasoning_tokens")
+                or 0
             )
             if choice.get("finish_reason") == "length":
                 raise AIOutputLengthError("AI 输出达到长度上限，JSON 被截断")
@@ -457,10 +420,13 @@ def _call_llm_group(
             raise
         except AIOutputLengthError as exc:
             error = exc
-            diagnostics["length_recoveries"] = int(diagnostics.get("length_recoveries", 0)) + 1
+            diagnostics["length_recoveries"] = (
+                int(diagnostics.get("length_recoveries", 0)) + 1
+            )
             logger.warning(
                 "[Cleaner] AI 输出达到上限，准备缩小批次（%s 条，深度 %s）",
-                len(batch), _depth,
+                len(batch),
+                _depth,
             )
             break
         except AIProviderRequestError as exc:
@@ -471,32 +437,46 @@ def _call_llm_group(
             retry_after = getattr(getattr(exc, "__cause__", None), "response", None)
             retry_after = getattr(retry_after, "headers", {}).get("Retry-After")
             try:
-                delay = min(30.0, max(0.0, float(retry_after))) if retry_after else 2 ** attempt
+                delay = (
+                    min(30.0, max(0.0, float(retry_after)))
+                    if retry_after
+                    else 2**attempt
+                )
             except (TypeError, ValueError):
-                delay = 2 ** attempt
+                delay = 2**attempt
             time.sleep(delay)
         except httpx.RequestError as exc:
             error = exc
             logger.warning("[Cleaner] AI 网络请求失败（第 %s 次）: %s", attempt + 1, exc)
             if attempt >= 1:
                 raise RuntimeError(f"AI 网络请求失败：{exc}") from exc
-            time.sleep(2 ** attempt)
+            time.sleep(2**attempt)
         except Exception as exc:
             error = exc
             logger.warning("[Cleaner] LLM 句子重组失败（第 %s 次）: %s", attempt + 1, exc)
             if attempt < 1:
-                time.sleep(2 ** attempt)
+                time.sleep(2**attempt)
 
     if len(batch) == 1:
-        diagnostics["failed_leaf_batches"] = int(diagnostics.get("failed_leaf_batches", 0)) + 1
-        raise RuntimeError(f"AI 在最小批次仍未返回符合约束的 JSON 分组：{error}") from error
+        diagnostics["failed_leaf_batches"] = (
+            int(diagnostics.get("failed_leaf_batches", 0)) + 1
+        )
+        raise RuntimeError(
+            f"AI 在最小批次仍未返回符合约束的 JSON 分组：{error}"
+        ) from error
 
     left, right = _split_batch_for_recovery(batch)
     diagnostics["adaptive_splits"] = int(diagnostics.get("adaptive_splits", 0)) + 1
     if task_id:
-        reason = "输出达到长度上限" if isinstance(error, AIOutputLengthError) else "连续返回无效 JSON"
+        reason = (
+            "输出达到长度上限"
+            if isinstance(error, AIOutputLengthError)
+            else "连续返回无效 JSON"
+        )
         task_manager.add_log(
-            task_id, "warning", "AI 自适应拆批",
+            task_id,
+            "warning",
+            "AI 自适应拆批",
             f"{reason}，已将 {len(batch)} 条缩小为 {len(left)} + {len(right)} 条",
             detail=(
                 f"输入字符 {_batch_character_count(batch)} · "
@@ -506,12 +486,20 @@ def _call_llm_group(
         )
     return [
         *_call_llm_group(
-            left, ai, target_length, task_id=task_id,
-            diagnostics=diagnostics, _depth=_depth + 1,
+            left,
+            ai,
+            target_length,
+            task_id=task_id,
+            diagnostics=diagnostics,
+            _depth=_depth + 1,
         ),
         *_call_llm_group(
-            right, ai, target_length, task_id=task_id,
-            diagnostics=diagnostics, _depth=_depth + 1,
+            right,
+            ai,
+            target_length,
+            task_id=task_id,
+            diagnostics=diagnostics,
+            _depth=_depth + 1,
         ),
     ]
 
@@ -539,9 +527,13 @@ def _split_batch_for_recovery(batch: list[dict]) -> tuple[list[dict], list[dict]
         previous = batch[position - 1]
         following = batch[position]
         distance_penalty = abs(position - midpoint) * 3
-        sentence_bonus = 18 if re.search(
-            r"[.!?。！？][\"'”’)]?$", str(previous.get("raw_text") or "").strip()
-        ) else 0
+        sentence_bonus = (
+            18
+            if re.search(
+                r"[.!?。！？][\"'”’)]?$", str(previous.get("raw_text") or "").strip()
+            )
+            else 0
+        )
         try:
             gap = float(following.get("start") or 0) - float(previous.get("end") or 0)
         except (TypeError, ValueError):
@@ -574,15 +566,15 @@ def _validate_grouped_results(batch: list[dict], parsed) -> list[dict]:
         if any(value not in row_by_idx for value in ids):
             continue
         positions = [position_by_idx[value] for value in ids]
-        if ids != expected[min(positions):max(positions) + 1]:
+        if ids != expected[min(positions) : max(positions) + 1]:
             raise ValueError("AI 字幕 ID 顺序变化或分组不连续")
         if consumed.intersection(ids):
             continue
 
         clean_text = text.strip()
-        source_text = _join_text([
-            row_by_idx[value].get("raw_text", "") or "" for value in ids
-        ])
+        source_text = _join_text(
+            [row_by_idx[value].get("raw_text", "") or "" for value in ids]
+        )
         if source_text and not _is_faithful_rewrite(source_text, clean_text):
             logger.warning(
                 "[Cleaner] 字幕 %s 改写幅度过大，已回退为原文合并",
@@ -595,12 +587,17 @@ def _validate_grouped_results(batch: list[dict], parsed) -> list[dict]:
         normalized.append({"ids": ids, "clean_text": clean_text})
         consumed.update(ids)
 
-    # Malformed groups and omitted IDs fall back to the original subtitle.  This
+    # Malformed groups and omitted IDs fall back to the original subtitle. This
     # keeps one bad group from invalidating useful work from the entire batch.
     for value in expected:
         if value not in consumed:
             row = row_by_idx[value]
-            normalized.append({"ids": [value], "clean_text": row.get("clean_text") or row.get("raw_text") or ""})
+            normalized.append(
+                {
+                    "ids": [value],
+                    "clean_text": row.get("clean_text") or row.get("raw_text") or "",
+                }
+            )
     normalized.sort(key=lambda group: position_by_idx[group["ids"][0]])
     return normalized
 
@@ -629,7 +626,7 @@ def _compose_final_segments(rows: list[dict], groups: list[dict]) -> list[dict]:
         key = str(row["idx"])
         if key in consumed:
             continue
-        if row.get("locked") or key not in group_by_first:
+        if key not in group_by_first:
             output.append(dict(row))
             consumed.add(key)
             continue
@@ -638,45 +635,72 @@ def _compose_final_segments(rows: list[dict], groups: list[dict]) -> list[dict]:
         consumed.update(group["ids"])
         first, last = source_rows[0], source_rows[-1]
         raw_text = _join_text([item["raw_text"] for item in source_rows])
-        speakers = {item.get("speaker") or "" for item in source_rows}
-        output.append({
-            "id": first["id"], "project_id": first["project_id"], "idx": 0,
-            "start": first["start"], "end": last["end"], "raw_text": raw_text,
-            "clean_text": group["clean_text"],
-            "translated_text": "",
-            "speaker": speakers.pop() if len(speakers) == 1 else "", "locked": 0,
-            "is_draft": 0, "source_stage": "cleaned",
-            "_source_ids": [item["id"] for item in source_rows],
-        })
+        output.append(
+            {
+                "id": first["id"],
+                "project_id": first["project_id"],
+                "idx": 0,
+                "start": first["start"],
+                "end": last["end"],
+                "raw_text": raw_text,
+                "clean_text": group["clean_text"],
+                "translated_text": "",
+                "is_draft": 0,
+                "source_stage": "cleaned",
+                "transcription_run_id": first.get("transcription_run_id"),
+                "_source_ids": [item["id"] for item in source_rows],
+            }
+        )
     for index, segment in enumerate(output, 1):
         segment["idx"] = index
     return output
 
 
 def _commit_restructured_segments(
-    project_id: str, original: list[dict], fingerprint,
-    final_segments: list[dict], task_id: str | None = None,
+    project_id: str,
+    original: list[dict],
+    fingerprint,
+    final_segments: list[dict],
+    task_id: str | None = None,
 ):
     db = get_db()
     try:
         db.execute("BEGIN IMMEDIATE")
-        current = [dict(row) for row in db.execute(
-            "SELECT * FROM segments WHERE project_id = ? ORDER BY idx", (project_id,)
-        ).fetchall()]
-        before_snapshot = [{column: row.get(column) for column in SEGMENT_COLUMNS} for row in current]
-        revision = int(db.execute("SELECT edit_revision FROM projects WHERE id=?", (project_id,)).fetchone()[0] or 0)
-        original_by_id={row["id"]: row for row in original}; current_by_id={row["id"]: row for row in current}
-        reconciled=[]; consumed=set(); conflicts=0
+        current = [
+            dict(row)
+            for row in db.execute(
+                "SELECT * FROM segments WHERE project_id = ? ORDER BY idx",
+                (project_id,),
+            ).fetchall()
+        ]
+        original_by_id = {row["id"]: row for row in original}
+        current_by_id = {row["id"]: row for row in current}
+        reconciled = []
+        consumed = set()
+        conflicts = 0
         for segment in final_segments:
-            source_ids=segment.pop("_source_ids", [segment["id"]])
-            unchanged=all(source_id in current_by_id and source_id in original_by_id and _fingerprint([current_by_id[source_id]]) == _fingerprint([original_by_id[source_id]]) for source_id in source_ids)
-            if unchanged: reconciled.append(segment)
+            source_ids = segment.pop("_source_ids", [segment["id"]])
+            unchanged = all(
+                source_id in current_by_id
+                and source_id in original_by_id
+                and _fingerprint([current_by_id[source_id]])
+                == _fingerprint([original_by_id[source_id]])
+                for source_id in source_ids
+            )
+            if unchanged:
+                reconciled.append(segment)
             else:
-                conflicts += 1; reconciled.extend(dict(current_by_id[source_id]) for source_id in source_ids if source_id in current_by_id)
+                conflicts += 1
+                reconciled.extend(
+                    dict(current_by_id[source_id])
+                    for source_id in source_ids
+                    if source_id in current_by_id
+                )
             consumed.update(source_ids)
         reconciled.extend(dict(row) for row in current if row["id"] not in consumed)
-        reconciled=sorted(reconciled,key=lambda item:item["start"])
-        for index, segment in enumerate(reconciled,1): segment["idx"]=index
+        reconciled = sorted(reconciled, key=lambda item: item["start"])
+        for index, segment in enumerate(reconciled, 1):
+            segment["idx"] = index
         if task_id:
             task_manager.checkpoint(task_id)
         db.execute("DELETE FROM segments WHERE project_id = ?", (project_id,))
@@ -684,20 +708,9 @@ def _commit_restructured_segments(
             if task_id and index % 20 == 0:
                 task_manager.checkpoint(task_id)
             _insert_segment(db, segment)
-        after_rows = [dict(row) for row in db.execute("SELECT * FROM segments WHERE project_id=? ORDER BY idx", (project_id,))]
-        after_snapshot = [{column: row.get(column) for column in SEGMENT_COLUMNS} for row in after_rows]
-        operation_id = str(uuid.uuid4()); next_revision = revision + 1
-        db.execute("DELETE FROM edit_operations WHERE project_id=? AND undone=1", (project_id,))
         db.execute(
-            """INSERT INTO edit_operations(id,project_id,operation,before_json,after_json,base_revision,result_revision,undone,created_at)
-               VALUES (?,?,?,?,?,?,?,0,?)""",
-            (operation_id, project_id, "ai_clean", json.dumps(before_snapshot, ensure_ascii=False),
-             json.dumps(after_snapshot, ensure_ascii=False), revision, next_revision, _now()),
+            "UPDATE projects SET updated_at=? WHERE id=?", (_now(), project_id)
         )
-        db.execute("UPDATE projects SET edit_revision=?,updated_at=? WHERE id=?", (next_revision, _now(), project_id))
-        db.execute("""DELETE FROM edit_operations WHERE id IN (
-            SELECT id FROM edit_operations WHERE project_id=? AND undone=0
-            ORDER BY result_revision DESC LIMIT -1 OFFSET 500)""", (project_id,))
         if task_id:
             task_manager.checkpoint(task_id)
         db.commit()
@@ -712,21 +725,36 @@ def _commit_restructured_segments(
 def _insert_segment(db, segment: dict):
     db.execute(
         """INSERT INTO segments
-           (id, project_id, idx, start, end, raw_text, clean_text, translated_text, speaker, speaker_id, locked, is_draft, source_stage, transcription_run_id)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+           (id, project_id, idx, start, end, raw_text, clean_text, translated_text,
+            is_draft, source_stage, transcription_run_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
-            segment["id"], segment["project_id"], segment["idx"], segment["start"], segment["end"],
-            segment.get("raw_text", ""), segment.get("clean_text", ""), segment.get("translated_text", ""),
-            segment.get("speaker", ""), segment.get("speaker_id"), int(bool(segment.get("locked"))), int(bool(segment.get("is_draft"))),
-            segment.get("source_stage", "final"), segment.get("transcription_run_id"),
+            segment["id"],
+            segment["project_id"],
+            segment["idx"],
+            segment["start"],
+            segment["end"],
+            segment.get("raw_text", ""),
+            segment.get("clean_text", ""),
+            segment.get("translated_text", ""),
+            int(bool(segment.get("is_draft"))),
+            segment.get("source_stage", "final"),
+            segment.get("transcription_run_id"),
         ),
     )
 
 
 def _fingerprint(rows: list[dict]):
     return [
-        (row["id"], row["idx"], row["start"], row["end"], row.get("raw_text", ""),
-         row.get("clean_text", ""), row.get("translated_text", ""), int(bool(row.get("locked"))))
+        (
+            row["id"],
+            row["idx"],
+            row["start"],
+            row["end"],
+            row.get("raw_text", ""),
+            row.get("clean_text", ""),
+            row.get("translated_text", ""),
+        )
         for row in rows
     ]
 
@@ -739,7 +767,9 @@ def _join_text(parts: list[str]) -> str:
             continue
         if not result:
             result = part
-        elif re.search(r"[\u3400-\u9fff]$", result) and re.match(r"^[\u3400-\u9fff]", part):
+        elif re.search(r"[\u3400-\u9fff]$", result) and re.match(
+            r"^[\u3400-\u9fff]", part
+        ):
             result += part
         else:
             result += " " + part
@@ -753,7 +783,9 @@ def _extract_json(text: str):
     try:
         return json.loads(text)
     except json.JSONDecodeError:
-        start_candidates = [value for value in (text.find("["), text.find("{")) if value >= 0]
+        start_candidates = [
+            value for value in (text.find("["), text.find("{")) if value >= 0
+        ]
         if not start_candidates:
             return None
         start = min(start_candidates)
@@ -761,7 +793,7 @@ def _extract_json(text: str):
             end = text.rfind(closing)
             if end > start:
                 try:
-                    return json.loads(text[start:end + 1])
+                    return json.loads(text[start : end + 1])
                 except json.JSONDecodeError:
                     continue
         return None

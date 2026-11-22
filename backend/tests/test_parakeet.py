@@ -24,8 +24,9 @@ if "SUBTITLE_FACTORY_DATA_DIR" not in os.environ:
         prefix="subtitle-factory-parakeet-tests-",
     )
 
-from app.api.projects import start_transcribe
+from app.api.projects import start_workflow
 from app.models.database import get_db, init_db
+from app.models.schemas import WorkflowRequest
 from app.services import parakeet_transcriber as parakeet
 from app.services.parakeet_transcriber import (
     PARAKEET_MODEL_DIR_NAME,
@@ -295,23 +296,21 @@ class ParakeetInferenceAdapterTests(unittest.TestCase):
         init_db()
         project_id = str(uuid.uuid4())
         now = time.strftime("%Y-%m-%d %H:%M:%S")
-        with tempfile.NamedTemporaryFile(suffix=".wav") as audio:
-            with wave.open(audio.name, "wb") as output:
-                output.setnchannels(1)
-                output.setsampwidth(2)
-                output.setframerate(16000)
-                output.writeframes(b"\0\0" * 16000)
+        with tempfile.NamedTemporaryFile(suffix=".mp4") as video:
+            video.write(b"video")
+            video.flush()
             db = get_db()
             db.execute(
                 "INSERT INTO projects "
-                "(id,title,source_type,audio_path,language,target_language,created_at,updated_at) "
+                "(id,title,source_type,video_path,language,target_language,created_at,updated_at) "
                 "VALUES (?,?,?,?,?,?,?,?)",
-                (project_id, "API Parakeet", "local", audio.name, "auto", "zh", now, now),
+                (project_id, "API Parakeet", "local", video.name, "auto", "zh", now, now),
             )
             db.commit()
             db.close()
 
             fake_manager = SimpleNamespace(
+                active_task_ids=lambda _project_id: [],
                 create_task=lambda _project_id, _kind, **_options: "parakeet-task",
                 update_task=lambda *_args, **_kwargs: None,
                 run_background=lambda *_args, **_kwargs: None,
@@ -320,12 +319,22 @@ class ParakeetInferenceAdapterTests(unittest.TestCase):
                 "app.api.projects.get_transcription_model_status",
                 return_value={"ready": True},
             ):
-                response = start_transcribe(project_id, "auto", PARAKEET_MODEL_ID)
+                response = start_workflow(
+                    project_id,
+                    WorkflowRequest(
+                        model=PARAKEET_MODEL_ID,
+                        language="auto",
+                        runtime="external_coreml",
+                    ),
+                )
 
-        self.assertEqual(response["task_id"], "parakeet-task")
-        with self.assertRaises(HTTPException) as raised:
-            start_transcribe("missing", "auto", "invented-model")
-        self.assertEqual(raised.exception.status_code, 400)
+            self.assertEqual(response["task_id"], "parakeet-task")
+            with self.assertRaises(HTTPException) as raised:
+                start_workflow(
+                    project_id,
+                    WorkflowRequest(model="invented-model", language="auto", runtime="cpu"),
+                )
+            self.assertEqual(raised.exception.status_code, 400)
 
     def test_official_nemo_transducer_adapter_yields_timed_vad_segment(self):
         with tempfile.TemporaryDirectory() as folder:
