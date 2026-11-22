@@ -1,7 +1,6 @@
 import { createPortal } from 'react-dom';
-import { createContext, useContext, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
-
-export const AppSelectThemeContext=createContext<'light'|'dark'|undefined>(undefined);
+import { useContext, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { AppSelectThemeContext } from './appSelectContext';
 
 export interface AppSelectOption { value:string; label:string; description?:string; disabled?:boolean; keywords?:string; }
 interface Props { value:string; onChange:(value:string)=>void; options:readonly AppSelectOption[]; label:string; placeholder?:string; searchable?:boolean; allowCustom?:boolean; disabled?:boolean; className?:string; tone?:'player'; }

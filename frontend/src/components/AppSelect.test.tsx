@@ -1,7 +1,8 @@
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
-import AppSelect, {AppSelectThemeContext} from './AppSelect';
+import AppSelect from './AppSelect';
+import { AppSelectThemeContext } from './appSelectContext';
 
 const OPTIONS = [
   { value: 'zh', label: '中文', description: 'Chinese' },

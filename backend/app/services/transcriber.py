@@ -12,41 +12,22 @@
 
 import json
 import logging
-import re
-import sys
 import time as time_module
 import uuid
 from contextlib import ExitStack
-from dataclasses import asdict, dataclass
-from pathlib import Path
-from typing import List
 
 from ..models.database import get_db
-from ..utils.config import (
-    MAX_CHARS_CN,
-    MAX_CHARS_EN,
-    MAX_DURATION,
-    MIN_DURATION,
-    WHISPER_MODEL,
-)
+from ..utils.config import MAX_DURATION, MIN_DURATION, WHISPER_MODEL
 from ..utils.task_manager import task_manager
 from .cloud_asr import (
     FUN_ASR_MODEL_ID,
     FUN_ASR_RUNTIME,
     create_fun_asr_session,
-    fun_asr_status,
 )
-from .managed_sherpa import (
-    create_managed_session,
-    managed_model_status,
-    recommended_ready_model,
-)
+from .managed_sherpa import create_managed_session
 from .model_catalog import (
-    QWEN_ASR_CATALOG_BY_ID,
-    WHISPER_CATALOG_BY_ID,
     prepare_whisper_model,
     resolve_local_model,
-    runtime_model_status,
 )
 from .parakeet_transcriber import (
     PARAKEET_MODEL_ID,
@@ -55,280 +36,86 @@ from .parakeet_transcriber import (
     create_parakeet_session,
     get_parakeet_model_status,
 )
-from .sherpa_catalog import MANAGED_SHERPA_BY_ID
+from .transcription_models import (
+    MANAGED_SHERPA_MODEL_IDS,
+    PARAKEET_MODEL_IDS,
+    QWEN_ASR_MODEL_IDS,
+    SAFE_TRANSCRIPTION_MODEL,
+    SUPPORTED_TRANSCRIPTION_MODELS,
+    WHISPER_MODEL_IDS,
+    ModelResolution,
+    _bundled_whisper_model,
+    _managed_whisper_model_ready,
+    get_transcription_model_status,
+    resolve_transcription_model,
+    validate_whisper_model_path,
+)
+from .transcription_postprocess import (
+    _allocate_piece_times,
+    _decode_timings,
+    _fmt_time,
+    _has_sentence_end,
+    _max_chars_for_text,
+    _post_process_segments,
+    _segment_word_timings,
+    _smart_merge,
+    _split_text_into_pieces,
+)
 
 logger = logging.getLogger(__name__)
-
-WHISPER_MODEL_IDS = frozenset(WHISPER_CATALOG_BY_ID)
-QWEN_ASR_MODEL_IDS = frozenset(QWEN_ASR_CATALOG_BY_ID)
-PARAKEET_MODEL_IDS = frozenset({PARAKEET_MODEL_ID, PARAKEET_ONNX_MODEL_ID})
-MANAGED_SHERPA_MODEL_IDS = frozenset(MANAGED_SHERPA_BY_ID)
-SUPPORTED_TRANSCRIPTION_MODELS = (
-    WHISPER_MODEL_IDS
-    | QWEN_ASR_MODEL_IDS
-    | PARAKEET_MODEL_IDS
-    | MANAGED_SHERPA_MODEL_IDS
-    | {FUN_ASR_MODEL_ID, "custom"}
-)
-SAFE_TRANSCRIPTION_MODEL = "small"
-_WHISPER_REQUIRED_FILES = frozenset({"model.bin", "config.json", "tokenizer.json"})
 
 # 日志节流：每 N 条字幕写一次日志
 LOG_THROTTLE_INTERVAL = 5
 
+__all__ = [
+    "FUN_ASR_MODEL_ID",
+    "FUN_ASR_RUNTIME",
+    "LOG_THROTTLE_INTERVAL",
+    "MANAGED_SHERPA_MODEL_IDS",
+    "ModelResolution",
+    "PARAKEET_MODEL_ID",
+    "PARAKEET_MODEL_IDS",
+    "PARAKEET_ONNX_MODEL_ID",
+    "PARAKEET_SUPPORTED_LANGUAGES",
+    "QWEN_ASR_MODEL_IDS",
+    "SAFE_TRANSCRIPTION_MODEL",
+    "SUPPORTED_TRANSCRIPTION_MODELS",
+    "TranscriptionError",
+    "WHISPER_MODEL_IDS",
+    "_allocate_piece_times",
+    "_bundled_whisper_model",
+    "_decode_timings",
+    "_fmt_time",
+    "_has_sentence_end",
+    "_managed_whisper_model_ready",
+    "_max_chars_for_text",
+    "_post_process_segments",
+    "_segment_word_timings",
+    "_smart_merge",
+    "_split_text_into_pieces",
+    "create_parakeet_session",
+    "get_parakeet_model_status",
+    "get_transcription_model_status",
+    "resolve_transcription_model",
+    "transcribe_audio",
+    "validate_whisper_model_path",
+]
+
 
 class TranscriptionError(RuntimeError):
-    def __init__(self, message: str, error_code: str, *, recoverable: bool = True,
-                 suggestion: str = "请检查音频和模型状态后重试"):
+    def __init__(
+        self,
+        message: str,
+        error_code: str,
+        *,
+        recoverable: bool = True,
+        suggestion: str = "请检查音频和模型状态后重试",
+    ):
         super().__init__(message)
         self.error_code = error_code
         self.recoverable = recoverable
         self.available_actions = ["retry", "choose_fallback"] if recoverable else []
         self.suggestion = suggestion
-
-
-@dataclass(frozen=True)
-class ModelResolution:
-    requested_model: str
-    model_id: str
-    load_target: str
-    source: str
-    fallback_reason: str = ""
-
-    @property
-    def fell_back(self) -> bool:
-        return bool(self.fallback_reason)
-
-    def to_details(self) -> dict:
-        # load_target may be a user-selected local path; never persist it.
-        value = asdict(self)
-        value.pop("load_target", None)
-        value["fell_back"] = self.fell_back
-        return value
-
-
-def validate_whisper_model_path(path: str | Path | None) -> dict:
-    """Validate a local faster-whisper CTranslate2 model directory."""
-    if not path:
-        return {"ok": False, "source": "unavailable", "error": "尚未选择模型目录"}
-    candidate = Path(path).expanduser()
-    missing = sorted(
-        name for name in _WHISPER_REQUIRED_FILES if not (candidate / name).is_file()
-    )
-    if not candidate.is_dir() or missing:
-        return {
-            "ok": False,
-            "source": "unavailable",
-            "error": "模型目录缺少必要文件" if missing else "模型目录不存在",
-            "missing_files": missing,
-        }
-    return {"ok": True, "source": "custom_path", "error": "", "missing_files": []}
-
-
-def _bundled_whisper_model(model_id: str) -> Path | None:
-    roots: list[Path] = []
-    frozen_root = getattr(sys, "_MEIPASS", None)
-    if frozen_root:
-        roots.append(Path(frozen_root))
-    if getattr(sys, "frozen", False):
-        roots.append(Path(sys.executable).resolve().parent)
-    for root in roots:
-        for candidate in (
-            root / "models" / "whisper" / model_id,
-            root / "models" / f"faster-whisper-{model_id}",
-        ):
-            if validate_whisper_model_path(candidate)["ok"]:
-                return candidate.resolve()
-    return None
-
-
-def _managed_whisper_model_ready(model_id: str) -> bool:
-    return bool(
-        resolve_local_model(model_id, "cpu")
-        or resolve_local_model(model_id, "mlx")
-    )
-
-
-def get_transcription_model_status(
-    model_id: str,
-    *,
-    custom_model_path: str | Path | None = None,
-    coreml_model_path: str | Path | None = None,
-    coreml_cli_path: str | Path | None = None,
-) -> dict:
-    """Return model state with explicit source categories for the settings UI."""
-    if model_id == FUN_ASR_MODEL_ID:
-        return fun_asr_status()
-    if model_id in MANAGED_SHERPA_MODEL_IDS:
-        return managed_model_status(model_id)
-    if model_id in QWEN_ASR_MODEL_IDS:
-        status = runtime_model_status(model_id, "mlx")
-        return {
-            "model_id": model_id,
-            "ready": bool(status["model_ready"]),
-            "source": status["source"],
-            "state": status["status"],
-            "download_required": status["download_required"],
-            "download_bytes": status["download_bytes"],
-            "error": "" if status["model_ready"] else "首次使用时将下载到 App 模型目录",
-        }
-    if model_id in PARAKEET_MODEL_IDS:
-        return get_parakeet_model_status(
-            model_id,
-            coreml_model_dir=coreml_model_path,
-            coreml_cli_path=coreml_cli_path,
-        )
-    if model_id == "custom":
-        validation = validate_whisper_model_path(custom_model_path)
-        return {
-            "model_id": model_id,
-            "ready": validation["ok"],
-            "source": "custom_path" if validation["ok"] else "unavailable",
-            "state": "ready" if validation["ok"] else "invalid",
-            "download_required": False,
-            "error": validation["error"],
-        }
-    if model_id not in WHISPER_MODEL_IDS:
-        return {
-            "model_id": model_id, "ready": False, "source": "unavailable",
-            "state": "unavailable", "download_required": False,
-            "error": "不支持的转写模型",
-        }
-    bundled = _bundled_whisper_model(model_id)
-    cpu_status = runtime_model_status(model_id, "cpu")
-    mlx_status = runtime_model_status(model_id, "mlx")
-    managed_ready = bool(cpu_status["model_ready"] or mlx_status["model_ready"])
-    return {
-        "model_id": model_id,
-        "ready": bool(bundled or managed_ready),
-        "source": "built_in" if bundled else (
-            "app_download" if managed_ready else "huggingface"
-        ),
-        "state": "ready" if bundled or managed_ready else "not_downloaded",
-        "download_required": not bool(bundled or managed_ready),
-        "download_bytes": min(
-            cpu_status["download_bytes"], mlx_status["download_bytes"],
-        ),
-        "error": "" if bundled or managed_ready else "首次使用时将下载到 App 模型目录",
-    }
-
-
-def resolve_transcription_model(
-    model_size: str | None,
-    language: str = "auto",
-    *,
-    default_model: str | None = None,
-    custom_model_path: str | Path | None = None,
-    coreml_model_path: str | Path | None = None,
-    coreml_cli_path: str | Path | None = None,
-) -> ModelResolution:
-    """Resolve to a safe runtime model and explain every automatic fallback."""
-    requested = (model_size or "auto").strip()
-    candidate = requested
-    if candidate == "auto":
-        configured = (default_model or "auto").strip()
-        candidate = (
-            configured
-            if configured and configured != "auto"
-            else recommended_ready_model(language) or SAFE_TRANSCRIPTION_MODEL
-        )
-
-    normalized_language = (language or "auto").lower()
-    if candidate.startswith("local:"):
-        try:
-            from .local_models import validate_imported
-            imported = validate_imported(candidate)
-            if imported["ready"]:
-                return ModelResolution(requested, candidate, imported["path"], "imported_reference")
-        except Exception:
-            pass
-        return ModelResolution(requested, candidate, candidate, "unavailable", "导入模型路径失效，需要重新定位")
-    if (
-        candidate in PARAKEET_MODEL_IDS
-        and normalized_language != "auto"
-        and normalized_language not in PARAKEET_SUPPORTED_LANGUAGES
-    ):
-        return ModelResolution(
-            requested, SAFE_TRANSCRIPTION_MODEL, SAFE_TRANSCRIPTION_MODEL, "app_download",
-            "Parakeet 不支持所选源语言，已切换到 Whisper Small",
-        )
-    if (
-        candidate == "distil-large-v3"
-        and normalized_language not in {"auto", "", "en", "english"}
-    ):
-        return ModelResolution(
-            requested, SAFE_TRANSCRIPTION_MODEL, SAFE_TRANSCRIPTION_MODEL, "app_download",
-            "Distil-Whisper Large V3 仅支持英语，已切换到 Whisper Small",
-        )
-
-    if candidate in MANAGED_SHERPA_MODEL_IDS:
-        definition = MANAGED_SHERPA_BY_ID[candidate]
-        if (
-            normalized_language not in {"", "auto"}
-            and "*" not in definition.languages
-            and normalized_language not in definition.languages
-        ):
-            return ModelResolution(
-                requested,
-                SAFE_TRANSCRIPTION_MODEL,
-                SAFE_TRANSCRIPTION_MODEL,
-                "app_download",
-                f"{definition.name} 不支持所选源语言，已切换到 Whisper Small",
-            )
-        return ModelResolution(
-            requested,
-            candidate,
-            candidate,
-            "app_download",
-        )
-
-    if candidate in QWEN_ASR_MODEL_IDS:
-        return ModelResolution(requested, candidate, candidate, "huggingface")
-
-    if candidate == FUN_ASR_MODEL_ID:
-        return ModelResolution(requested, candidate, candidate, "dashscope_cloud")
-
-    if candidate == PARAKEET_MODEL_ID:
-        status = get_parakeet_model_status(
-            candidate,
-            coreml_model_dir=coreml_model_path,
-            coreml_cli_path=coreml_cli_path,
-        )
-        if not status["ready"]:
-            return ModelResolution(
-                requested, SAFE_TRANSCRIPTION_MODEL, SAFE_TRANSCRIPTION_MODEL, "app_download",
-                "外部 Core ML 模型或 CLI 无效，已切换到 Whisper Small",
-            )
-        return ModelResolution(requested, candidate, candidate, status["source"])
-
-    if candidate == PARAKEET_ONNX_MODEL_ID:
-        return ModelResolution(requested, candidate, candidate, "app_download")
-
-    if candidate == "custom" or Path(candidate).expanduser().is_absolute():
-        selected_path = custom_model_path if candidate == "custom" else candidate
-        validation = validate_whisper_model_path(selected_path)
-        if validation["ok"]:
-            return ModelResolution(
-                requested, "custom", str(Path(selected_path).expanduser().resolve()), "custom_path",
-            )
-        return ModelResolution(
-            requested, SAFE_TRANSCRIPTION_MODEL, SAFE_TRANSCRIPTION_MODEL, "app_download",
-            "自定义模型目录无效，已切换到 Whisper Small",
-        )
-
-    if candidate in WHISPER_MODEL_IDS:
-        bundled = _bundled_whisper_model(candidate)
-        return ModelResolution(
-            requested,
-            candidate,
-            str(bundled) if bundled else candidate,
-            "built_in" if bundled else "app_download",
-        )
-
-    return ModelResolution(
-        requested, SAFE_TRANSCRIPTION_MODEL, SAFE_TRANSCRIPTION_MODEL, "app_download",
-        "所选模型不可用，已切换到 Whisper Small",
-    )
 
 
 def transcribe_audio(task_id: str, audio_path: str, project_id: str, language: str = "auto", model_size: str | None = None, runtime: str | None = None):
@@ -811,264 +598,3 @@ def _transcribe_audio(task_id, audio_path, project_id, language, model_size, run
 
     return processed if draft_segments else []
 
-
-def _decode_timings(value) -> list[dict]:
-    try:
-        parsed = json.loads(value or "[]") if isinstance(value, str) else value
-    except (TypeError, ValueError, json.JSONDecodeError):
-        return []
-    return parsed if isinstance(parsed, list) else []
-
-
-def _segment_word_timings(segment, time_offset: float = 0.0) -> list[dict]:
-    """Normalize Parakeet/Whisper token objects into one durable timing format."""
-    source = getattr(segment, "timings", None) or getattr(segment, "words", None) or []
-    result: list[dict] = []
-    for item in source:
-        getter = item.get if isinstance(item, dict) else lambda key, default=None, item=item: getattr(item, key, default)
-        text = str(getter("text") or getter("word") or getter("token") or "")
-        try:
-            start = float(getter("start", getter("startTime", 0.0))) + time_offset
-            end = float(getter("end", getter("endTime", start - time_offset + 0.04))) + time_offset
-        except (TypeError, ValueError):
-            continue
-        if not text or end <= start:
-            continue
-        result.append({"text": text, "start": round(max(0.0, start), 4), "end": round(end, 4)})
-    return result
-
-
-def _fmt_time(seconds: float) -> str:
-    """格式化时间: 00:04:32"""
-    if not seconds:
-        return "00:00:00"
-    h = int(seconds // 3600)
-    m = int((seconds % 3600) // 60)
-    s = int(seconds % 60)
-    return f"{h:02d}:{m:02d}:{s:02d}"
-
-
-def _post_process_segments(raw_segments: list) -> tuple:
-    """
-    后处理字幕段：
-    1. 规范非法或重叠的时间区间
-    2. 只合并没有完整句界、持续时间 < MIN_DURATION 的相邻碎片
-    3. 保留模型识别出的完整语义句，不再按显示长度或时长硬拆
-
-    Returns: (final_segments, merge_count, split_count)
-    """
-    logger.info("[Transcriber] 后处理: 规范时间轴并保留完整语义句")
-    merge_count = 0
-    split_count = 0
-
-    # 先规范非法/重叠区间，避免同一时刻出现多条字幕。
-    normalized: List[dict] = []
-    previous_end = 0.0
-    for raw in sorted(raw_segments, key=lambda item: (float(item.get("start", 0)), float(item.get("end", 0)))):
-        text = str(raw.get("text", "")).strip()
-        if not text:
-            continue
-        start = max(0.0, float(raw.get("start", 0)))
-        end = max(start + 0.05, float(raw.get("end", start)))
-        if start < previous_end:
-            start = previous_end
-        if end <= start:
-            continue
-        timings = [
-            item for item in _decode_timings(raw.get("timings", []))
-            if isinstance(item, dict) and float(item.get("end", 0) or 0) > start
-            and float(item.get("start", 0) or 0) < end
-        ]
-        normalized.append({"start": start, "end": end, "text": text, "timings": timings})
-        previous_end = end
-
-    # 合并极短的非完整碎片，但不跨越明显静音、完整句界，也不制造
-    # 超过最大显示时长的段。短而完整的问候或回答必须保持独立。
-    merged: List[dict] = []
-    i = 0
-    while i < len(normalized):
-        seg = dict(normalized[i])
-        duration = seg["end"] - seg["start"]
-        has_sentence_end = _has_sentence_end(seg["text"])
-        if duration < MIN_DURATION and not has_sentence_end and merged:
-            prev = merged[-1]
-            gap = seg["start"] - prev["end"]
-            if (
-                not _has_sentence_end(prev["text"])
-                and gap <= 0.75
-                and seg["end"] - prev["start"] <= MAX_DURATION
-            ):
-                prev["end"] = seg["end"]
-                prev["text"] = _smart_merge(prev["text"], seg["text"])
-                prev["timings"] = [*prev.get("timings", []), *seg.get("timings", [])]
-                merge_count += 1
-                i += 1
-                continue
-        if duration < MIN_DURATION and not has_sentence_end and i + 1 < len(normalized):
-            nxt = normalized[i + 1]
-            gap = nxt["start"] - seg["end"]
-            if gap <= 0.75 and nxt["end"] - seg["start"] <= MAX_DURATION:
-                seg["end"] = nxt["end"]
-                seg["text"] = _smart_merge(seg["text"], nxt["text"])
-                seg["timings"] = [*seg.get("timings", []), *nxt.get("timings", [])]
-                merge_count += 1
-                i += 1
-        merged.append(seg)
-        i += 1
-
-    # 长度和显示时长属于质检问题，不应在转写阶段破坏语义句界。旧版在
-    # 这里按 42 字/7 秒硬拆，导致 Parakeet 的自然句被放大成大量 ASR
-    # 碎片，再让 AI 反向拼接。保留 split_count 供现有任务详情兼容。
-    final = merged
-
-    # 重新分配稳定的一基索引。
-    output = []
-    for i, seg in enumerate(final):
-        output.append({
-            "index": i + 1,
-            "start": round(seg["start"], 3),
-            "end": round(seg["end"], 3),
-            "text": seg["text"].strip(),
-        })
-
-    return output, merge_count, split_count
-
-
-def _has_sentence_end(text: str) -> bool:
-    return bool(re.search(r"[.!?。！？][\"'”’)]?$", (text or "").strip()))
-
-
-def _smart_merge(text1: str, text2: str) -> str:
-    if text1 and text1[-1] in ".。!！?？,，":
-        return f"{text1} {text2}"
-    return f"{text1} {text2}"
-
-
-def _max_chars_for_text(text: str) -> int:
-    cn_count = sum(1 for c in text if '\u3400' <= c <= '\u9fff')
-    return MAX_CHARS_CN if cn_count >= max(1, len(text) // 4) else MAX_CHARS_EN
-
-
-def _split_text_into_pieces(text: str, max_chars: int, min_parts: int = 1) -> List[str]:
-    """Split at punctuation/words first, then fall back to character chunks."""
-    clauses = [p.strip() for p in re.findall(r".+?(?:[.。!！?？，,;；]+|$)", text) if p.strip()]
-    atoms: List[str] = []
-    for clause in clauses or [text]:
-        if len(clause) <= max_chars:
-            atoms.append(clause)
-            continue
-        words = clause.split()
-        if len(words) > 1:
-            current = ""
-            for word in words:
-                candidate = f"{current} {word}".strip()
-                if current and len(candidate) > max_chars:
-                    atoms.append(current)
-                    current = word
-                else:
-                    current = candidate
-            if current:
-                atoms.append(current)
-        else:
-            atoms.extend(clause[pos:pos + max_chars] for pos in range(0, len(clause), max_chars))
-
-    pieces: List[str] = []
-    for atom in atoms:
-        candidate = _smart_merge(pieces[-1], atom) if pieces else atom
-        if pieces and len(candidate) <= max_chars and len(pieces) + 1 >= min_parts:
-            pieces[-1] = candidate
-        else:
-            pieces.append(atom)
-
-    # Long-duration, short-text segments still need time slices. Split the longest
-    # piece until the requested count is reached, without duplicating text.
-    while len(pieces) < min_parts:
-        idx = max(range(len(pieces)), key=lambda n: len(pieces[n]))
-        value = pieces[idx]
-        if len(value) < 2:
-            break
-        midpoint = len(value) // 2
-        whitespace = [match.start() for match in re.finditer(r"\s+", value)]
-        cut = min(whitespace, key=lambda position: abs(position - midpoint)) if whitespace else midpoint
-        if cut <= 0 or cut >= len(value):
-            cut = midpoint
-        left = value[:cut].rstrip()
-        right = value[cut:].lstrip()
-        pieces[idx:idx + 1] = [left, right]
-    return [piece for piece in pieces if piece]
-
-
-def _allocate_piece_times(
-    start: float, end: float, pieces: List[str], timings: list[dict] | None = None,
-) -> List[dict]:
-    """Allocate text pieces on real token boundaries, never equal-duration slices.
-
-    Core ML Parakeet and Whisper expose token/word timestamps.  When an engine
-    cannot provide them, character weight is a more faithful fallback than the
-    former ``duration / piece_count`` calculation.
-    """
-    if not pieces:
-        return []
-    if len(pieces) == 1:
-        return [{"start": round(start, 3), "end": round(end, 3), "text": pieces[0]}]
-
-    valid_timings = []
-    for item in timings or []:
-        try:
-            token_start = max(start, float(item.get("start")))
-            token_end = min(end, float(item.get("end")))
-        except (AttributeError, TypeError, ValueError):
-            continue
-        token_text = str(item.get("text") or item.get("word") or item.get("token") or "")
-        if token_text and token_end > token_start:
-            valid_timings.append({"text": token_text, "start": token_start, "end": token_end})
-    valid_timings.sort(key=lambda item: (item["start"], item["end"]))
-
-    boundaries: list[float] = []
-    if len(valid_timings) >= len(pieces):
-        token_weights = [max(1, len(re.sub(r"\s+", "", item["text"]))) for item in valid_timings]
-        piece_weights = [max(1, len(re.sub(r"\s+", "", piece))) for piece in pieces]
-        total_token_weight = sum(token_weights)
-        total_piece_weight = sum(piece_weights)
-        token_cumulative = []
-        running = 0
-        for weight in token_weights:
-            running += weight
-            token_cumulative.append(running)
-        previous_cut = 0
-        piece_running = 0
-        for piece_index, piece_weight in enumerate(piece_weights[:-1]):
-            piece_running += piece_weight
-            target = total_token_weight * piece_running / total_piece_weight
-            minimum_cut = previous_cut + 1
-            maximum_cut = len(valid_timings) - (len(pieces) - piece_index - 1)
-            cut = min(
-                range(minimum_cut, maximum_cut + 1),
-                key=lambda value: abs(token_cumulative[value - 1] - target),
-            )
-            left = valid_timings[cut - 1]
-            right = valid_timings[cut]
-            boundary = right["start"] if right["start"] >= left["end"] else left["end"]
-            boundaries.append(max(start, min(end, boundary)))
-            previous_cut = cut
-
-    if len(boundaries) != len(pieces) - 1:
-        # Engines without token timestamps use proportional text weight.  This
-        # still avoids falsely implying evenly spaced speech.
-        duration = max(0.001, end - start)
-        weights = [max(1, len(re.sub(r"\s+", "", piece))) for piece in pieces]
-        total_weight = sum(weights)
-        running = 0
-        boundaries = []
-        for weight in weights[:-1]:
-            running += weight
-            boundaries.append(start + duration * running / total_weight)
-
-    cursor = start
-    result = []
-    for index, piece in enumerate(pieces):
-        piece_end = end if index == len(pieces) - 1 else boundaries[index]
-        piece_end = max(cursor + 0.001, min(end, piece_end))
-        result.append({"start": round(cursor, 3), "end": round(piece_end, 3), "text": piece})
-        cursor = piece_end
-    return result
