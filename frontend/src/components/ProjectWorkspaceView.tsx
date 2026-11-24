@@ -15,21 +15,14 @@ import type {
 import DeferredPanel from './DeferredPanel';
 import EditorWorkbench from './EditorWorkbench';
 import ExportWorkspace from './ExportWorkspace';
-import GlossaryPanel from './GlossaryPanel';
-import ProcessLogViewer from './ProcessLogViewer';
-import ProcessTimeline from './ProcessTimeline';
-import QualityPanel from './QualityPanel';
-import SmartToolsPanel from './SmartToolsPanel';
-import StyleTemplateBar from './StyleTemplateBar';
 import type { PlayerPresentationMode, SubtitlePlayerHandle } from './SubtitlePlayer';
-import SubtitleStylePanel from './SubtitleStylePanel';
 import SubtitleTable from './SubtitleTable';
 import SubtitleTimeline from './SubtitleTimeline';
-import TaskWorkspace from './TaskWorkspace';
-import WorkspacePanel from './WorkspacePanel';
+import SegmentInspector from './workspace/SegmentInspector';
+import StyleWorkspaceView from './workspace/StyleWorkspaceView';
+import WorkspaceToolsPanel from './workspace/WorkspaceToolsPanel';
 
 const SubtitlePlayer = lazy(() => import('./SubtitlePlayer'));
-const ContentCenter = lazy(() => import('./ContentCenter'));
 
 interface Props {
   inProjectView: boolean;
@@ -389,115 +382,34 @@ export default function ProjectWorkspaceView({
                 }
                 inspector={
                   inspectedSegment && (
-                    <>
-                      <button className="button secondary" onClick={() => onInspectSegment(null)}>
-                        关闭属性
-                      </button>
-                      <h3>字幕 {inspectedSegment.index}</h3>
-                      <label>
-                        开始时间（秒）
-                        <input
-                          key={`start-${inspectedSegment.id}-${inspectedSegment.start}`}
-                          type="number"
-                          min={0}
-                          step={0.01}
-                          defaultValue={inspectedSegment.start}
-                          disabled={editorBusy}
-                          onBlur={event => {
-                            const start = Number(event.target.value);
-                            if (
-                              Number.isFinite(start) &&
-                              start >= 0 &&
-                              start < inspectedSegment.end &&
-                              start !== inspectedSegment.start
-                            ) {
-                              void onUpdateSegment(inspectedSegment.index, { start });
-                            }
-                          }}
-                        />
-                      </label>
-                      <label>
-                        结束时间（秒）
-                        <input
-                          key={`end-${inspectedSegment.id}-${inspectedSegment.end}`}
-                          type="number"
-                          min={inspectedSegment.start}
-                          step={0.01}
-                          defaultValue={inspectedSegment.end}
-                          disabled={editorBusy}
-                          onBlur={event => {
-                            const end = Number(event.target.value);
-                            if (
-                              Number.isFinite(end) &&
-                              end > inspectedSegment.start &&
-                              end !== inspectedSegment.end
-                            ) {
-                              void onUpdateSegment(inspectedSegment.index, { end });
-                            }
-                          }}
-                        />
-                      </label>
-                      <p>说话人：{inspectedSegment.speaker || '未分配'}</p>
-                      <button
-                        className="button secondary"
-                        onClick={() => onOpenTools('smart')}
-                      >
-                        管理说话人
-                      </button>
-                      <button
-                        className="button secondary"
-                        onClick={() => onSelectWorkspace('style')}
-                      >
-                        调整字幕样式
-                      </button>
-                    </>
+                    <SegmentInspector
+                      segment={inspectedSegment}
+                      editorBusy={editorBusy}
+                      onClose={() => onInspectSegment(null)}
+                      onUpdateSegment={onUpdateSegment}
+                      onManageSpeakers={() => onOpenTools('smart')}
+                      onOpenStyle={() => onSelectWorkspace('style')}
+                    />
                   )
                 }
               />
             )}
 
             {projectWorkspace === 'style' && (
-              <section className="task-page style-task-page">
-                <div className="style-canvas">
-                  <StyleTemplateBar style={subtitleStyle} onApply={onStyleChange} />
-                  <header>
-                    <h2>实时外观预览</h2>
-                    <p>在接近成片的画面比例中调整字幕，不受其他工具干扰。</p>
-                  </header>
-                  <div className="style-canvas-stage">
-                    {activeProject && canPlayMedia && activeProject.video_url ? (
-                      <Suspense fallback={<DeferredPanel kind="player" label="正在加载样式预览…" />}>
-                        <SubtitlePlayer
-                          initialTime={currentTime}
-                          ref={videoPlayerRef}
-                          projectId={activeProject.id}
-                          videoUrl={api.getBackendMediaUrl(activeProject.video_url) || ''}
-                          segments={segments}
-                          style={subtitleStyle}
-                          activeIdx={activeSegmentIdx}
-                          onTimeUpdate={onTimeUpdate}
-                          onDurationChange={onDurationChange}
-                          onStyleChange={onStyleChange}
-                          presentationMode={presentationMode}
-                          onPresentationModeChange={onPresentationModeChange}
-                        />
-                      </Suspense>
-                    ) : (
-                      <div className="style-preview-card">
-                        <span>为每一句话找到恰好的位置。</span>
-                        <small>Give every line its perfect place.</small>
-                      </div>
-                    )}
-                  </div>
-                </div>
-                <aside className="style-controls-page">
-                  <header>
-                    <small>字幕检查器</small>
-                    <h2>字体与排版</h2>
-                  </header>
-                  <SubtitleStylePanel style={subtitleStyle} onChange={onStyleChange} />
-                </aside>
-              </section>
+              <StyleWorkspaceView
+                activeProject={activeProject}
+                canPlayMedia={canPlayMedia}
+                currentTime={currentTime}
+                videoPlayerRef={videoPlayerRef}
+                segments={segments}
+                subtitleStyle={subtitleStyle}
+                activeSegmentIdx={activeSegmentIdx}
+                presentationMode={presentationMode}
+                onTimeUpdate={onTimeUpdate}
+                onDurationChange={onDurationChange}
+                onStyleChange={onStyleChange}
+                onPresentationModeChange={onPresentationModeChange}
+              />
             )}
 
             {projectWorkspace === 'export' && (
@@ -536,113 +448,36 @@ export default function ProjectWorkspaceView({
           </div>
 
           {toolsOpen && (
-            <WorkspacePanel
-              title="任务与工具"
+            <WorkspaceToolsPanel
+              activeProject={activeProject}
+              toolTabsRef={toolTabsRef}
+              toolsTab={toolsTab}
+              activeTaskCount={activeTaskCount}
+              currentTask={currentTask}
+              segments={segments}
+              hasSegments={hasSegments}
+              editorRevision={editorRevision}
+              videoDuration={videoDuration}
+              compactSteps={compactSteps}
+              activeProcessStep={activeProcessStep}
+              processSteps={processSteps}
+              totalProgress={totalProgress}
+              processLogs={processLogs}
+              processSettingsNode={processSettingsNode}
               onClose={onCloseTools}
-              actions={
-                <button type="button" className="panel-link" onClick={onOpenTaskDrawer}>
-                  全部后台任务{activeTaskCount ? <b>{activeTaskCount}</b> : null}
-                </button>
-              }
-            >
-              <nav
-                ref={toolTabsRef}
-                className="tool-panel-tabs sliding-tabs"
-                aria-label="工具分类"
-              >
-                {(
-                  [
-                    ['process', '字幕流程'],
-                    ['quality', '质检与术语'],
-                    ['smart', 'OCR 与说话人'],
-                    ['content', '内容'],
-                  ] as const
-                ).map(([id, label]) => (
-                  <button
-                    key={id}
-                    aria-pressed={toolsTab === id}
-                    onClick={() => onToolsTabChange(id)}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </nav>
-
-              {toolsTab === 'quality' && activeProject && (
-                <section className="task-page quality-task-page">
-                  <div className="quality-page-grid">
-                    <QualityPanel
-                      projectId={activeProject.id}
-                      segments={segments}
-                      revision={editorRevision}
-                      onEditorResult={result => onAcceptEditorResult(activeProject.id, result)}
-                      onSeek={time => {
-                        onSeek(time);
-                        onSelectWorkspace('subtitles');
-                      }}
-                    />
-                    <GlossaryPanel projectId={activeProject.id} />
-                  </div>
-                </section>
-              )}
-
-              {toolsTab === 'smart' && activeProject && (
-                <section className="task-page smart-task-page">
-                  <SmartToolsPanel
-                    projectId={activeProject.id}
-                    revision={editorRevision}
-                    duration={videoDuration}
-                    onEditorResult={result => onAcceptEditorResult(activeProject.id, result)}
-                    onProjectChanged={() => onRefreshActiveProject(activeProject.id)}
-                  />
-                </section>
-              )}
-
-              {toolsTab === 'process' && (
-                <TaskWorkspace
-                  steps={compactSteps}
-                  selected={activeProcessStep}
-                  onSelect={onSelectStep}
-                  task={currentTask}
-                  settings={processSettingsNode}
-                  onPause={onPauseTask}
-                  onCancel={onCancelTask}
-                  diagnostics={
-                    <details className="process-diagnostics">
-                      <summary>
-                        任务日志与诊断 <span>{processLogs.length}</span>
-                      </summary>
-                      <div>
-                        <ProcessTimeline
-                          steps={processSteps}
-                          currentStepId={activeProcessStep}
-                          totalProgress={totalProgress}
-                          onStepClick={onSelectStep}
-                        />
-                        <ProcessLogViewer
-                          logs={processLogs}
-                          collapsed={false}
-                          onToggle={() => undefined}
-                          onClear={onClearLogs}
-                        />
-                      </div>
-                    </details>
-                  }
-                />
-              )}
-
-              {toolsTab === 'content' && activeProject && (
-                <Suspense fallback={<DeferredPanel label="正在打开内容工作区…" />}>
-                  <ContentCenter
-                    project={activeProject}
-                    projectRevision={editorRevision}
-                    hasSegments={hasSegments}
-                    onPreview={onPreviewClipRange}
-                    onMessage={message => onMessage(message, 4200)}
-                  />
-                </Suspense>
-              )}
-            </WorkspacePanel>
+              onOpenTaskDrawer={onOpenTaskDrawer}
+              onToolsTabChange={onToolsTabChange}
+              onSelectWorkspace={onSelectWorkspace}
+              onAcceptEditorResult={onAcceptEditorResult}
+              onRefreshActiveProject={onRefreshActiveProject}
+              onSeek={onSeek}
+              onSelectStep={onSelectStep}
+              onPauseTask={onPauseTask}
+              onCancelTask={onCancelTask}
+              onClearLogs={onClearLogs}
+              onPreviewClipRange={onPreviewClipRange}
+              onMessage={onMessage}
+            />
           )}
         </>
       )}

@@ -1,0 +1,306 @@
+.rename-dialog {
+  width: min(420px, 100%);
+  padding: 18px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--elevated);
+  box-shadow: var(--shadow-menu);
+  animation: dialog-in var(--duration-panel) var(--ease-standard);
+}
+.rename-dialog header { display: flex; justify-content: space-between; margin-bottom: 14px; }
+.rename-dialog h2 { margin: 0; color: var(--text); font-size: 15px; }
+.rename-dialog p { margin: 4px 0 0; color: var(--text-3); font-size: 9px; }
+
+.rename-dialog header button {
+  width: 26px;
+  height: 26px;
+  border: 0;
+  background: transparent;
+  color: var(--text-3);
+  font-size: 18px;
+}
+.rename-dialog footer { display: flex; justify-content: flex-end; gap: 7px; margin-top: 15px; }
+
+.drop-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 210;
+  display: grid;
+  place-items: center;
+  padding: 32px;
+  background: color-mix(in srgb, var(--accent) 10%, rgba(0,0,0,.55));
+  backdrop-filter: blur(12px);
+  pointer-events: none;
+  animation: fade-in var(--duration-fast) var(--ease-smooth);
+}
+
+.drop-overlay > div {
+  width: min(520px, 90vw);
+  height: 260px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  border: 2px dashed color-mix(in srgb, var(--accent) 68%, white);
+  border-radius: var(--radius-xl);
+  background: color-mix(in srgb, var(--elevated) 92%, transparent);
+  box-shadow: var(--shadow-menu);
+  animation: float-in var(--duration-panel) var(--ease-smooth);
+}
+
+.drop-overlay span {
+  width: 60px;
+  height: 60px;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-lg);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 30px;
+  box-shadow: 0 4px 16px color-mix(in srgb, var(--accent) 24%, transparent);
+}
+.drop-overlay strong { font-size: 17px; font-weight: 650; letter-spacing: -.01em; }
+.drop-overlay small { color: var(--text-3); font-size: 11px; }
+
+/* 属于「app-shell」，为保持层叠顺序放在这里 */
+.pro-app small { font-size: 11px; line-height: 1.4; }
+
+/* 属于「base」，为保持层叠顺序放在这里 */
+.clip-range-editor small { color: #4b9d70; font-size: 9px; }
+
+/* 属于「base」，为保持层叠顺序放在这里 */
+.clip-render-list small { color: var(--text-3); font-size: 9px; }
+
+/* 属于「library」，为保持层叠顺序放在这里 */
+.project-card-copy small { font-size: 11px; }
+
+/* 属于「library」，为保持层叠顺序放在这里 */
+.library-page-header small {
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+/* 属于「library」，为保持层叠顺序放在这里 */
+.library-overview small {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-3);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 属于「library」，为保持层叠顺序放在这里 */
+.subtitle-search-hits small {
+  margin-top: 3px;
+  overflow: hidden;
+  color: var(--text-3);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 属于「workspace」，为保持层叠顺序放在这里 */
+.project-workspace-nav small { overflow: hidden; font-size: 11px; opacity: .72; text-overflow: ellipsis; white-space: nowrap; }
+
+/* 属于「workspace」，为保持层叠顺序放在这里 */
+.workspace-page-heading small {
+  display: block;
+  max-width: 50vw;
+  overflow: hidden;
+  margin-bottom: 2px;
+  color: var(--text-3);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 属于「style-export」，为保持层叠顺序放在这里 */
+.export-task-card small { margin-top: 3px; color: var(--text-3); font-size: 11px; }
+
+/* 属于「tools」，为保持层叠顺序放在这里 */
+.quality-issue small { margin-bottom: 2px; color: var(--text-3); font-size: 10px; }
+
+/* 属于「tools」，为保持层叠顺序放在这里 */
+.content-center-header small {
+  color: var(--accent);
+  font-size: 10px;
+  font-weight: 750;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+/* 属于「tools」，为保持层叠顺序放在这里 */
+.content-pack-toolbar small { display: block; margin-top: 4px; color: var(--text-3); font-size: 10px; }
+
+.studio-toast {
+  position: fixed;
+  z-index: 120;
+  left: 50%;
+  transform: translateX(-50%);
+  border: 1px solid var(--border);
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  bottom: 24px;
+  min-height: 38px;
+  padding: 0 15px;
+  border-color: var(--border);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--elevated) 96%, transparent);
+  color: var(--text);
+  box-shadow: var(--shadow-menu);
+  backdrop-filter: blur(24px);
+  animation: toast-in var(--duration-panel) var(--ease-smooth);
+}
+.studio-toast span { color: var(--green); font-size: 18px; }
+
+.deferred-module {
+  min-height: 180px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: var(--text-2);
+  font-size: 12px;
+}
+
+.deferred-module i {
+  width: 16px;
+  height: 16px;
+  border: 2px solid color-mix(in srgb, var(--accent) 24%, transparent);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: deferred-spin .8s linear infinite;
+}
+.deferred-module-player { width: 100%; height: 100%; min-height: 260px; background: #111; color: rgba(255,255,255,.72); }
+.deferred-overlay { z-index: 115; }
+
+.deferred-overlay > .deferred-module {
+  width: min(480px, calc(100vw - 48px));
+  min-height: 180px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--elevated);
+  box-shadow: var(--shadow-menu);
+}
+.deferred-settings > .deferred-module { grid-column: 1 / -1; min-height: 100%; }
+
+@media (prefers-reduced-motion: reduce) {
+  .deferred-module i { animation: none; }
+}
+.modal-backdrop { background: rgba(0,0,0,.38); backdrop-filter: blur(8px); animation: fade-in var(--duration-normal); }
+
+/* 属于「base」，为保持层叠顺序放在这里 */
+.motion-off *, .motion-off *::before, .motion-off *::after {
+  animation: none !important;
+  transition: none !important;
+  scroll-behavior: auto !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* 属于「app-shell」，为保持层叠顺序放在这里 */
+  .pro-app *, .pro-app *::before, .pro-app *::after {
+    animation: none !important;
+    transition-duration: .01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* 属于「tools」，为保持层叠顺序放在这里 */
+.log-entry { transition: background-color .16s ease, color .16s ease; }
+
+@media (prefers-reduced-motion:reduce) {
+  /* 属于「tools」，为保持层叠顺序放在这里 */
+  .workspace-tool-panel { animation: none; }
+}
+
+/* 属于「settings」，为保持层叠顺序放在这里 */
+.settings-backdrop, .settings-center { animation-fill-mode: both; }
+
+.pro-app button:not(:disabled),
+.pro-app [role="tab"]:not([aria-disabled="true"]),
+.pro-app [role="combobox"]:not(:disabled),
+.app-select-popover button:not(:disabled) {
+  cursor: pointer;
+}
+
+/* 属于「library」，为保持层叠顺序放在这里 */
+.pro-app .library-view-toggle button {
+  width: 32px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-3);
+  cursor: pointer;
+  transition: color .2s ease;
+}
+
+/* 属于「library」，为保持层叠顺序放在这里 */
+.pro-app .library-pager button {
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid var(--border-soft);
+  border-radius: 9px;
+  background: var(--surface);
+  color: var(--text-2);
+  box-shadow: var(--shadow-xs);
+  cursor: pointer;
+  transition: border-color .15s ease, color .15s ease, transform .3s var(--ease-spring, ease);
+}
+
+/* 属于「editor」，为保持层叠顺序放在这里 */
+.pro-app .timeline-controls button {
+  min-width: 26px;
+  height: 24px;
+  padding: 0 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--text-2);
+  font-size: 11.5px;
+  line-height: 1;
+  cursor: pointer;
+  transition: border-color .15s ease, background-color .15s ease, color .15s ease;
+}
+
+/* 属于「tools」，为保持层叠顺序放在这里 */
+.pro-app .task-stepper button {
+  width: 100%;
+  display: grid;
+  justify-items: center;
+  gap: 3px;
+  padding: 0 2px;
+  border: 0;
+  background: transparent;
+  color: var(--text-2);
+  cursor: pointer;
+}
+
+/* 属于「tools」，为保持层叠顺序放在这里 */
+.pro-app .task-live-actions button {
+  height: 28px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 12px;
+  cursor: pointer;
+}
+.app-select > input, .app-select-trigger { min-height: 36px; padding-inline: 11px; font-size: 12px; }
+.app-select-options strong { overflow: hidden; text-overflow: ellipsis; font-weight: 560; font-size: 12px; }
+.app-select-options small { color: var(--text-3); font-size: 11px; }
+

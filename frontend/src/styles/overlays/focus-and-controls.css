@@ -1,0 +1,319 @@
+/* 浮层：弹窗、右键菜单、提示、拖放、预检、任务抽屉、下拉框、播放列表与批量工具。 */
+
+.player-subtitle-menu input:focus-visible,
+.player-subtitle-menu .app-select-trigger:focus-visible,
+.player-subtitle-menu button:focus-visible {
+  outline-color: #ff8a70;
+  box-shadow: 0 0 0 3px rgba(255,138,112,.24);
+}
+
+/* 属于「app-shell」，为保持层叠顺序放在这里 */
+.pro-app button:focus-visible,
+.pro-app input:focus-visible,
+.pro-app select:focus-visible,
+.pro-app [role="separator"]:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px var(--focus-ring);
+}
+
+/* 属于「app-shell」，为保持层叠顺序放在这里 */
+:is(.pro-app,
+.settings-backdrop) select:focus-visible,
+:is(.pro-app,
+.settings-backdrop) input:not([type="range"]):not([type="checkbox"]):not([type="color"]):focus {
+  border-color: color-mix(in srgb, var(--accent) 70%, var(--border));
+  box-shadow: 0 0 0 4px var(--focus-ring);
+  outline: none;
+}
+
+/* 属于「app-shell」，为保持层叠顺序放在这里 */
+:is(.pro-app, .settings-backdrop) .sliding-tabs > :is(.active, [aria-pressed="true"], [aria-selected="true"]) {
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+/* 属于「app-shell」，为保持层叠顺序放在这里 */
+.pro-app.theme-dark :is(.topbar-button, .icon-action, .task-status-pill) {
+  background: color-mix(in srgb, #3a342c 70%, transparent);
+  box-shadow: none;
+}
+
+/* 属于「app-shell」，为保持层叠顺序放在这里 */
+.pro-app .task-status-pill:hover { background: var(--surface); color: var(--text); }
+
+/* 属于「app-shell」，为保持层叠顺序放在这里 */
+.pro-app .task-status-pill.busy {
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
+  color: var(--accent);
+  background: repeating-linear-gradient(-45deg, transparent 0 8px, color-mix(in srgb, var(--accent) 8%, transparent) 8px 16px),
+    color-mix(in srgb, var(--accent) 6%, var(--surface));
+  background-size: 32px 100%, auto;
+  animation: sf-stripes 1s linear infinite;
+}
+
+/* 属于「library」，为保持层叠顺序放在这里 */
+.library-switcher button.active {
+  color: var(--text);
+  background: var(--surface-2);
+  box-shadow: 0 1px 3px rgba(0,0,0,.1), inset 0 1px 0 rgba(255,255,255,.04);
+  transform: translateY(0);
+}
+
+/* 属于「workspace」，为保持层叠顺序放在这里 */
+.project-workspace-nav button.active {
+  background: var(--accent-soft);
+  color: var(--accent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 26%, transparent);
+}
+
+/* 属于「settings」，为保持层叠顺序放在这里 */
+.link-popover input:focus,
+.inspector-section input:focus,
+.inspector-section select:focus,
+.settings-field input:focus,
+.settings-field select:focus,
+.path-control input:focus,
+.rename-dialog input:focus,
+.language-picker input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--focus-ring);
+}
+
+/* 属于「style-export」，为保持层叠顺序放在这里 */
+:is(.pro-app,
+.settings-backdrop) :is(.library-filters,
+.library-pagination,
+.editor-view-actions,
+.export-options,
+.style-template-bar,
+.media-selection-panel) select {
+  appearance: none;
+  -webkit-appearance: none;
+  height: 34px;
+  padding: 0 30px 0 11px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%238a7e70' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") no-repeat right 11px center;
+  color: var(--text);
+  box-shadow: var(--shadow-xs);
+  cursor: pointer;
+  transition: border-color var(--dur-base, .2s) ease, box-shadow var(--dur-base, .2s) ease;
+}
+
+/* 属于「editor」，为保持层叠顺序放在这里 */
+.pro-app .editor-view-actions select { height: 32px; min-height: 32px; }
+
+/* 属于「style-export」，为保持层叠顺序放在这里 */
+.pro-app .export-options select { width: 100%; height: 42px; padding-inline: 14px 34px; border-radius: 12px; font-weight: 500; }
+
+/* 属于「settings」，为保持层叠顺序放在这里 */
+.model-search input:focus { border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb,var(--accent) 18%,transparent); }
+
+/* 属于「settings」，为保持层叠顺序放在这里 */
+.toggle-row > input[type="checkbox"] {
+  width: 36px;
+  height: 21px;
+  appearance: none;
+  padding: 0;
+  border: 0;
+  border-radius: 11px;
+  background: var(--surface-3);
+  box-shadow: inset 0 0 0 1px var(--border);
+  transition: background var(--duration-fast);
+}
+
+/* 属于「settings」，为保持层叠顺序放在这里 */
+.segmented-control button.active { background: var(--elevated); color: var(--text); box-shadow: 0 1px 4px rgba(0,0,0,.14); }
+.player-subtitle-menu .app-select-trigger { border-color: #454c59; background: #111419; color: #f5f7fa; }
+.player-subtitle-menu .app-select-trigger:hover { border-color: #6d7788; background: #1b2028; color: #fff; }
+.modal-backdrop { position: fixed; inset: 0; z-index: 100; display: grid; place-items: center; padding: 24px; }
+
+/* 属于「settings」，为保持层叠顺序放在这里 */
+.settings-backdrop { padding: 34px; }
+.modal-header, .modal-actions { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.modal-header h2 { margin: 0; font-size: 17px; }
+.modal-header p { margin: 4px 0 0; color: var(--text-3); font-size: 10px; }
+.modal-actions { justify-content: flex-end; }
+
+.modal-card {
+  width: min(580px,100%);
+  max-height: calc(100vh - 48px);
+  overflow: auto;
+  padding: 22px;
+  border: 1px solid #3a424f;
+  border-radius: var(--radius-lg);
+  background: #191d24;
+  box-shadow: 0 28px 80px rgba(0,0,0,.6), 0 4px 20px rgba(0,0,0,.3);
+  animation: menu-in .22s ease-out;
+}
+.theme-light .modal-card { background: #fffefb; border-color: var(--border); }
+.theme-light .studio-toast { background: #fffefb; color: var(--text); border-color: var(--border); }
+
+.link-popover {
+  position: absolute;
+  top: 52px;
+  right: 92px;
+  width: 390px;
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--elevated) 95%, transparent);
+  box-shadow: var(--shadow-menu);
+  backdrop-filter: blur(28px);
+  animation: menu-in var(--duration-panel) var(--ease-standard);
+}
+.link-popover > div { display: flex; align-items: center; justify-content: space-between; }
+
+.link-popover > div button {
+  width: 24px;
+  height: 24px;
+  border: 0;
+  background: transparent;
+  color: var(--text-3);
+  font-size: 18px;
+  cursor: pointer;
+}
+.link-popover p { color: var(--text-3); font-size: 10px; line-height: 1.45; }
+.link-popover > .button { justify-self: end; }
+.app-select { position: relative; min-width: 0; }
+
+/* 属于「base」，为保持层叠顺序放在这里 */
+.language-picker { min-width: 0; display: grid; gap: 2px; }
+
+.app-select>input, .app-select-trigger {
+  width: 100%;
+  min-height: 32px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+}
+.app-select-trigger { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.app-select-trigger>span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.app-select-trigger>i { color: var(--text-3); font-style: normal; }
+
+.app-select>input:focus, .app-select-trigger:focus-visible {
+  border-color: var(--accent);
+  outline: 2px solid color-mix(in srgb,var(--accent) 22%,transparent);
+  outline-offset: 1px;
+}
+
+.app-select-options>button {
+  width: 100%;
+  min-height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-2);
+  text-align: left;
+}
+.app-select-options>button>span { min-width: 0; display: grid; gap: 2px; }
+.app-select-options i { color: var(--accent); font-style: normal; }
+.app-select-options>button.active, .app-select-options>button:hover { background: var(--accent-soft); color: var(--text); }
+
+/* 属于「tools」，为保持层叠顺序放在这里 */
+.quality-summary button.active { border-color: var(--accent); background: var(--accent-soft); }
+
+/* 属于「tools」，为保持层叠顺序放在这里 */
+.content-collection-list > button:hover, .content-collection-list > button.active { background: var(--accent-soft); }
+.app-select-options>button:disabled { opacity: .4; }
+
+/* 属于「app-shell」，为保持层叠顺序放在这里 */
+:is(.pro-app, .settings-backdrop) button:disabled { opacity: .42; filter: saturate(.6); }
+.app-select-options>p { padding: 12px; color: var(--text-3); text-align: center; font-size: 10px; }
+.settings-field.horizontal>.app-select { width: 100%; }
+.player-subtitle-menu label>.app-select { grid-column: 1/-1; width: 100%; }
+.project-group-editor>.app-select { min-width: 0; }
+.model-catalog-filters .app-select { width: 100%; }
+
+.context-menu {
+  position: fixed;
+  z-index: 180;
+  width: 220px;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--elevated) 97%, transparent);
+  box-shadow: var(--shadow-menu);
+  backdrop-filter: saturate(1.25) blur(28px);
+  animation: menu-in var(--duration-fast) var(--ease-smooth);
+}
+
+.context-menu button {
+  width: 100%;
+  height: 32px;
+  display: grid;
+  grid-template-columns: 26px 1fr;
+  align-items: center;
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  text-align: left;
+  cursor: default;
+  font-size: 11px;
+  font-weight: 520;
+  transition: all var(--duration-fast) var(--ease-smooth);
+}
+
+/* 属于「base」，为保持层叠顺序放在这里 */
+html.theme-revealing *, html.theme-revealing *::before, html.theme-revealing *::after { transition: none !important; }
+
+/* 属于「app-shell」，为保持层叠顺序放在这里 */
+.pro-app button, .pro-app input, .pro-app textarea, .pro-app select { font-size: 12px; }
+
+/* 属于「base」，为保持层叠顺序放在这里 */
+.clip-render-list button { border: 0; background: transparent; color: var(--accent); font-size: 9px; cursor: pointer; }
+
+/* 属于「library」，为保持层叠顺序放在这里 */
+.library-switcher button { height: 36px; font-size: 12px; }
+
+/* 属于「tools」，为保持层叠顺序放在这里 */
+.content-create-card input,
+.clip-create-card input,
+.content-create-grid input,
+.content-fields input,
+.content-fields textarea,
+.structured-item-list input,
+.structured-item-list textarea,
+.clip-title,
+.clip-range-editor input {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+}
+
+/* 属于「base」，为保持层叠顺序放在这里 */
+.clip-title { font-size: 15px; font-weight: 700; }
+
+.context-menu button:hover:not(:disabled) {
+  background: var(--accent);
+  color: white;
+  transform: translateX(2px);
+  box-shadow: 0 2px 6px color-mix(in srgb, var(--accent) 28%, transparent);
+}
+.context-menu button.danger { color: var(--red); }
+
+.context-menu button.danger:hover {
+  color: white;
+  background: var(--red);
+  box-shadow: 0 2px 6px color-mix(in srgb, var(--red) 28%, transparent);
+}
+.context-menu hr { height: 1px; margin: 5px 6px; border: 0; background: var(--border); }
+

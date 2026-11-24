@@ -9,8 +9,11 @@ import type {
   SubtitleSegment,
   TaskStatus,
 } from '../types';
-import LanguagePicker from './LanguagePicker';
-import MediaSelectionPanel from './MediaSelectionPanel';
+import CleanStepPanel from './process/CleanStepPanel';
+import DownloadStepPanel from './process/DownloadStepPanel';
+import StepActions from './process/StepActions';
+import { stepBlocker } from './process/stepHelpers';
+import TranslateStepPanel from './process/TranslateStepPanel';
 import TranscriptionCandidates from './TranscriptionCandidates';
 
 interface Props {
@@ -58,30 +61,6 @@ interface Props {
   onRetryCurrentFailure: () => void;
   onSeek: (time: number) => void;
   onAcceptCandidate: (result: EditorOperationResponse) => void;
-}
-
-function stepBlocker(...conditions: Array<[unknown, string]>): string {
-  return conditions.find(([blocked]) => Boolean(blocked))?.[1] || '';
-}
-
-function StepActions({
-  primary,
-  blocker,
-  extra,
-}: {
-  primary: ReactNode;
-  blocker: string;
-  extra?: ReactNode;
-}) {
-  return (
-    <footer className="step-actions">
-      {blocker && <p className="step-blocker">{blocker}</p>}
-      <div>
-        {primary}
-        {extra}
-      </div>
-    </footer>
-  );
 }
 
 export default function ProcessSettingsPanel({
@@ -133,69 +112,19 @@ export default function ProcessSettingsPanel({
   return (
     <div className="process-settings-content">
       {activeProcessStep === 'download' && (
-        <section className="inspector-section media-mode-inspector step-panel">
-          <header className="step-heading">
-            <h3>媒体与音轨</h3>
-            <p>
-              {activeProject?.source_type === 'local'
-                ? '导入的视频只保存在这个项目里，可离线播放；需要时可以换音轨或只截取一段。'
-                : '完整视频保存在本机，可离线播放；需要时可以换音轨或只截取一段。'}
-            </p>
-          </header>
-          {activeProjectIsYoutube && (
-            <label>
-              项目链接
-              <input
-                value={activeProject?.source_url || youtubeUrl}
-                placeholder="YouTube URL"
-                onChange={event => onYoutubeUrlChange(event.target.value)}
-              />
-            </label>
-          )}
-          <div className="runtime-mini">
-            <span className={health?.runtime?.ffmpeg?.ok ? 'ok' : 'error'}>
-              FFmpeg {health?.runtime?.ffmpeg?.ok ? '可用' : '需检查'}
-            </span>
-            {activeProjectIsYoutube && (
-              <span className={health?.runtime?.yt_dlp?.ok ? 'ok' : 'error'}>
-                yt-dlp {health?.runtime?.yt_dlp?.ok ? '可用' : '需检查'}
-              </span>
-            )}
-            {activeProjectIsYoutube && (
-              <span className={health?.runtime?.deno?.ok && health?.runtime?.ejs?.ok ? 'ok' : 'error'}>
-                YouTube 挑战组件 {health?.runtime?.deno?.ok && health?.runtime?.ejs?.ok ? '可用' : '需检查'}
-              </span>
-            )}
-          </div>
-          {activeProject?.video_path && (
-            <MediaSelectionPanel projectId={activeProject.id} onChanged={onMediaSelectionChanged} />
-          )}
-          <div className="media-mode-actions">
-            {activeProjectIsYoutube && (
-              <button
-                className="button primary"
-                disabled={!activeProject?.source_url || isProcessing}
-                onClick={onRetryDownload}
-              >
-                重新下载视频
-              </button>
-            )}
-            {activeProjectIsYoutube && !hasLocalVideo && (
-              <button
-                className="button secondary"
-                disabled={isProcessing}
-                onClick={onDownloadLocalCopy}
-              >
-                下载本地副本
-              </button>
-            )}
-            {activeProject?.video_path && (
-              <button className="button secondary" disabled={isProcessing} onClick={onExtractAudio}>
-                重新提取音频
-              </button>
-            )}
-          </div>
-        </section>
+        <DownloadStepPanel
+          activeProject={activeProject}
+          activeProjectIsYoutube={activeProjectIsYoutube}
+          hasLocalVideo={hasLocalVideo}
+          isProcessing={isProcessing}
+          health={health}
+          youtubeUrl={youtubeUrl}
+          onYoutubeUrlChange={onYoutubeUrlChange}
+          onMediaSelectionChanged={onMediaSelectionChanged}
+          onRetryDownload={onRetryDownload}
+          onDownloadLocalCopy={onDownloadLocalCopy}
+          onExtractAudio={onExtractAudio}
+        />
       )}
 
       {activeProcessStep === 'transcribe' && (
@@ -251,164 +180,34 @@ export default function ProcessSettingsPanel({
       )}
 
       {activeProcessStep === 'clean' && (
-        <section className="inspector-section step-panel">
-          <header className="step-heading">
-            <h3>AI 忠实整理</h3>
-            <p>只修正明显的错词、标点和断句，不改变原意；可随时撤销。</p>
-          </header>
-          <div className="ai-summary-row">
-            <span className="ai-logo">✦</span>
-            <div>
-              <strong>
-                {cleanAIProvider?.name || (aiProviderState ? '未配置 AI 服务' : '正在读取 AI 服务')}
-              </strong>
-              <small>{cleanAIProvider?.model || '在设置 → AI 服务中配置'}</small>
-            </div>
-          </div>
-          <label className="clean-length-field">
-            参考单句长度 <span>{config.clean_target_length} 字</span>
-            <input
-              type="range"
-              min={16}
-              max={100}
-              step={2}
-              value={config.clean_target_length}
-              onChange={event =>
-                onConfigChange(current => ({
-                  ...current,
-                  clean_target_length: Number(event.target.value),
-                }))
-              }
-            />
-          </label>
-          <StepActions
-            primary={
-              <button
-                className="button primary"
-                disabled={!hasSegments || isProcessing || !cleanAIReady}
-                onClick={onClean}
-              >
-                开始整理
-              </button>
-            }
-            blocker={stepBlocker(
-              [!hasSegments, '先生成或导入字幕'],
-              [isProcessing, '有任务正在运行，完成或停止后再开始'],
-              [!cleanAIReady, '尚未配置用于整理的 AI 服务或 API 密钥'],
-            )}
-            extra={
-              <>
-                {!cleanAIReady && (
-                  <button type="button" className="button secondary" onClick={onOpenSettings}>
-                    配置 AI 服务
-                  </button>
-                )}
-                <button
-                  type="button"
-                  className="step-link"
-                  disabled={!hasSegments || isProcessing}
-                  onClick={onUndoClean}
-                >
-                  撤销上次整理
-                </button>
-              </>
-            }
-          />
-        </section>
-      )}
-
-      {activeProcessStep === 'clean' && failedCleanBatches.length > 0 && (
-        <section className="failed-batch-recovery" aria-label="失败批次恢复">
-          <header>
-            <div>
-              <strong>有 {failedCleanBatches.length} 个批次需要重试</strong>
-              <small>只会重新整理对应时间范围，不会重跑整份字幕。</small>
-            </div>
-          </header>
-          <div className="failed-batch-list">
-            {failedCleanBatches.map(batch => (
-              <article key={batch.batch_index}>
-                <div>
-                  <strong>
-                    第 {batch.batch_index} 批 · {batch.segment_count} 条
-                  </strong>
-                  <small>
-                    {batch.start === null || batch.end === null
-                      ? '时间范围不可用'
-                      : `${batch.start.toFixed(1)}s – ${batch.end.toFixed(1)}s`}{' '}
-                    · 已尝试 {batch.attempts} 次
-                  </small>
-                  <p title={batch.error}>{batch.error || 'AI 未返回有效 JSON'}</p>
-                </div>
-                <button
-                  type="button"
-                  disabled={taskStarting || isProcessing}
-                  onClick={() => onRetryFailedCleanBatch(batch.batch_index)}
-                >
-                  只重试这一批
-                </button>
-              </article>
-            ))}
-          </div>
-        </section>
+        <CleanStepPanel
+          hasSegments={hasSegments}
+          isProcessing={isProcessing}
+          taskStarting={taskStarting}
+          config={config}
+          aiProviderState={aiProviderState}
+          cleanAIProvider={cleanAIProvider}
+          cleanAIReady={cleanAIReady}
+          failedCleanBatches={failedCleanBatches}
+          onConfigChange={onConfigChange}
+          onClean={onClean}
+          onUndoClean={onUndoClean}
+          onRetryFailedCleanBatch={onRetryFailedCleanBatch}
+          onOpenSettings={onOpenSettings}
+        />
       )}
 
       {activeProcessStep === 'translate' && (
-        <section className="inspector-section step-panel">
-          <header className="step-heading">
-            <h3>AI 翻译</h3>
-            <p>译文单独保存，不覆盖原文，之后可以继续逐句校对。</p>
-          </header>
-          <label>
-            目标语言
-            <LanguagePicker
-              mode="target"
-              allowCustom
-              allowNone
-              value={config.target_language}
-              onChange={onUpdateTargetLanguage}
-            />
-          </label>
-          <label className="check-row">
-            <input
-              type="checkbox"
-              checked={config.bilingual}
-              onChange={event =>
-                onConfigChange(current => ({ ...current, bilingual: event.target.checked }))
-              }
-            />{' '}
-            导出时包含原文与译文
-          </label>
-          <StepActions
-            primary={
-              <button
-                className="button primary"
-                disabled={
-                  !hasSegments ||
-                  isProcessing ||
-                  !translateAIReady ||
-                  config.target_language === 'none'
-                }
-                onClick={onTranslate}
-              >
-                开始翻译
-              </button>
-            }
-            blocker={stepBlocker(
-              [!hasSegments, '先生成或导入字幕'],
-              [isProcessing, '有任务正在运行，完成或停止后再开始'],
-              [config.target_language === 'none', '先选择目标语言'],
-              [!translateAIReady, '尚未配置用于翻译的 AI 服务或 API 密钥'],
-            )}
-            extra={
-              !translateAIReady ? (
-                <button type="button" className="button secondary" onClick={onOpenSettings}>
-                  配置 AI 服务
-                </button>
-              ) : null
-            }
-          />
-        </section>
+        <TranslateStepPanel
+          hasSegments={hasSegments}
+          isProcessing={isProcessing}
+          config={config}
+          translateAIReady={translateAIReady}
+          onConfigChange={onConfigChange}
+          onUpdateTargetLanguage={onUpdateTargetLanguage}
+          onTranslate={onTranslate}
+          onOpenSettings={onOpenSettings}
+        />
       )}
 
       {activeProcessStep === 'export' && (

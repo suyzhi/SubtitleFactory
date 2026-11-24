@@ -16,8 +16,9 @@ def process_watch_folders_once() -> int:
     # Imports stay local to avoid coupling service initialization to FastAPI's
     # route import order.
     from ..api.batches import BatchCreate, create_batch
-    from ..api.projects import WorkflowRequest, start_workflow
+    from ..api.projects import start_workflow
     from ..api.watch_folders import WatchImportMark, mark_watch_file_imported, scan_watch_folders
+    from ..models.schemas import WorkflowRequest
 
     ready = scan_watch_folders()["ready"]
     imported = 0

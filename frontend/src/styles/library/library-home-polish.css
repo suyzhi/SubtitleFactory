@@ -1,0 +1,273 @@
+.pro-app.library-home .brand-block, .pro-app.library-home .active-project-title { align-self: center; margin-top: 0; }
+.pro-app.library-home .brand-block > strong { font-size: 15px; line-height: 1.2; letter-spacing: -.01em; }
+.pro-app .active-project-title strong { font-size: 13px; font-weight: 650; letter-spacing: -.01em; }
+.pro-app .active-project-title span { font-size: 11px; }
+
+.pro-app .v05-shell.app-library .project-sidebar {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-content: start;
+  column-gap: 16px;
+}
+.pro-app .v05-shell.app-library .project-sidebar > * { grid-column: 1 / -1; min-width: 0; }
+.pro-app .v05-shell.app-library .project-sidebar > .library-switcher { grid-column: 1; }
+.pro-app .v05-shell.app-library .project-sidebar > .library-pagination { grid-column: 2; }
+
+.pro-app .v05-shell.app-library {
+  padding: 40px clamp(28px, 5.5vw, 88px) 72px;
+  background: radial-gradient(560px 300px at calc(clamp(28px, 5.5vw, 88px) + 120px) 60px, color-mix(in srgb, var(--accent) 13%, transparent), transparent 70%),
+    radial-gradient(460px 260px at calc(clamp(28px, 5.5vw, 88px) + 380px) 20px, color-mix(in srgb, var(--yellow) 9%, transparent), transparent 70%),
+    var(--window-bg);
+  background-attachment: local;
+}
+
+.pro-app.theme-dark .v05-shell.app-library {
+  background: radial-gradient(560px 300px at calc(clamp(28px, 5.5vw, 88px) + 120px) 60px, color-mix(in srgb, var(--accent) 9%, transparent), transparent 70%),
+    var(--window-bg);
+  background-attachment: local;
+}
+.pro-app .library-page-header { margin-bottom: 30px; padding-top: 8px; }
+
+.pro-app .library-page-header small {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .14em;
+}
+
+.pro-app .library-page-header small::before {
+  content: '';
+  width: 18px;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+
+.pro-app .library-page-header h1 {
+  margin: 10px 0 10px;
+  font-size: clamp(34px, 3.4vw, 48px);
+  font-weight: 700;
+  letter-spacing: -.02em;
+  background: linear-gradient(100deg, var(--text) 30%, color-mix(in srgb, var(--accent) 80%, var(--text)) 120%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.pro-app .library-page-header p { font-size: 14px; color: var(--text-2); }
+.pro-app .library-page-header > div:last-child { gap: 8px; }
+.pro-app .library-page-header .button { min-height: 38px; padding: 0 16px; font-size: 13px; }
+.pro-app .library-page-header .button.primary { padding: 0 20px; }
+
+.pro-app .library-overview > div {
+  position: relative;
+  overflow: hidden;
+  padding: 18px 20px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-lg);
+  background: linear-gradient(180deg, var(--surface), color-mix(in srgb, var(--surface) 55%, var(--surface-2)));
+  box-shadow: var(--shadow-card);
+}
+
+.pro-app .library-overview > div::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 18px;
+  right: 18px;
+  height: 2px;
+  border-radius: 0 0 2px 2px;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  opacity: 0;
+  transition: opacity var(--dur-base, .2s) ease;
+}
+
+.pro-app .library-overview > div:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-raised);
+  border-color: var(--border);
+}
+.pro-app .library-overview > div:hover::after { opacity: .9; }
+.pro-app .library-overview span { color: var(--text-2); font-size: 12px; font-weight: 600; }
+.pro-app .library-overview strong { font-size: 30px; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: -.03em; }
+.pro-app .library-overview small { font-size: 11px; }
+.pro-app .library-runtime-card strong { font-size: 17px; display: inline-flex; align-items: center; gap: 7px; }
+
+.pro-app .library-runtime-card strong::before {
+  content: '';
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 0 4px color-mix(in srgb, currentColor 18%, transparent);
+}
+.pro-app .library-runtime-card.connecting strong::before { animation: sf-breathe 1.3s ease-in-out infinite; }
+
+.pro-app .app-library .library-switcher {
+  width: max-content;
+  height: 40px;
+  min-height: 40px;
+  display: inline-grid;
+  grid-auto-flow: column;
+  grid-template-columns: none;
+  gap: 2px;
+  align-self: center;
+  margin: 0 0 16px;
+  padding: 3px;
+  border: 1px solid var(--border-soft);
+  border-radius: 12px;
+  background: var(--surface-2);
+  box-shadow: var(--inset-sunken);
+  --indicator-bg: var(--surface);
+}
+
+.pro-app.theme-dark .app-library .library-switcher {
+  --indicator-bg: var(--surface-3);
+  background: color-mix(in srgb, var(--surface) 60%, black);
+}
+
+.pro-app .app-library .library-switcher button {
+  min-width: 92px;
+  height: 32px;
+  padding: 0 18px;
+  border-radius: 9px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-3);
+}
+.pro-app .app-library .library-switcher button:hover { background: transparent; color: var(--text-2); transform: none; }
+
+.pro-app .app-library .library-pagination {
+  justify-content: flex-end;
+  align-self: center;
+  gap: 8px;
+  margin-bottom: 16px;
+  padding: 0;
+  color: var(--text-3);
+  font-size: 12px;
+}
+.pro-app .app-library .library-pagination label { gap: 8px; color: var(--text-2); }
+.pro-app .app-library .library-pagination .button { min-height: 32px; height: 32px; padding: 0 12px; font-size: 12px; }
+.pro-app .app-library .library-pagination select { height: 32px; min-width: 96px; }
+.pro-app .app-library .library-filters { gap: 10px; margin-bottom: 26px; padding: 0; border: 0; }
+
+.pro-app .app-library .library-filters input {
+  height: 44px;
+  padding: 0 16px 0 42px;
+  border: 1px solid var(--border-soft);
+  border-radius: 14px;
+  background: var(--surface) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 16 16'%3E%3Ccircle cx='7' cy='7' r='5.25' fill='none' stroke='%238a7e70' stroke-width='1.6'/%3E%3Cpath d='M11 11l3.5 3.5' stroke='%238a7e70' stroke-width='1.6' stroke-linecap='round'/%3E%3C/svg%3E") no-repeat 16px center;
+  box-shadow: var(--shadow-card);
+  font-size: 14px;
+  transition: border-color var(--dur-base, .2s) ease, box-shadow var(--dur-base, .2s) ease;
+}
+.pro-app .app-library .library-filters input::placeholder { color: var(--text-3); }
+.pro-app .app-library .library-filters input:hover { border-color: var(--border); }
+.pro-app .app-library .library-filters input:focus { box-shadow: 0 0 0 4px var(--focus-ring), var(--shadow-card); }
+.pro-app .app-library .project-group-header:hover { background: transparent; box-shadow: none; transform: none; }
+.pro-app .app-library .project-group-header span { gap: 8px; font-size: 15px; font-weight: 650; letter-spacing: -.01em; }
+
+.pro-app .app-library .project-group-header i {
+  width: 20px;
+  height: 20px;
+  display: grid;
+  place-items: center;
+  border-radius: 6px;
+  background: var(--surface-2);
+  color: var(--text-3);
+  font-size: 12px;
+  transition: background-color .2s ease, color .2s ease;
+}
+.pro-app .app-library .project-group-header:hover i { background: var(--accent-soft); color: var(--accent); }
+.pro-app .app-library .project-group-header small { font: 600 11px var(--font); font-variant-numeric: tabular-nums; }
+.pro-app .app-library .project-group-items { grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 20px; }
+
+.pro-app .app-library .project-card {
+  border: 1px solid var(--border-soft);
+  border-radius: 18px;
+  background: var(--surface);
+  box-shadow: var(--shadow-card);
+}
+
+.pro-app .app-library .project-card:hover {
+  transform: translateY(-5px);
+  border-color: color-mix(in srgb, var(--accent) 28%, var(--border));
+  box-shadow: var(--shadow-raised);
+}
+
+.pro-app .app-library .project-card.active {
+  border-color: color-mix(in srgb, var(--accent) 70%, transparent);
+  box-shadow: 0 0 0 3px var(--accent-soft), var(--shadow-card);
+}
+
+.pro-app .app-library .project-thumb::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  background: linear-gradient(180deg, rgba(0,0,0,0) 55%, rgba(0,0,0,.28));
+  pointer-events: none;
+}
+
+.pro-app .app-library .project-thumb::after {
+  content: '';
+  position: absolute;
+  z-index: 3;
+  left: 50%;
+  top: 50%;
+  width: 46px;
+  height: 46px;
+  margin: -23px 0 0 -23px;
+  border-radius: 50%;
+  background: rgba(255,255,255,.2) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='18' viewBox='0 0 16 18'%3E%3Cpath d='M2 1.8v14.4c0 .8.9 1.3 1.6.9l12-7.2c.7-.4.7-1.4 0-1.8l-12-7.2C2.9.5 2 1 2 1.8z' fill='white'/%3E%3C/svg%3E") no-repeat 55% center;
+  border: 1px solid rgba(255,255,255,.35);
+  box-shadow: 0 8px 24px rgba(0,0,0,.28);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  opacity: 0;
+  transform: scale(.7);
+  pointer-events: none;
+}
+.pro-app .app-library .project-card:hover .project-thumb::after { opacity: 1; transform: scale(1); }
+.pro-app .app-library .project-card:hover .project-thumb img { transform: scale(1.07); filter: saturate(1.1); }
+.pro-app .app-library .trash-card .project-thumb::after { display: none; }
+.pro-app .app-library .project-card-copy { gap: 0; padding: 14px 16px 16px; }
+.pro-app .app-library .project-card-copy strong { font-size: 14px; font-weight: 650; letter-spacing: -.01em; }
+.pro-app .app-library .project-card-copy small { margin-top: 4px; font-size: 12px; font-variant-numeric: tabular-nums; }
+
+.pro-app .app-library .project-more {
+  top: 10px;
+  right: 10px;
+  width: 30px;
+  height: 30px;
+  border-radius: 10px;
+  transform: scale(.85);
+}
+
+.pro-app .app-library .project-card-shell:hover .project-more,
+.pro-app .app-library .project-more:focus-visible,
+.pro-app .app-library .project-more[aria-expanded="true"] {
+  transform: scale(1);
+}
+
+.pro-app .app-library .project-empty {
+  min-height: 300px;
+  gap: 10px;
+  border: 1.5px dashed var(--border);
+  border-radius: 22px;
+  background: color-mix(in srgb, var(--surface) 60%, transparent);
+}
+
+.pro-app .app-library .project-empty > span {
+  width: 72px;
+  height: 72px;
+  border-radius: 20px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 34px;
+  box-shadow: 0 10px 30px -10px color-mix(in srgb, var(--accent) 60%, transparent);
+}
+.pro-app .library-skeleton i { height: 218px; border-radius: 18px; }
+.pro-app .app-library .library-skeleton { grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 20px; padding: 0; }
+

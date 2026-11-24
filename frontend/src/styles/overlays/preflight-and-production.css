@@ -1,0 +1,267 @@
+.presentation-theater .studio-topbar,
+.presentation-fullscreen .studio-topbar,
+.presentation-theater .engine-error-banner,
+.presentation-fullscreen .engine-error-banner,
+.presentation-theater .upload-progress-banner,
+.presentation-fullscreen .upload-progress-banner,
+.presentation-theater .project-sidebar,
+.presentation-fullscreen .project-sidebar,
+.presentation-theater .panel-resizer,
+.presentation-fullscreen .panel-resizer,
+.presentation-theater .subtitle-timeline,
+.presentation-fullscreen .subtitle-timeline,
+.presentation-theater .studio-toast,
+.presentation-fullscreen .studio-toast,
+.presentation-theater .modal-backdrop,
+.presentation-fullscreen .modal-backdrop {
+  display: none !important;
+}
+
+.global-task-drawer {
+  position: fixed;
+  z-index: 300;
+  top: 58px;
+  right: 14px;
+  width: min(420px, calc(100vw - 28px));
+  max-height: min(640px, calc(100vh - 76px));
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface);
+  box-shadow: 0 24px 70px rgba(0,0,0,.32);
+}
+
+.global-task-drawer > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 15px 17px;
+  border-bottom: 1px solid var(--border);
+}
+.global-task-drawer > header small { color: var(--text-3); font-size: 10px; }
+.global-task-drawer > header h2 { margin: 2px 0 0; font-size: 17px; }
+.global-task-drawer > header button { border: 0; background: transparent; color: var(--text-2); font-size: 23px; cursor: pointer; }
+.global-task-list { padding: 9px; overflow: auto; }
+
+.global-task-list article {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 9px;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.global-task-main {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 4px 10px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+.global-task-main span { min-width: 0; display: grid; gap: 2px; }
+.global-task-main small { overflow: hidden; color: var(--text-3); text-overflow: ellipsis; white-space: nowrap; }
+.global-task-main em { color: var(--accent); font-style: normal; }
+.global-task-main progress { width: 100%; height: 4px; grid-column: 1 / -1; accent-color: var(--accent); }
+.global-task-list article > div { display: flex; gap: 4px; }
+
+.global-task-list article > div button {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-2);
+  color: var(--text-2);
+  padding: 4px 7px;
+}
+.global-task-empty { padding: 42px; color: var(--text-3); text-align: center; }
+
+.preflight-overlay {
+  position: fixed;
+  z-index: 500;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(6,8,12,.68);
+  backdrop-filter: blur(8px);
+}
+
+.preflight-card {
+  width: min(620px, 100%);
+  padding: 26px;
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  background: var(--surface);
+  box-shadow: 0 32px 100px rgba(0,0,0,.45);
+}
+.preflight-card > header small { color: var(--accent); font-size: 10px; letter-spacing: .09em; text-transform: uppercase; }
+.preflight-card > header h2 { margin: 5px 0 7px; color: var(--text); font-size: 25px; }
+.preflight-card > header p { margin: 0; color: var(--text-3); line-height: 1.6; }
+.preflight-checks { display: grid; grid-template-columns: repeat(3, 1fr); gap: 9px; margin: 22px 0 14px; }
+
+.preflight-checks > span {
+  display: grid;
+  gap: 4px;
+  padding: 13px;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  background: var(--surface-2);
+}
+
+.preflight-checks i {
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-style: normal;
+}
+.preflight-checks small { color: var(--text-3); }
+
+.preflight-device {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 13px 15px;
+  border: 1px solid var(--accent);
+  border-radius: 11px;
+  background: var(--accent-soft);
+}
+.preflight-device > span { display: grid; text-align: right; color: var(--accent); font-weight: 650; }
+.preflight-device small { color: var(--text-3); font-weight: 400; }
+.preflight-card footer { display: flex; justify-content: flex-end; margin-top: 20px; }
+.style-controls-page .style-label .app-select-trigger { min-height: 40px; background: var(--surface); }
+
+.production-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1200;
+  background: rgba(5,8,14,.68);
+  backdrop-filter: blur(10px);
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+
+.production-center {
+  width: min(820px,95vw);
+  max-height: 88vh;
+  overflow: auto;
+  background: var(--panel-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 20px;
+  padding: 22px;
+  box-shadow: 0 24px 80px rgba(0,0,0,.45);
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.production-center>header { display: flex; justify-content: space-between; gap: 20px; }
+.production-center>header h2 { margin: 3px 0; }
+.production-center>header p, .production-center>header small { color: var(--text-secondary); }
+.production-center>header>button { font-size: 26px; }
+.production-actions, .production-queue-actions { display: flex; flex-wrap: wrap; gap: 9px; }
+.production-warning { color: #d99c48; }
+.production-center>footer { display: flex; align-items: center; gap: 10px; color: var(--text-secondary); }
+
+.production-center>footer i {
+  width: 14px;
+  height: 14px;
+  border: 2px solid var(--border-color);
+  border-top-color: var(--accent-color);
+  border-radius: 50%;
+  animation: spin .8s linear infinite;
+}
+.production-template { display: flex; align-items: center; gap: 10px; }
+
+.production-template select {
+  flex: 1;
+  border: 1px solid var(--border-color);
+  background: var(--input-bg);
+  color: var(--text-primary);
+  border-radius: 8px;
+  padding: 8px;
+}
+
+.playlist-dialog {
+  width: min(780px,96vw);
+  max-height: 90vh;
+  overflow: auto;
+  display: grid;
+  gap: 16px;
+  padding: 22px;
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  background: var(--elevated);
+  box-shadow: 0 28px 90px rgba(0,0,0,.48);
+}
+.playlist-dialog>header { display: flex; justify-content: space-between; gap: 18px; }
+.playlist-dialog>header h2 { margin: 3px 0; font-size: 21px; }
+.playlist-dialog>header p, .playlist-dialog>header small { color: var(--text-3); }
+
+.playlist-dialog>header>button {
+  width: 32px;
+  height: 32px;
+  border: 0;
+  background: transparent;
+  color: var(--text-3);
+  font-size: 25px;
+  cursor: pointer;
+}
+.playlist-loading { min-height: 180px; display: grid; place-items: center; align-content: center; gap: 12px; color: var(--text-2); }
+
+.playlist-loading i {
+  width: 26px;
+  height: 26px;
+  border: 3px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin .8s linear infinite;
+}
+
+.playlist-error, .playlist-warning, .playlist-blockers {
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb,var(--red) 45%,var(--border));
+  border-radius: 10px;
+  background: color-mix(in srgb,var(--red) 10%,var(--surface));
+  color: var(--text-2);
+  font-size: 11px;
+}
+
+.playlist-warning {
+  border-color: color-mix(in srgb,var(--yellow) 45%,var(--border));
+  background: color-mix(in srgb,var(--yellow) 8%,var(--surface));
+}
+.playlist-blockers { display: grid; gap: 4px; }
+
+.playlist-summary {
+  display: flex;
+  gap: 13px;
+  align-items: center;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-2);
+}
+
+.playlist-cover {
+  width: 112px;
+  aspect-ratio: 16/9;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border-radius: 8px;
+  background: #111;
+  color: white;
+}
+.playlist-cover img { width: 100%; height: 100%; object-fit: cover; }
+.playlist-summary>div { display: grid; gap: 4px; }
+.playlist-summary small { color: var(--text-3); }
+

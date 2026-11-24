@@ -1,0 +1,253 @@
+.backup-list { display: grid; gap: 6px; width: 100%; }
+
+.backup-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--surface-2);
+}
+.backup-row span { min-width: 0; display: grid; gap: 2px; }
+.backup-row strong, .backup-row small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.backup-row small { color: var(--text-3); }
+.process-settings-content { padding: 16px 20px 22px; }
+
+.speaker-row input:not([type=color]),
+.inline-form input,
+.model-file-grid input,
+.ocr-region-grid input,
+.ocr-time-grid input,
+.speaker-merge select {
+  border: 1px solid var(--border-color);
+  background: var(--input-bg);
+  color: var(--text-primary);
+  border-radius: 8px;
+  padding: 8px;
+}
+.model-file-grid { display: grid; gap: 10px; }
+.model-file-grid label { display: grid; grid-template-columns: 100px minmax(0,1fr) auto; gap: 8px; align-items: center; }
+.model-file-grid label:last-child { grid-template-columns: 160px 100px; }
+
+.cloud-consent-card {
+  grid-column: 1/-1;
+  border: 1px solid var(--border-color);
+  border-radius: 14px;
+  padding: 15px;
+  background: var(--panel-bg);
+}
+.cloud-consent-card>header { display: flex; justify-content: space-between; gap: 20px; }
+.cloud-consent-card h3 { margin: 2px 0; }
+.cloud-consent-card p { max-width: 520px; color: var(--text-secondary); font-size: 12px; }
+.cloud-consent-card>div { display: grid; grid-template-columns: repeat(3,1fr); gap: 8px; margin-top: 10px; }
+
+.cloud-consent-card label {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 9px;
+}
+.cloud-consent-card label span { display: flex; flex-direction: column; }
+.cloud-consent-card label small { color: var(--text-secondary); }
+
+.managed-model-card {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.managed-model-card span { display: flex; flex-direction: column; }
+.managed-model-card small { color: var(--text-2); }
+
+.button,
+.model-action,
+.path-control button,
+.production-center button,
+.smart-tool-card button,
+.quality-panel button,
+.glossary-panel button {
+  white-space: nowrap;
+}
+.model-action { min-width: 64px; padding-inline: 10px; }
+
+.model-row:has(.model-runtime-select) {
+  grid-template-columns: 10px minmax(0, 1fr) auto;
+  grid-template-rows: auto auto;
+  row-gap: 8px;
+  padding-block: 8px;
+}
+.model-row:has(.model-runtime-select) > .status-orb { grid-column: 1; grid-row: 1; }
+.model-row:has(.model-runtime-select) > div:not(.app-select):not(.model-row-actions) { grid-column: 2; grid-row: 1; }
+.model-row:has(.model-runtime-select) > em { grid-column: 3; grid-row: 1; }
+.model-row:has(.model-runtime-select) > .model-runtime-select { grid-column: 2; grid-row: 2; width: min(240px, 100%); }
+.model-row:has(.model-runtime-select) > .model-row-actions { grid-column: 3; grid-row: 2; }
+
+.path-control {
+  grid-template-columns: minmax(0,1fr) auto auto auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 7px;
+}
+.path-control input { flex: 1 1 320px; }
+.path-control button { flex: none; min-width: 64px; }
+.model-file-grid label, .model-file-grid label:last-child { grid-template-columns: 100px minmax(0, 1fr) auto; }
+
+@media (max-width: 1100px) {
+  .settings-field.horizontal { grid-template-columns: minmax(0, 1fr); align-items: stretch; }
+  .provider-card-grid, .provider-assignments { grid-template-columns: minmax(0, 1fr); }
+  .settings-section > header .inline-actions { width: 100%; justify-content: flex-start; padding-bottom: 0; }
+}
+.task-settings-body { padding: 12px 18px; }
+.task-settings-body .inspector-section > h3 { margin: 0; }
+.task-settings-body .inspector-section > p { margin: 0; color: var(--text-2); font-size: 12px; line-height: 1.5; }
+.workspace-tool-panel .task-settings-body { padding: 16px; }
+.workspace-tool-panel .process-settings-content { padding: 0; }
+.model-catalog-filters { align-items: end; }
+.model-catalog-row:has(.model-runtime-select) { grid-template-columns: 10px minmax(0,1fr) minmax(150px,auto) !important; }
+.model-catalog-row:has(.model-runtime-select) > .model-runtime-select { width: 100%; }
+.model-catalog-row > em { justify-self: end; max-width: 100%; }
+.model-row-actions { display: flex; flex-wrap: nowrap; justify-content: flex-end; gap: 6px; align-items: center; }
+
+.provider-assignments {
+  display: grid;
+  gap: 12px 14px;
+  align-items: end;
+  grid-template-columns: repeat(3,minmax(0,1fr));
+  padding-block: 16px 18px;
+}
+.provider-assignments > .button { justify-self: start; }
+.provider-card-grid { align-items: start; padding-block: 10px 16px; }
+
+.provider-card {
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-2);
+  display: block;
+}
+.provider-card > summary { cursor: pointer; display: flex; align-items: center; gap: 8px; min-height: 28px; list-style: none; }
+.provider-card > summary::-webkit-details-marker { display: none; }
+.provider-card > summary::before { content: '›'; font-size: 18px; }
+.provider-card[open] > summary::before { transform: rotate(90deg); }
+.provider-card > summary span { margin-left: auto; color: var(--text-3); font-size: 11px; }
+.provider-card > summary span.ready { color: var(--green); }
+.provider-card-body { display: grid; gap: 10px; padding-top: 14px; }
+
+@media (max-width:700px) {
+  .provider-assignments { grid-template-columns: 1fr; }
+}
+.model-category > summary { cursor: pointer; list-style: none; gap: 8px; }
+.model-category > summary::-webkit-details-marker { display: none; }
+.model-category > summary::before { content: '›'; transition: transform 180ms ease; }
+.model-category[open] > summary::before { transform: rotate(90deg); }
+.model-category > summary strong { flex: 1; }
+.model-category:not([open]) > summary { border-bottom: 0; }
+
+.about-data-row {
+  border-top: 1px solid var(--border-soft);
+  border-bottom: 1px solid var(--border-soft);
+  border: 0;
+  padding: 12px 0;
+}
+.about-data-row + .about-data-row { border-top: 1px solid var(--border-soft); }
+.shortcut-grid > :nth-last-child(-n+2) { border-bottom: 0; }
+.about-data-row.about-directory-row { border-top: 1px solid var(--border-soft); border-bottom: 1px solid var(--border-soft); }
+.pro-app, .settings-backdrop { font-feature-settings: "tnum" 0; }
+
+.settings-backdrop .toggle-row > input[type="checkbox"] {
+  width: 40px;
+  height: 24px;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: background-color var(--dur-base, .2s) ease, box-shadow var(--dur-base, .2s) ease;
+}
+
+.settings-backdrop .toggle-row > input[type="checkbox"]::after {
+  width: 20px;
+  height: 20px;
+  transition: transform 420ms var(--ease-spring, ease), width 200ms ease;
+}
+.settings-backdrop .toggle-row > input[type="checkbox"]:active::after { width: 24px; }
+
+.settings-backdrop .toggle-row > input[type="checkbox"]:checked {
+  background: var(--accent-grad);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 60%, black 10%);
+}
+.settings-backdrop .toggle-row > input[type="checkbox"]:checked::after { transform: translateX(16px); }
+.settings-backdrop .toggle-row > input[type="checkbox"]:checked:active::after { transform: translateX(12px); }
+
+.pro-app .modal-backdrop,
+.modal-backdrop.settings-backdrop,
+.pro-app .utility-dialog-backdrop,
+.pro-app .preflight-overlay {
+  background: rgba(24, 18, 12, .34);
+  backdrop-filter: blur(12px) saturate(1.2);
+  -webkit-backdrop-filter: blur(12px) saturate(1.2);
+}
+
+.pro-app.theme-dark .modal-backdrop,
+.modal-backdrop.settings-backdrop.theme-dark,
+.pro-app.theme-dark .utility-dialog-backdrop {
+  background: rgba(0, 0, 0, .5);
+}
+
+.settings-backdrop .settings-center, .pro-app :is(.rename-dialog, .import-flow, .preflight-card) {
+  border: 1px solid var(--border-soft);
+  border-radius: 24px;
+  box-shadow: 0 40px 100px -20px rgba(0,0,0,.45), 0 0 0 1px rgba(255,255,255,.04) inset;
+}
+.settings-backdrop .settings-navigation nav button { border-radius: 10px; transition: color .2s ease, background-color .2s ease; }
+
+.settings-backdrop .settings-navigation nav button:hover {
+  background: color-mix(in srgb, var(--text-3) 9%, transparent);
+  transform: none;
+}
+.settings-backdrop .settings-navigation nav button.active { color: var(--accent); font-weight: 650; }
+
+.settings-backdrop .settings-navigation nav button i {
+  transition: background-color .25s ease, color .25s ease, transform .4s var(--ease-spring, ease);
+}
+.settings-backdrop .settings-navigation nav button.active i { background: var(--accent); color: white; transform: scale(1.08); }
+.settings-backdrop .segmented-control button { transition: color .2s ease; }
+.settings-backdrop .segmented-control button.active { color: var(--text); font-weight: 600; }
+.pro-app .transcription-setup .runtime-choice-grid { grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); }
+
+.pro-app .transcription-setup .runtime-choice-grid > button {
+  grid-template-columns: minmax(0, 1fr);
+  min-height: 64px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  transition: border-color .2s ease, background-color .2s ease, transform .35s var(--ease-spring, ease);
+}
+.pro-app .transcription-setup .runtime-choice-grid > button:hover:not(:disabled) { transform: translateY(-1px); }
+.pro-app .transcription-setup .runtime-choice-grid > button > span { display: grid; gap: 3px; }
+.pro-app .transcription-setup .runtime-choice-grid strong { font-size: 12.5px; }
+.pro-app .transcription-setup .runtime-choice-grid small { font-size: 11px; line-height: 1.4; }
+
+:is(.pro-app, .settings-backdrop, .app-select-shell) .chevron {
+  display: inline-block;
+  flex: none;
+  width: 7px;
+  height: 7px;
+  margin: 0 2px;
+  border: solid currentColor;
+  border-width: 0 1.6px 1.6px 0;
+  border-radius: 0 0 1px 0;
+  transform: translateY(-2px) rotate(45deg);
+  transition: transform .32s var(--ease-spring, ease);
+}
+:is(.pro-app, .settings-backdrop, .app-select-shell) .app-select-trigger > i.chevron { color: var(--text-3); }
+
+:is(.pro-app, .settings-backdrop, .app-select-shell) .app-select-trigger[aria-expanded="true"] > i.chevron {
+  transform: translateY(2px) rotate(225deg);
+}
+.pro-app .workspace-tool-panel .task-settings-body { padding: 4px 18px 0; }

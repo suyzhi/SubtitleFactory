@@ -1,0 +1,186 @@
+.step-indicator .step-number { align-self: center; color: var(--text-3); font-size: 7px; }
+.log-level-icon { width: 15px; flex: 0 0 15px; text-align: center; font-size: 9px; color: var(--text-3); }
+.log-info .log-level-icon { color: var(--accent); }
+.log-warning .log-level-icon { color: var(--yellow); }
+.log-error .log-level-icon { color: var(--red); }
+.log-entry.log-error { background: color-mix(in srgb, var(--red) 6%, transparent); }
+.log-entry.log-error:hover { background: color-mix(in srgb, var(--red) 10%, transparent); }
+.log-suggestion { flex-basis: 100%; color: var(--yellow); font-size: 9px; }
+.log-empty-text { padding: 20px 0; text-align: center; color: var(--text-3); font-size: 10px; }
+.stat-label { color: var(--text-3); }
+
+.workspace-tool-panel {
+  position: absolute;
+  z-index: 40;
+  top: 72px;
+  right: 0;
+  bottom: 0;
+  width: min(800px,96%);
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border-left: 1px solid var(--border);
+  box-shadow: -12px 0 40px #0003;
+  overflow: hidden;
+}
+.workspace-tool-panel > header { display: flex; align-items: center; justify-content: space-between; padding: 12px 18px; }
+.workspace-tool-panel > header h2 { font-size: 18px; margin: 0; }
+.tool-panel-tabs { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 16px; border-bottom: 1px solid var(--border); }
+.tool-panel-tabs button[aria-pressed=true] { color: var(--accent); background: var(--accent-soft); }
+.workspace-tool-panel .quality-page-grid { grid-template-columns: 1fr; }
+.transcription-setup > label { display: grid; gap: 6px; margin: 12px 0; }
+.transcription-setup fieldset { border: 1px solid var(--border); border-radius: 8px; margin: 14px 0; padding: 12px; min-width: 0; }
+.transcription-setup button[aria-pressed=true] { background: var(--accent-soft); color: var(--accent); }
+.flow-options { padding-block: 12px; border-top: 1px solid var(--border); }
+.flow-options p { font-size: 12px; line-height: 1.6; color: var(--text-2); }
+.workspace-tool-panel .task-workspace { flex: 1; min-height: 0; overflow: auto; }
+
+.task-inline-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+}
+.task-inline-status span { flex: 1; }
+.task-settings-body .inspector-section { display: grid; gap: 12px; }
+.candidate-review { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
+
+.candidate-comparison > div {
+  display: grid;
+  grid-template-columns: 70px minmax(0,1fr) minmax(0,1fr);
+  gap: 10px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+.candidate-comparison p { display: block; margin: 0; overflow-wrap: anywhere; font-size: 12px; line-height: 1.6; }
+.candidate-comparison p small { display: block; color: var(--text-2); }
+.flow-options > summary { cursor: pointer; padding: 8px 0; }
+.workspace-editor .workspace-tool-panel { top: 60px; width: min(600px,94%); }
+.export-task-page > .tool-panel-tabs, .export-options { max-width: 900px; width: 100%; margin-inline: auto; }
+.export-task-page > .tool-panel-tabs { padding: 8px 0; }
+
+.editor-workspace > .workspace-tool-panel {
+  width: min(600px,94%);
+  top: 68px;
+  right: 8px;
+  bottom: 8px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  animation: workspace-tools-in 220ms var(--ease-standard);
+}
+.motion-off .workspace-tool-panel { animation: none; }
+.workspace-tool-panel .process-diagnostics { margin: 0 16px 16px; padding: 0; }
+.workspace-tool-panel .process-diagnostics > div { grid-template-columns: minmax(0,1fr); }
+
+.pro-app .app-library .media-mode-badge {
+  margin-top: 10px;
+  padding: 3px 9px;
+  border: 0;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--green) 13%, transparent);
+  color: var(--green);
+  font-size: 11px;
+  font-weight: 600;
+}
+.pro-app .export-task-page > .tool-panel-tabs, .pro-app .export-options { max-width: 760px; }
+
+.pro-app .export-task-page > .tool-panel-tabs {
+  width: max-content;
+  margin: 0 auto 0 max(0px, calc((100% - 760px) / 2));
+  padding: 3px;
+  border: 1px solid var(--border-soft);
+  border-radius: 12px;
+  background: var(--surface-2);
+  box-shadow: var(--inset-sunken);
+  --indicator-bg: var(--surface);
+}
+
+.pro-app.theme-dark .export-task-page > .tool-panel-tabs {
+  background: color-mix(in srgb, var(--surface) 60%, black);
+  --indicator-bg: var(--surface-3);
+}
+
+.pro-app .export-task-page > .tool-panel-tabs button {
+  height: 32px;
+  padding: 0 16px;
+  background: transparent;
+  color: var(--text-3);
+  font-weight: 600;
+}
+.pro-app .export-task-page > .tool-panel-tabs button[aria-pressed="true"] { color: var(--text); }
+
+.pro-app .editor-workspace > .workspace-tool-panel {
+  top: 68px;
+  right: 12px;
+  bottom: 12px;
+  border: 1px solid var(--border-soft);
+  border-radius: 20px;
+  background: color-mix(in srgb, var(--elevated) 94%, transparent);
+  box-shadow: var(--shadow-menu);
+  backdrop-filter: saturate(1.4) blur(30px);
+  -webkit-backdrop-filter: saturate(1.4) blur(30px);
+}
+.pro-app .workspace-tool-panel > header h2 { font-size: 19px; }
+.pro-app .workspace-tool-panel > header .button { min-height: 30px; }
+
+.pro-app .workspace-tool-panel .tool-panel-tabs {
+  gap: 2px;
+  padding: 6px 14px 12px;
+  --indicator-bg: var(--accent-soft);
+  --indicator-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 25%, transparent);
+}
+
+.pro-app .workspace-tool-panel .tool-panel-tabs button {
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--text-2);
+  font-weight: 600;
+  transition: color .2s ease;
+}
+
+.pro-app .workspace-tool-panel .tool-panel-tabs button:hover {
+  color: var(--text);
+  background: color-mix(in srgb, var(--text-3) 8%, transparent);
+}
+.pro-app .workspace-tool-panel .tool-panel-tabs button[aria-pressed="true"] { color: var(--accent); }
+
+.pro-app .workspace-tool-panel .inspector-section {
+  border-color: var(--border-soft);
+  border-radius: 16px;
+  background: var(--surface);
+}
+.pro-app .workspace-tool-panel .smart-tools-grid { grid-template-columns: minmax(0, 1fr); padding: 16px; gap: 14px; }
+.pro-app .app-library .library-list-view .media-mode-badge { grid-column: 2; grid-row: 1 / span 2; align-self: center; margin: 0; }
+.pro-app .workspace-tool-panel > header { padding: 16px 18px 10px; gap: 12px; }
+.pro-app .workspace-panel-actions { display: inline-flex; align-items: center; gap: 6px; }
+
+.pro-app .panel-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-2);
+  font-size: 12px;
+  cursor: pointer;
+  transition: background-color .15s ease, color .15s ease;
+}
+.pro-app .panel-link:hover { background: color-mix(in srgb, var(--text-3) 12%, transparent); color: var(--text); }
+
+.pro-app .panel-link b {
+  min-width: 18px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 10.5px;
+  text-align: center;
+}
+

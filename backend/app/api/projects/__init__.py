@@ -13,6 +13,7 @@
 from fastapi import APIRouter
 
 from ...models.database import get_db
+from ...models.schemas import WorkflowRequest
 from ...services.app_settings import get_effective_app_settings as get_app_settings
 from ...services.cloud_asr import fun_asr_status
 from ...services.transcriber import get_transcription_model_status, transcribe_audio
@@ -135,6 +136,7 @@ __all__ = [
     "RUNTIME_LABELS",
     "SUBTITLES_DIR",
     "VIDEO_EXTENSIONS",
+    "WorkflowRequest",
     "_active_task_conflict",
     "_audio_preflight",
     "_do_clean",

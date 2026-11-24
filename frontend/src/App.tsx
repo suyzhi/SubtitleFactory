@@ -1,50 +1,34 @@
 // 字幕工厂 - 主应用入口（项目库首页 + 按需项目工作区编排）
 
-import {
-  lazy,
-  Suspense,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type CSSProperties,
-} from 'react';
+import { lazy, Suspense, useCallback, useRef, useState, type CSSProperties } from 'react';
 import * as api from './api/backend';
 import { AppSelectThemeContext } from './components/appSelectContext';
 import DeferredPanel from './components/DeferredPanel';
 import FirstRunPreflight from './components/FirstRunPreflight';
 import GlobalTaskDrawer from './components/GlobalTaskDrawer';
 import ImportFlow from './components/ImportFlow';
-import LanguagePicker from './components/LanguagePicker';
 import LibrarySidebar from './components/LibrarySidebar';
 import ProcessSettingsPanel from './components/ProcessSettingsPanel';
 import ProjectContextOverlays from './components/ProjectContextOverlays';
 import ProjectWorkspaceView from './components/ProjectWorkspaceView';
 import StudioTopbar from './components/StudioTopbar';
 import type { SubtitlePlayerHandle } from './components/SubtitlePlayer';
-import TranscriptionSetup from './components/TranscriptionSetup';
+import { FlowOptionsPanel, TranscriptionSetupBlock } from './components/TranscriptionFlowSetup';
 import { useAppBootstrap } from './hooks/useAppBootstrap';
 import { useAppTheme } from './hooks/useAppTheme';
 import { useLibrary } from './hooks/useLibrary';
+import { useProcessingConfig } from './hooks/useProcessingConfig';
 import { useProcessLogs } from './hooks/useProcessLogs';
 import { useProjectImport } from './hooks/useProjectImport';
+import { useProjectSession } from './hooks/useProjectSession';
 import { useProjectTasks } from './hooks/useProjectTasks';
 import { useSubtitleEditor } from './hooks/useSubtitleEditor';
 import { useToast } from './hooks/useToast';
 import { useWorkspaceLayout } from './hooks/useWorkspaceLayout';
 import { useWorkspaceShortcuts } from './hooks/useWorkspaceShortcuts';
-import { emptyProcess } from './processSteps';
 import { taskIsActive } from './projectState';
-import { loadSubtitleStyle } from './subtitleStyle';
 import { findSubtitleFocusIndex } from './subtitleTableVirtualization';
-import type {
-  ProcessingConfig,
-  Project,
-  SegmentSearchHit,
-  SubtitleSegment,
-  SubtitleStyleSettings,
-} from './types';
+import type { Project } from './types';
 import { isPlaylistUrl } from './utils/library';
 import { useSlidingIndicator, useTransientFlag } from './utils/motion';
 import './styles/tokens.css';
@@ -68,16 +52,6 @@ const PlaylistBatchDialog = lazy(() => import('./components/PlaylistBatchDialog'
 // Settings are opened occasionally; loading them on demand keeps the startup bundle lean.
 const SettingsCenter = lazy(() => import('./components/SettingsCenter'));
 
-const DEFAULT_CONFIG: ProcessingConfig = {
-  model: 'auto',
-  language: 'auto',
-  target_language: 'zh',
-  enable_clean: false,
-  enable_translate: false,
-  bilingual: localStorage.getItem('subtitle_factory_export_bilingual') === 'true',
-  clean_target_length: 42,
-};
-
 function App() {
   const youtubeEnabled = api.youtubeFeaturesEnabled();
   const filesystemAutomationEnabled = api.filesystemAutomationEnabled();
@@ -87,19 +61,8 @@ function App() {
   const [libraryRefresh, setLibraryRefresh] = useState(0);
   const [activeProject, setActiveProject] = useState<Project | null>(null);
   const [youtubeUrl, setYoutubeUrl] = useState('');
-  const [config, setConfig] = useState<ProcessingConfig>(() => ({
-    ...DEFAULT_CONFIG,
-    enable_clean: localStorage.getItem('subtitle_factory_flow_clean') === 'true',
-    enable_translate: localStorage.getItem('subtitle_factory_flow_translate') === 'true',
-    clean_target_length:
-      Number(localStorage.getItem('subtitle_factory_clean_target_length')) ||
-      DEFAULT_CONFIG.clean_target_length,
-  }));
 
   // ── UI chrome & workspace navigation state ──
-  const [currentTime, setCurrentTime] = useState(0);
-  const [videoDuration, setVideoDuration] = useState(0);
-  const [activeSegmentIdx, setActiveSegmentIdx] = useState(-1);
   const [autoScrollTable, setAutoScrollTable] = useState(true);
   const [showSettingsCenter, setShowSettingsCenter] = useState(false);
   const [showTaskDrawer, setShowTaskDrawer] = useState(false);
@@ -111,7 +74,6 @@ function App() {
   const [projectWorkspace, setProjectWorkspace] = useState<'subtitles' | 'style' | 'export'>(
     'subtitles',
   );
-  const [subtitleFocusRequest, setSubtitleFocusRequest] = useState(0);
   const [toolsOpen, setToolsOpen] = useState(false);
   const [toolsTab, setToolsTab] = useState<'process' | 'quality' | 'smart' | 'content'>('process');
   const [selectedStep, setSelectedStep] = useState<string | null>(null);
@@ -124,14 +86,7 @@ function App() {
   // ── Refs ──
   const videoPlayerRef = useRef<SubtitlePlayerHandle>(null);
   const settingsButtonRef = useRef<HTMLButtonElement>(null);
-  const restoredStartupProject = useRef(false);
   const activeProjectIdRef = useRef<string | null>(null);
-  const projectSelectionIntent = useRef(0);
-  const pendingSearchJump = useRef<SegmentSearchHit | null>(null);
-  const playheadRef = useRef<{ segments: SubtitleSegment[]; time: number }>({
-    segments: [],
-    time: 0,
-  });
 
   // ── Independent utility hooks ──
   const { toast, setToast, showToast } = useToast();
@@ -152,6 +107,12 @@ function App() {
     beginResize,
   } = useWorkspaceLayout(motionEnabled);
   const { processLogs, setProcessLogs, addLog } = useProcessLogs();
+  const { config, setConfig, flowOptions, updateTargetLanguage, updateBilingual } =
+    useProcessingConfig({
+      activeProjectIdRef,
+      setActiveProject,
+      setToast,
+    });
 
   // ── Backend bootstrap, settings, AI providers & model runtimes ──
   const {
@@ -186,31 +147,6 @@ function App() {
     showToast,
   });
 
-  useEffect(() => {
-    localStorage.setItem('subtitle_factory_clean_target_length', String(config.clean_target_length));
-  }, [config.clean_target_length]);
-
-  useEffect(() => {
-    localStorage.setItem('subtitle_factory_flow_clean', String(config.enable_clean));
-    localStorage.setItem('subtitle_factory_flow_translate', String(config.enable_translate));
-  }, [config.enable_clean, config.enable_translate]);
-
-  const flowOptions = useMemo(
-    () => ({
-      enable_clean: config.enable_clean,
-      enable_translate: config.enable_translate,
-      target_language: config.target_language,
-      clean_target_length: config.clean_target_length,
-      text_processing_consent: config.enable_clean || config.enable_translate,
-    }),
-    [
-      config.clean_target_length,
-      config.enable_clean,
-      config.enable_translate,
-      config.target_language,
-    ],
-  );
-
   // ── Subtitle editor & draft recovery hook ──
   const editor = useSubtitleEditor({
     activeProject,
@@ -224,10 +160,6 @@ function App() {
     setToast,
     showToast,
   });
-
-  useEffect(() => {
-    playheadRef.current = { segments: editor.segments, time: currentTime };
-  }, [editor.segments, currentTime]);
 
   const activeProjectIsYoutube = youtubeEnabled && activeProject?.source_type === 'youtube';
 
@@ -258,110 +190,33 @@ function App() {
     showToast,
   });
 
-  const {
-    waitForPendingWrites,
-    resetDraftState,
-    setSegments,
-    refreshSegments,
-    setSubtitleStyle,
-  } = editor;
-  const {
-    resetTaskTracking,
-    refreshProcessSteps,
-    attachTask,
-    setProcessSteps,
-  } = tasks;
-
-  // ── Project selection & reset coordination ──
-  const selectProject = useCallback(
-    async (p: Project, requestedIntent?: number) => {
-      const selectionIntent = requestedIntent ?? ++projectSelectionIntent.current;
-      if (selectionIntent !== projectSelectionIntent.current) return;
-      await waitForPendingWrites();
-      if (selectionIntent !== projectSelectionIntent.current) return;
-      const switchingProject = activeProjectIdRef.current !== p.id;
-      activeProjectIdRef.current = p.id;
-      setActiveProject(p);
-      resetDraftState(Number(p.edit_revision || 0));
-      setShowProjectWorkspace(true);
-      setProjectWorkspace('subtitles');
-      setToolsOpen(false);
-      setSegmentInspector(null);
-      setSegments([]);
-      localStorage.setItem('subtitle_factory_last_project_id', p.id);
-      resetTaskTracking();
-      setActiveSegmentIdx(-1);
-      if (switchingProject) {
-        setCurrentTime(0);
-        setVideoDuration(0);
-      }
-      refreshProcessSteps(p);
-      await Promise.all([
-        refreshSegments(p.id),
-        api
-          .getProjectStyle(p.id)
-          .then(result => {
-            if (activeProjectIdRef.current !== p.id) return;
-            setSubtitleStyle(
-              result.settings
-                ? ({ ...loadSubtitleStyle(), ...result.settings } as SubtitleStyleSettings)
-                : loadSubtitleStyle(),
-            );
-          })
-          .catch(() => {
-            if (activeProjectIdRef.current === p.id) setSubtitleStyle(loadSubtitleStyle());
-          }),
-      ]);
-      try {
-        const latestTask = await api.getLatestProjectTask(p.id);
-        if (activeProjectIdRef.current !== p.id) return;
-        if (latestTask) attachTask(latestTask, 1000);
-      } catch {
-        /* projects created by older builds may not have task history */
-      }
-      if (activeProjectIdRef.current === p.id) addLog('info', '项目', `打开项目: ${p.title}`);
-    },
-    [
-      addLog,
-      attachTask,
-      refreshProcessSteps,
-      refreshSegments,
-      resetDraftState,
-      resetTaskTracking,
-      setSegments,
-      setSubtitleStyle,
-      waitForPendingWrites,
-    ],
-  );
-
-  const selectProjectById = useCallback(
-    async (projectId: string) => {
-      const selectionIntent = ++projectSelectionIntent.current;
-      try {
-        const project = await api.getProject(projectId);
-        if (selectionIntent !== projectSelectionIntent.current) return;
-        await selectProject(project, selectionIntent);
-      } catch (error) {
-        if (selectionIntent === projectSelectionIntent.current) {
-          setToast(error instanceof Error ? error.message : String(error));
-        }
-      }
-    },
-    [selectProject, setToast],
-  );
-
-  const resetActiveProject = useCallback(() => {
-    projectSelectionIntent.current += 1;
-    activeProjectIdRef.current = null;
-    setActiveProject(null);
-    setSegments([]);
-    resetDraftState(0);
-    resetTaskTracking();
-    setProcessSteps(emptyProcess());
-    setInspectorMode(null);
-    setShowProjectWorkspace(false);
-    setProjectWorkspace('subtitles');
-  }, [resetDraftState, resetTaskTracking, setProcessSteps, setSegments]);
+  // ── Project selection, startup restore & playback sync hook ──
+  const session = useProjectSession({
+    backendStatus,
+    appSettings,
+    projects,
+    activeProject,
+    activeProjectIdRef,
+    segments: editor.segments,
+    videoPlayerRef,
+    setActiveProject,
+    setSegments: editor.setSegments,
+    setSubtitleStyle: editor.setSubtitleStyle,
+    setShowProjectWorkspace,
+    setProjectWorkspace,
+    setToolsOpen,
+    setSegmentInspector,
+    setInspectorMode,
+    setProcessSteps: tasks.setProcessSteps,
+    waitForPendingWrites: editor.waitForPendingWrites,
+    resetDraftState: editor.resetDraftState,
+    resetTaskTracking: tasks.resetTaskTracking,
+    refreshProcessSteps: tasks.refreshProcessSteps,
+    refreshSegments: editor.refreshSegments,
+    attachTask: tasks.attachTask,
+    addLog,
+    setToast,
+  });
 
   // ── Library, search, playlists & project actions hook ──
   const library = useLibrary({
@@ -377,23 +232,10 @@ function App() {
     currentTask: tasks.currentTask,
     setActiveProject,
     waitForPendingWrites: editor.waitForPendingWrites,
-    resetActiveProject,
+    resetActiveProject: session.resetActiveProject,
     setToast,
     showToast,
   });
-
-  useEffect(() => {
-    if (restoredStartupProject.current || backendStatus !== 'connected' || !projects.length) return;
-    if (activeProject) {
-      restoredStartupProject.current = true;
-      return;
-    }
-    restoredStartupProject.current = true;
-    if (appSettings.startup_behavior !== 'restore_last') return;
-    const lastId = localStorage.getItem('subtitle_factory_last_project_id');
-    const project = projects.find(item => item.id === lastId);
-    if (project) void selectProject(project);
-  }, [activeProject, appSettings.startup_behavior, backendStatus, projects, selectProject]);
 
   // ── Global keyboard & popover shortcuts ──
   useWorkspaceShortcuts({
@@ -409,7 +251,7 @@ function App() {
     draftItemsRef: editor.draftItemsRef,
     editorQueue: editor.editorQueue,
     editorWriteFailed: editor.editorWriteFailed,
-    playheadRef,
+    playheadRef: session.playheadRef,
     videoPlayerRef,
     commitDraft: editor.commitDraft,
     splitSegment: editor.splitSegment,
@@ -444,98 +286,11 @@ function App() {
     compatibleModel,
     runtimeForModel,
     requireRuntime,
-    selectProject,
-    attachTask,
+    selectProject: session.selectProject,
+    attachTask: tasks.attachTask,
     setToast,
     showToast,
   });
-
-  const updateTargetLanguage = useCallback(
-    async (targetLanguage: string) => {
-      setConfig(current => ({ ...current, target_language: targetLanguage }));
-      const projectId = activeProjectIdRef.current;
-      if (!projectId) return;
-      try {
-        const updated = await api.updateProjectTargetLanguage(projectId, targetLanguage);
-        if (activeProjectIdRef.current === projectId) setActiveProject(updated);
-      } catch (error) {
-        if (activeProjectIdRef.current === projectId) {
-          setToast(error instanceof Error ? error.message : String(error));
-        }
-      }
-    },
-    [setToast],
-  );
-
-  // ── Playback & search jump sync ──
-  const handleTimeUpdate = useCallback(
-    (time: number) => {
-      setCurrentTime(time);
-      setActiveSegmentIdx(editor.segments.findLastIndex(s => s.start <= time && s.end >= time));
-    },
-    [editor.segments],
-  );
-
-  const handleSeek = useCallback(
-    (time: number) => {
-      setCurrentTime(time);
-      setActiveSegmentIdx(
-        editor.segments.findLastIndex(segment => segment.start <= time && segment.end >= time),
-      );
-      videoPlayerRef.current?.seekTo(time);
-    },
-    [editor.segments],
-  );
-
-  const openLibrarySearchHit = useCallback(
-    async (hit: SegmentSearchHit) => {
-      const selectionIntent = ++projectSelectionIntent.current;
-      try {
-        pendingSearchJump.current = hit;
-        const project =
-          projects.find(item => item.id === hit.project_id) ||
-          (await api.getProject(hit.project_id));
-        if (selectionIntent !== projectSelectionIntent.current) return;
-        await selectProject(project, selectionIntent);
-      } catch (error) {
-        pendingSearchJump.current = null;
-        setToast(error instanceof Error ? error.message : String(error));
-      }
-    },
-    [projects, selectProject, setToast],
-  );
-
-  useEffect(() => {
-    const hit = pendingSearchJump.current;
-    if (!hit || activeProject?.id !== hit.project_id) return;
-    if (
-      !editor.segments.some(
-        segment => segment.id === hit.segment_id || segment.index === hit.segment_index,
-      )
-    ) {
-      return;
-    }
-    const frame = window.requestAnimationFrame(() => {
-      setProjectWorkspace('subtitles');
-      setShowProjectWorkspace(true);
-      setActiveSegmentIdx(
-        Math.max(
-          0,
-          editor.segments.findIndex(segment => segment.id === hit.segment_id),
-        ),
-      );
-      handleSeek(hit.start);
-      setSubtitleFocusRequest(request => request + 1);
-      pendingSearchJump.current = null;
-    });
-    return () => window.cancelAnimationFrame(frame);
-  }, [activeProject?.id, editor.segments, handleSeek]);
-
-  const previewClipRange = useCallback((start: number, end: number) => {
-    setProjectWorkspace('subtitles');
-    setShowProjectWorkspace(true);
-    window.requestAnimationFrame(() => videoPlayerRef.current?.previewRange(start, end));
-  }, []);
 
   const openWorkflowStep = useCallback((stepId: string) => {
     setSelectedStep(stepId);
@@ -579,88 +334,48 @@ function App() {
   const hasLocalVideo = Boolean(activeProject?.video_available || activeProject?.video_path);
   const canPlayMedia = hasLocalVideo;
   const activeSegmentIndex =
-    activeSegmentIdx >= 0 ? (editor.segments[activeSegmentIdx]?.index ?? -1) : -1;
-  const subtitleEntryFocusIndex = findSubtitleFocusIndex(editor.segments, currentTime);
+    session.activeSegmentIdx >= 0 ? (editor.segments[session.activeSegmentIdx]?.index ?? -1) : -1;
+  const subtitleEntryFocusIndex = findSubtitleFocusIndex(editor.segments, session.currentTime);
 
   const inspectorModelId =
     config.model === 'auto' ? modelStatus?.recommended_model || 'small' : config.model;
+  const inspectorRuntime = runtimeForModel(inspectorModelId);
   const activeProcessStep =
     selectedStep || (!hasAudio ? 'download' : !hasSegments ? 'transcribe' : 'clean');
 
   const playlistWorkflow = {
     model: inspectorModelId,
-    runtime: runtimeForModel(inspectorModelId),
+    runtime: inspectorRuntime,
     language: config.language,
     target_language: config.target_language,
     clean_target_length: config.clean_target_length,
   };
 
   const transcriptionSetupNode = (
-    <>
-      {modelError && (
-        <p role="alert">
-          模型列表暂时无法刷新：{modelError}
-          <button onClick={refreshModels}>重新加载模型</button>
-        </p>
-      )}
-      <TranscriptionSetup
-        models={modelStatus?.models || []}
-        model={config.model}
-        language={config.language}
-        recommended={modelStatus?.recommended_model}
-        runtime={runtimeForModel(inspectorModelId)}
-        onModel={model => setConfig(current => ({ ...current, model }))}
-        onLanguage={language => setConfig(current => ({ ...current, language }))}
-        onRuntime={chooseRuntime}
-      />
-    </>
+    <TranscriptionSetupBlock
+      modelError={modelError}
+      models={modelStatus?.models || []}
+      recommendedModel={modelStatus?.recommended_model}
+      model={config.model}
+      language={config.language}
+      runtime={inspectorRuntime}
+      onRefreshModels={refreshModels}
+      onModelChange={model => setConfig(current => ({ ...current, model }))}
+      onLanguageChange={language => setConfig(current => ({ ...current, language }))}
+      onRuntimeChange={chooseRuntime}
+    />
   );
 
   const flowOptionsNode = (
-    <details className="flow-options">
-      <summary>
-        生成后流程：{config.enable_clean || config.enable_translate ? '含文本处理' : '仅转写'}
-      </summary>
-      <label className="check-row">
-        <input
-          type="checkbox"
-          checked={config.enable_clean}
-          disabled={!cleanAIReady}
-          onChange={event =>
-            setConfig(current => ({ ...current, enable_clean: event.target.checked }))
-          }
-        />
-        自动整理
-      </label>
-      <label className="check-row">
-        <input
-          type="checkbox"
-          checked={config.enable_translate}
-          disabled={!translateAIReady}
-          onChange={event =>
-            setConfig(current => ({ ...current, enable_translate: event.target.checked }))
-          }
-        />
-        自动翻译
-      </label>
-      {config.enable_translate && (
-        <LanguagePicker
-          mode="target"
-          value={config.target_language}
-          onChange={target_language => setConfig(current => ({ ...current, target_language }))}
-        />
-      )}
-      <p>
-        勾选即同意在此流程中将字幕文本发送至设置中的服务商（整理：
-        {cleanAIProvider?.name || '未配置'}；翻译：{translateAIProvider?.name || '未配置'}
-        ）。可能产生服务商费用，处理地区依服务商设置；取消勾选后，新任务不再自动执行相应步骤；正在运行的任务请在任务面板中终止。音视频不会随这两个步骤上传。
-      </p>
-      {(!cleanAIReady || !translateAIReady) && (
-        <button className="button secondary" onClick={() => setShowSettingsCenter(true)}>
-          配置文本服务
-        </button>
-      )}
-    </details>
+    <FlowOptionsPanel
+      config={config}
+      cleanAIReady={cleanAIReady}
+      translateAIReady={translateAIReady}
+      cleanAIProvider={cleanAIProvider}
+      translateAIProvider={translateAIProvider}
+      onConfigChange={setConfig}
+      onOpenSettings={() => setShowSettingsCenter(true)}
+    />
   );
 
   return (
@@ -726,7 +441,7 @@ function App() {
               </>
             }
             busy={importBusy}
-            canStart={!!runtimeForModel(inspectorModelId)}
+            canStart={!!inspectorRuntime}
             onClose={() => setPendingImport(null)}
             onStart={(generate, remember) => executeImport(pendingImport, generate, remember)}
           />
@@ -741,8 +456,8 @@ function App() {
               library.playlistBatches
                 .flatMap(batch => batch.items)
                 .find(item => item.project_id === projectId)?.project;
-            if (project) void selectProject(project);
-            else void selectProjectById(projectId);
+            if (project) void session.selectProject(project);
+            else void session.selectProjectById(projectId);
             setShowTaskDrawer(false);
           }}
           onOpenSettings={() => {
@@ -878,10 +593,10 @@ function App() {
             onLibrarySearchSelectionChange={library.setLibrarySearchSelection}
             onLibrarySearchFiltersChange={library.setLibrarySearchFilters}
             onLibrarySearchPageChange={library.setLibrarySearchPage}
-            onOpenSearchHit={hit => void openLibrarySearchHit(hit)}
+            onOpenSearchHit={hit => void session.openLibrarySearchHit(hit)}
             onTogglePlaylistBatch={library.togglePlaylistBatch}
             onRefreshPlaylistBatches={() => void library.refreshPlaylistBatches()}
-            onSelectProject={project => void selectProject(project)}
+            onSelectProject={project => void session.selectProject(project)}
             onToggleProjectGroup={library.toggleProjectGroup}
             onOpenProjectMenu={library.openProjectMenu}
             onGroupDraftChange={library.setGroupDraft}
@@ -925,12 +640,12 @@ function App() {
             segments={editor.segments}
             segmentsLoading={editor.segmentsLoading}
             segmentsError={editor.segmentsError}
-            currentTime={currentTime}
-            videoDuration={videoDuration}
-            activeSegmentIdx={activeSegmentIdx}
+            currentTime={session.currentTime}
+            videoDuration={session.videoDuration}
+            activeSegmentIdx={session.activeSegmentIdx}
             activeSegmentIndex={activeSegmentIndex}
             subtitleEntryFocusIndex={subtitleEntryFocusIndex}
-            subtitleFocusRequest={subtitleFocusRequest}
+            subtitleFocusRequest={session.subtitleFocusRequest}
             autoScrollTable={autoScrollTable}
             editorSaveState={editor.editorSaveState}
             editorRevision={editor.editorRevision.current}
@@ -972,7 +687,7 @@ function App() {
                 segments={editor.segments}
                 editorRevision={editor.editorRevision.current}
                 hasDraft={Object.keys(editor.draftItems).length > 0}
-                inspectorRuntime={runtimeForModel(inspectorModelId)}
+                inspectorRuntime={inspectorRuntime}
                 quickImport={quickImport}
                 transcriptionSetup={transcriptionSetupNode}
                 flowOptionsPanel={flowOptionsNode}
@@ -1012,7 +727,7 @@ function App() {
                 }}
                 onOpenSettings={() => setShowSettingsCenter(true)}
                 onRetryCurrentFailure={tasks.retryCurrentFailure}
-                onSeek={handleSeek}
+                onSeek={session.handleSeek}
                 onAcceptCandidate={result =>
                   activeProject && editor.acceptEditorResult(activeProject.id, result)
                 }
@@ -1020,7 +735,9 @@ function App() {
             }
             onSelectWorkspace={workspace => {
               setProjectWorkspace(workspace);
-              if (workspace === 'subtitles') setSubtitleFocusRequest(request => request + 1);
+              if (workspace === 'subtitles') {
+                session.setSubtitleFocusRequest(request => request + 1);
+              }
               setInspectorMode(null);
             }}
             onOpenTools={(tab = 'process') => {
@@ -1035,12 +752,12 @@ function App() {
             onImportSubtitleFile={editor.importSubtitleFile}
             onImportLocal={handleImportLocal}
             onOpenLinkPopover={() => setShowLinkPopover(true)}
-            onTimeUpdate={handleTimeUpdate}
-            onDurationChange={setVideoDuration}
+            onTimeUpdate={session.handleTimeUpdate}
+            onDurationChange={session.setVideoDuration}
             onStyleChange={editor.handleStyleChange}
             onPresentationModeChange={setPresentationMode}
             onRefreshSegments={projectId => void editor.refreshSegments(projectId)}
-            onSeek={handleSeek}
+            onSeek={session.handleSeek}
             onInspectSegment={setSegmentInspector}
             onUpdateSegment={editor.handleUpdateSegment}
             onReplaceAll={editor.replaceSegments}
@@ -1053,10 +770,7 @@ function App() {
             onCommitDraft={() => void editor.commitDraft()}
             onDiscardDraft={() => void editor.discardDraft()}
             onAutoScrollChange={setAutoScrollTable}
-            onBilingualChange={bilingual => {
-              setConfig(current => ({ ...current, bilingual }));
-              localStorage.setItem('subtitle_factory_export_bilingual', String(bilingual));
-            }}
+            onBilingualChange={updateBilingual}
             onExport={format => void tasks.doExport(format)}
             onPackage={includeMedia => void exportProjectPackage(includeMedia)}
             onAcceptEditorResult={editor.acceptEditorResult}
@@ -1065,7 +779,7 @@ function App() {
             onPauseTask={() => void tasks.toggleTaskPause()}
             onCancelTask={() => void tasks.cancelCurrentTask()}
             onClearLogs={() => setProcessLogs([])}
-            onPreviewClipRange={previewClipRange}
+            onPreviewClipRange={session.previewClipRange}
             onMessage={showToast}
           />
         </div>
@@ -1078,7 +792,7 @@ function App() {
           dragActive={dragActive}
           toast={toast}
           onCloseContextMenu={() => library.setContextMenu(null)}
-          onSelectProject={project => void selectProject(project)}
+          onSelectProject={project => void session.selectProject(project)}
           onStartRename={project => {
             library.setRenameDraft(project.title);
             library.setRenameProjectState(project);

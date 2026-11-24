@@ -1,0 +1,370 @@
+/* 设置中心：分类导航、表单字段、模型管理、AI 服务。 */
+
+.pro-app, .settings-backdrop {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  color: var(--text);
+  background: radial-gradient(circle at 55% -30%, rgba(201, 100, 66, .06), transparent 42%), var(--bg);
+  transition: background-color .28s ease, color .28s ease;
+}
+
+/* 属于「app-shell」，为保持层叠顺序放在这里 */
+.pro-app {
+  background: var(--window-bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Helvetica Neue", sans-serif;
+  letter-spacing: -.003em;
+}
+
+/* 属于「app-shell」，为保持层叠顺序放在这里 */
+.pro-app { font-size: 14px; line-height: 1.45; }
+.ai-settings-form { display: grid; gap: 11px; margin: 17px 0 13px; }
+.ai-settings-form label { display: grid; gap: 5px; color: var(--text-2); font-size: 12px; }
+
+.ai-settings-form input, .ai-settings-form select {
+  width: 100%;
+  padding: 8px 9px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface-2);
+  color: var(--text);
+  outline: none;
+}
+
+/* 属于「app-shell」，为保持层叠顺序放在这里 */
+.pro-app button, .pro-app input, .pro-app select { color: inherit; }
+
+/* 属于「app-shell」，为保持层叠顺序放在这里 */
+.engine-error-banner button { border: 0; background: transparent; color: var(--accent); cursor: pointer; }
+
+/* 属于「library」，为保持层叠顺序放在这里 */
+.library-switcher button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-3);
+  cursor: default;
+  font-weight: 580;
+  letter-spacing: -.01em;
+  transition: all var(--duration-fast) var(--ease-smooth);
+}
+
+/* 属于「library」，为保持层叠顺序放在这里 */
+.project-group-editor input { color: var(--text); }
+
+/* 属于「library」，为保持层叠顺序放在这里 */
+.library-filters input, .library-filters select {
+  min-width: 0;
+  height: 31px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface-2);
+  color: var(--text);
+  padding: 0 8px;
+}
+
+/* 属于「library」，为保持层叠顺序放在这里 */
+.search-filter-panel select, .search-filter-panel input {
+  width: 100%;
+  min-width: 0;
+  height: 34px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0 8px;
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+/* 属于「library」，为保持层叠顺序放在这里 */
+.subtitle-search-hits > button {
+  min-width: 0;
+  min-height: 112px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+/* 属于「library」，为保持层叠顺序放在这里 */
+.search-pagination button {
+  height: 30px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding-inline: 10px;
+  background: var(--surface);
+  color: var(--text-2);
+}
+
+/* 属于「library」，为保持层叠顺序放在这里 */
+.library-pagination select {
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px;
+}
+
+/* 属于「workspace」，为保持层叠顺序放在这里 */
+.project-workspace-nav button {
+  min-width: 0;
+  height: 53px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text-3);
+  cursor: pointer;
+}
+
+@media (max-width: 1100px) {
+  /* 属于「workspace」，为保持层叠顺序放在这里 */
+  .project-workspace-nav button { padding-inline: 8px; }
+}
+
+@media (max-height: 760px) {
+  /* 属于「workspace」，为保持层叠顺序放在这里 */
+  .project-workspace-nav button { height: 49px; }
+}
+
+/* 属于「editor」，为保持层叠顺序放在这里 */
+.editor-inspector input {
+  min-width: 0;
+  width: 100%;
+  padding: 8px;
+  background: var(--surface-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+/* 属于「editor」，为保持层叠顺序放在这里 */
+.editor-view-actions select {
+  min-height: 32px;
+  padding: 4px 24px 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--text);
+}
+
+/* 属于「editor」，为保持层叠顺序放在这里 */
+.subtitle-findbar input { height: 27px; background: var(--surface-2); color: var(--text); }
+
+/* 属于「editor」，为保持层叠顺序放在这里 */
+.subtitle-findbar button { height: 27px; padding: 0 9px; background: var(--surface-2); color: var(--text-2); }
+
+/* 属于「editor」，为保持层叠顺序放在这里 */
+.subtitle-draft-bar button, .replace-preview button {
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface-2);
+  color: var(--text);
+  padding: 5px 10px;
+}
+
+/* 属于「style-export」，为保持层叠顺序放在这里 */
+.style-template-bar select, .style-template-bar button {
+  height: 30px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface-2);
+  color: var(--text-2);
+  padding: 0 9px;
+}
+
+/* 属于「style-export」，为保持层叠顺序放在这里 */
+.style-template-save input {
+  min-width: 120px;
+  height: 30px;
+  border: 1px solid var(--accent);
+  border-radius: 7px;
+  background: var(--surface-2);
+  color: var(--text);
+  padding: 0 8px;
+}
+
+/* 属于「style-export」，为保持层叠顺序放在这里 */
+.export-options select {
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+}
+
+/* 属于「tools」，为保持层叠顺序放在这里 */
+.quality-summary button {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 13px 16px;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  background: var(--surface);
+  color: var(--text-2);
+  text-align: left;
+  cursor: pointer;
+}
+
+/* 属于「tools」，为保持层叠顺序放在这里 */
+.quality-actions button {
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface-2);
+  color: var(--text-2);
+  padding: 6px 9px;
+  cursor: pointer;
+}
+
+/* 属于「tools」，为保持层叠顺序放在这里 */
+.quality-fix-preview button {
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--text);
+  padding: 6px 9px;
+}
+
+/* 属于「tools」，为保持层叠顺序放在这里 */
+.glossary-panel button {
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface-2);
+  color: var(--text);
+  padding: 6px 9px;
+}
+
+/* 属于「tools」，为保持层叠顺序放在这里 */
+.glossary-panel > select, .glossary-add input {
+  min-width: 0;
+  height: 31px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface-2);
+  color: var(--text);
+  padding: 0 8px;
+}
+
+/* 属于「tools」，为保持层叠顺序放在这里 */
+.glossary-create input {
+  min-width: 0;
+  height: 32px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--text);
+  padding: 0 8px;
+}
+
+/* 属于「tools」，为保持层叠顺序放在这里 */
+.quality-rule-grid input {
+  border: 1px solid var(--border-color);
+  background: var(--input-bg);
+  color: var(--text-primary);
+  border-radius: 7px;
+  padding: 7px;
+}
+
+/* 属于「tools」，为保持层叠顺序放在这里 */
+.speaker-assign input, .speaker-assign select {
+  border: 1px solid var(--border-color);
+  background: var(--input-bg);
+  color: var(--text-primary);
+  border-radius: 8px;
+  padding: 8px;
+}
+
+/* 属于「tools」，为保持层叠顺序放在这里 */
+.speaker-count-field input {
+  width: 90px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text);
+  border-radius: 8px;
+  padding: 8px;
+}
+
+/* 属于「tools」，为保持层叠顺序放在这里 */
+.content-collection-list > button {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 11px 12px;
+  border: 0;
+  border-bottom: 1px solid var(--border-soft);
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+/* 属于「tools」，为保持层叠顺序放在这里 */
+.content-pack-rename input {
+  min-width: 180px;
+  height: 31px;
+  border: 1px solid var(--accent);
+  border-radius: 7px;
+  background: var(--surface-2);
+  color: var(--text);
+  padding: 0 8px;
+}
+
+@media (max-width: 1250px) {
+  /* 属于「tools」，为保持层叠顺序放在这里 */
+  .content-collection-list > button { min-width: 190px; border-right: 1px solid var(--border-soft); }
+}
+
+/* 属于「tools」，为保持层叠顺序放在这里 */
+.tool-panel-tabs button {
+  color: var(--text);
+  background: var(--surface-2);
+  border: 0;
+  border-radius: 8px;
+  padding: 8px 10px;
+  cursor: pointer;
+}
+.ai-settings-form input:focus, .ai-settings-form select:focus { border-color: var(--accent); }
+.theme-light .ai-settings-form input, .theme-light .ai-settings-form select { background: #fffefb; color: var(--text); }
+
+.settings-backdrop {
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Helvetica Neue", sans-serif;
+  font-size: 13px;
+  letter-spacing: -.003em;
+}
+
+.link-popover input,
+.inspector-section input,
+.inspector-section select,
+.settings-field input,
+.settings-field select,
+.path-control input,
+.rename-dialog input,
+.language-picker input {
+  width: 100%;
+  min-width: 0;
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-2);
+  outline: 0;
+}
+
